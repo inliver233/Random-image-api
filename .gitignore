@@ -1,0 +1,68 @@
+## Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+## Virtualenv
+.venv/
+venv/
+ENV/
+env/
+
+## Node
+node_modules/
+dist/
+.vite/
+
+## Runtime data / local state (never commit)
+data/
+backend/data/
+deploy/.env
+.env
+.env.*
+!.env.example
+!deploy/.env.example
+*.db
+*.sqlite
+*.sqlite3
+
+## Codex / AI tooling (repo-local)
+.codex/
+plan/
+issues/
+docs/
+参考资料/
+
+## Data exports / plans
+*.csv
+*.tsv
+*.plan.md
+
+## OS / IDE
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.iml
+
+## Local temp / scratch
+*.log
+*.tmp
+要求.txt
+_tmp_easy_export.txt
+_tmp_*.md
+_tmp_*.txt
+
+## Keep public-facing docs at repo root
+/*.md
+!README.md
+!LICENSE*

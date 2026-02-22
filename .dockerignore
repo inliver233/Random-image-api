@@ -1,0 +1,24 @@
+.git
+.github
+.codex
+.venv
+.pytest_cache
+**/__pycache__/
+
+# Env / secrets
+.env
+.env.*
+!deploy/.env.example
+
+data/
+issues/
+plan/
+docs/
+参考资料/
+
+frontend/node_modules/
+frontend/dist/
+
+backend/.pytest_cache/
+
+_tmp_append_test.md
