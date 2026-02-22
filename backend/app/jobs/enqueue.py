@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -14,13 +13,6 @@ OPPORTUNISTIC_HYDRATE_REF_TYPE = "opportunistic_hydrate"
 OPPORTUNISTIC_HYDRATE_PRIORITY = -10
 
 
-def _pixiv_oauth_configured() -> bool:
-    # Opportunistic hydration needs OAuth credentials to refresh access tokens.
-    client_id = (os.environ.get("PIXIV_OAUTH_CLIENT_ID") or "").strip()
-    client_secret = (os.environ.get("PIXIV_OAUTH_CLIENT_SECRET") or "").strip()
-    return bool(client_id and client_secret)
-
-
 async def enqueue_opportunistic_hydrate_metadata(
     engine: AsyncEngine,
     *,
@@ -28,8 +20,6 @@ async def enqueue_opportunistic_hydrate_metadata(
     reason: str,
 ) -> int | None:
     if int(illust_id) <= 0:
-        return None
-    if not _pixiv_oauth_configured():
         return None
 
     ref_id = str(int(illust_id))

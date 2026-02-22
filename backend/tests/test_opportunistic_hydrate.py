@@ -19,8 +19,6 @@ def test_random_opportunistically_enqueues_hydrate_metadata_once(tmp_path: Path,
     monkeypatch.setenv("DATABASE_URL", db_url)
     monkeypatch.setenv("SECRET_KEY", "secret_test")
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("PIXIV_OAUTH_CLIENT_ID", "client_id_test")
-    monkeypatch.setenv("PIXIV_OAUTH_CLIENT_SECRET", "client_secret_test")
 
     app = create_app()
 
@@ -119,8 +117,6 @@ def test_image_proxy_opportunistically_enqueues_hydrate_metadata_once(tmp_path: 
 
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("DATABASE_URL", db_url)
-    monkeypatch.setenv("PIXIV_OAUTH_CLIENT_ID", "client_id_test")
-    monkeypatch.setenv("PIXIV_OAUTH_CLIENT_SECRET", "client_secret_test")
 
     app = create_app()
 

@@ -35,7 +35,7 @@ def test_load_settings_dev_auto_generates_field_encryption_key(monkeypatch: pyte
     assert s2.field_encryption_key == s1.field_encryption_key
 
 
-def test_load_settings_dev_pixiv_oauth_empty_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+def test_load_settings_dev_pixiv_oauth_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.delenv("PIXIV_OAUTH_CLIENT_ID", raising=False)
@@ -43,6 +43,6 @@ def test_load_settings_dev_pixiv_oauth_empty_by_default(monkeypatch: pytest.Monk
     monkeypatch.delenv("PIXIV_OAUTH_HASH_SECRET", raising=False)
 
     s = load_settings()
-    assert s.pixiv_oauth_client_id == ""
-    assert s.pixiv_oauth_client_secret == ""
-    assert s.pixiv_oauth_hash_secret == ""
+    assert s.pixiv_oauth_client_id
+    assert s.pixiv_oauth_client_secret
+    assert s.pixiv_oauth_hash_secret

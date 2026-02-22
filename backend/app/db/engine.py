@@ -7,9 +7,10 @@ from sqlalchemy import event
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-SQLITE_BUSY_TIMEOUT_MS = 30_000
-SQLITE_POOL_SIZE = 5
-SQLITE_MAX_OVERFLOW = 0
+SQLITE_BUSY_TIMEOUT_MS = 5_000
+SQLITE_POOL_SIZE = 10
+SQLITE_MAX_OVERFLOW = 10
+SQLITE_POOL_TIMEOUT_S = 5
 
 
 def apply_sqlite_pragmas(dbapi_connection: Any) -> None:
@@ -22,8 +23,11 @@ def apply_sqlite_pragmas(dbapi_connection: Any) -> None:
     cursor = dbapi_connection.cursor()
     try:
         cursor.execute("PRAGMA foreign_keys = ON")
-        cursor.execute("PRAGMA journal_mode = WAL")
-        cursor.fetchone()
+        try:
+            cursor.execute("PRAGMA journal_mode = WAL")
+            cursor.fetchone()
+        except Exception:
+            pass
         cursor.execute("PRAGMA synchronous = NORMAL")
         cursor.execute("PRAGMA temp_store = MEMORY")
         cursor.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
@@ -54,10 +58,29 @@ def create_engine(database_url: str) -> AsyncEngine:
         kwargs["connect_args"] = {"timeout": float(busy_timeout_ms) / 1000.0}
         if _is_sqlite_file_url(database_url):
             # 限制单进程内同时打开的 SQLite 连接数，减少并发写导致的 "database is locked"。
+            try:
+                pool_size = int((os.environ.get("SQLITE_POOL_SIZE") or str(SQLITE_POOL_SIZE)).strip() or SQLITE_POOL_SIZE)
+            except Exception:
+                pool_size = int(SQLITE_POOL_SIZE)
+            pool_size = max(1, min(int(pool_size), 200))
+
+            try:
+                max_overflow = int((os.environ.get("SQLITE_MAX_OVERFLOW") or str(SQLITE_MAX_OVERFLOW)).strip() or SQLITE_MAX_OVERFLOW)
+            except Exception:
+                max_overflow = int(SQLITE_MAX_OVERFLOW)
+            max_overflow = max(0, min(int(max_overflow), 200))
+
+            try:
+                pool_timeout_s = float((os.environ.get("SQLITE_POOL_TIMEOUT_S") or str(SQLITE_POOL_TIMEOUT_S)).strip() or SQLITE_POOL_TIMEOUT_S)
+            except Exception:
+                pool_timeout_s = float(SQLITE_POOL_TIMEOUT_S)
+            pool_timeout_s = float(max(0.5, min(float(pool_timeout_s), 120.0)))
+
             kwargs.update(
                 {
-                    "pool_size": int(SQLITE_POOL_SIZE),
-                    "max_overflow": int(SQLITE_MAX_OVERFLOW),
+                    "pool_size": int(pool_size),
+                    "max_overflow": int(max_overflow),
+                    "pool_timeout": float(pool_timeout_s),
                 }
             )
 

@@ -211,13 +211,9 @@ def build_hydrate_metadata_handler(
 ) -> Any:
     settings = load_settings()
     encryptor = FieldEncryptor.from_key(settings.field_encryption_key)
-    client_id = (settings.pixiv_oauth_client_id or "").strip()
-    client_secret = (settings.pixiv_oauth_client_secret or "").strip()
-    if not client_id or not client_secret:
-        raise ValueError("Pixiv OAuth not configured (PIXIV_OAUTH_CLIENT_ID/PIXIV_OAUTH_CLIENT_SECRET)")
     oauth_config = PixivOauthConfig(
-        client_id=client_id,
-        client_secret=client_secret,
+        client_id=settings.pixiv_oauth_client_id,
+        client_secret=settings.pixiv_oauth_client_secret,
         hash_secret=(settings.pixiv_oauth_hash_secret or "").strip() or None,
     )
 

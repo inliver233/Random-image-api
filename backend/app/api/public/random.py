@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import random
 import os
 import math
@@ -12,6 +13,7 @@ from fastapi.responses import RedirectResponse
 from app.core.errors import ApiError, ErrorCode
 from app.core.http_stream import stream_url
 from app.core.imgproxy import build_signed_processing_url, load_imgproxy_config_from_settings
+from app.core.pximg_reverse_proxy import normalize_pximg_mirror_host, rewrite_pximg_to_mirror
 from app.core.proxy_routing import select_proxy_uri_for_url
 from app.core.runtime_settings import load_runtime_config
 from app.core.time import iso_utc_ms
@@ -120,6 +122,8 @@ async def random_image(
     orientation: str = "any",
     layout: str | None = None,
     adaptive: int = 0,
+    pixiv_cat: int = 0,
+    pximg_mirror_host: str | None = None,
     min_width: int = 0,
     min_height: int = 0,
     min_pixels: int = 0,
@@ -170,6 +174,17 @@ async def random_image(
 
     if adaptive not in {0, 1}:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported adaptive", status_code=400)
+
+    if pixiv_cat not in {0, 1}:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported pixiv_cat", status_code=400)
+
+    mirror_host_override: str | None = None
+    if pximg_mirror_host is not None:
+        raw = str(pximg_mirror_host or "").strip()
+        if raw:
+            mirror_host_override = normalize_pximg_mirror_host(raw)
+            if mirror_host_override is None:
+                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported pximg_mirror_host", status_code=400)
 
     layout_source = "orientation"
     raw_layout = orientation
@@ -332,6 +347,20 @@ async def random_image(
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
     runtime = await load_runtime_config(engine)
+    use_pixiv_cat = bool(runtime.image_proxy_use_pixiv_cat) or int(pixiv_cat) == 1
+    mirror_host = mirror_host_override or str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
+
+    def _spawn_best_effort(coro) -> None:
+        async def _run() -> None:
+            try:
+                await coro
+            except Exception:
+                pass
+
+        try:
+            asyncio.create_task(_run())
+        except Exception:
+            pass
 
     random_defaults = runtime.random_defaults if isinstance(runtime.random_defaults, dict) else {}
 
@@ -690,8 +719,14 @@ async def random_image(
                 pass
 
         if format == "image" and redirect == 1:
+            qp: list[tuple[str, str]] = []
+            if int(pixiv_cat) == 1:
+                qp.append(("pixiv_cat", "1"))
+            if mirror_host_override is not None:
+                qp.append(("pximg_mirror_host", str(mirror_host_override)))
+            qs = ("?" + "&".join([f"{k}={v}" for k, v in qp])) if qp else ""
             return RedirectResponse(
-                url=f"/i/{image.id}.{image.ext}",
+                url=f"/i/{image.id}.{image.ext}{qs}",
                 status_code=302,
                 headers={"Cache-Control": "no-store"},
             )
@@ -796,28 +831,32 @@ async def random_image(
                 break
             image_id = int(image.id)
             origin_url = str(image.original_url)
+            source_url = rewrite_pximg_to_mirror(origin_url, mirror_host=mirror_host) if use_pixiv_cat else origin_url
             illust_id_for_hydrate = int(image.illust_id)
             needs_hydrate = _needs_opportunistic_hydrate(image)
+            should_mark_ok = image.last_ok_at is None or image.last_error_code is not None
 
         transport = getattr(request.app.state, "httpx_transport", None)
         proxy_uri = None
-        picked = await select_proxy_uri_for_url(
-            engine,
-            request.app.state.settings,
-            runtime_stream,
-            url=origin_url,
-        )
-        if picked is not None:
-            proxy_uri = picked.uri
+        if not use_pixiv_cat:
+            picked = await select_proxy_uri_for_url(
+                engine,
+                request.app.state.settings,
+                runtime_stream,
+                url=origin_url,
+            )
+            if picked is not None:
+                proxy_uri = picked.uri
         try:
             resp = await stream_url(
-                origin_url,
+                source_url,
                 transport=transport,
                 proxy=proxy_uri,
                 cache_control="no-store",
                 range_header=request.headers.get("Range"),
             )
-            await mark_image_ok(engine, image_id=image_id, now=iso_utc_ms())
+            if should_mark_ok:
+                _spawn_best_effort(mark_image_ok(engine, image_id=image_id, now=iso_utc_ms()))
             if needs_hydrate:
                 try:
                     await enqueue_opportunistic_hydrate_metadata(
@@ -835,12 +874,14 @@ async def random_image(
                 ErrorCode.UPSTREAM_404,
                 ErrorCode.UPSTREAM_RATE_LIMIT,
             }:
-                await mark_image_failure(
-                    engine,
-                    image_id=image_id,
-                    now=iso_utc_ms(),
-                    error_code=exc.code.value,
-                    error_message=exc.message,
+                _spawn_best_effort(
+                    mark_image_failure(
+                        engine,
+                        image_id=image_id,
+                        now=iso_utc_ms(),
+                        error_code=exc.code.value,
+                        error_message=exc.message,
+                    )
                 )
                 tried_ids.add(image_id)
                 last_error = exc

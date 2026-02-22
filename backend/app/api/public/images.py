@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,6 +12,7 @@ from app.core.http_stream import stream_url
 import sqlalchemy as sa
 
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
+from app.core.pximg_reverse_proxy import normalize_pximg_mirror_host, rewrite_pximg_to_mirror
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.runtime_settings import load_runtime_config
 from app.core.time import iso_utc_ms
@@ -248,10 +250,22 @@ async def proxy_image(
     request: Request,
     image_id: int,
     ext: str,
+    pixiv_cat: int = 0,
+    pximg_mirror_host: str | None = None,
 ):
     ext = (ext or "").lower()
     if ext not in ALLOWED_IMAGE_EXTS:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported ext", status_code=400)
+    if pixiv_cat not in {0, 1}:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported pixiv_cat", status_code=400)
+
+    mirror_host_override: str | None = None
+    if pximg_mirror_host is not None:
+        raw = str(pximg_mirror_host or "").strip()
+        if raw:
+            mirror_host_override = normalize_pximg_mirror_host(raw)
+            if mirror_host_override is None:
+                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported pximg_mirror_host", status_code=400)
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
@@ -288,28 +302,45 @@ async def proxy_image(
             needs_hydrate = tag_row is None
 
     runtime = await load_runtime_config(engine)
+    use_pixiv_cat = bool(runtime.image_proxy_use_pixiv_cat) or int(pixiv_cat) == 1
+    mirror_host = mirror_host_override or str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
+
+    def _spawn_best_effort(coro) -> None:
+        async def _run() -> None:
+            try:
+                await coro
+            except Exception:
+                pass
+
+        try:
+            asyncio.create_task(_run())
+        except Exception:
+            pass
+
+    source_url = rewrite_pximg_to_mirror(str(image.original_url), mirror_host=mirror_host) if use_pixiv_cat else str(image.original_url)
     proxy_uri = None
-    picked = await select_proxy_uri_for_url(
-        engine,
-        request.app.state.settings,
-        runtime,
-        url=str(image.original_url),
-    )
-    if picked is not None:
-        proxy_uri = picked.uri
+    if not use_pixiv_cat:
+        picked = await select_proxy_uri_for_url(
+            engine,
+            request.app.state.settings,
+            runtime,
+            url=str(image.original_url),
+        )
+        if picked is not None:
+            proxy_uri = picked.uri
 
     transport = getattr(request.app.state, "httpx_transport", None)
     now = iso_utc_ms()
     try:
         resp = await stream_url(
-            image.original_url,
+            source_url,
             transport=transport,
             proxy=proxy_uri,
             cache_control="public, max-age=31536000, immutable",
             range_header=request.headers.get("Range"),
         )
         if should_mark_ok:
-            await mark_image_ok(engine, image_id=int(image.id), now=now)
+            _spawn_best_effort(mark_image_ok(engine, image_id=int(image.id), now=now))
         if needs_hydrate:
             try:
                 await enqueue_opportunistic_hydrate_metadata(engine, illust_id=int(image.illust_id), reason="image_proxy")
@@ -323,11 +354,13 @@ async def proxy_image(
             ErrorCode.UPSTREAM_404,
             ErrorCode.UPSTREAM_RATE_LIMIT,
         }:
-            await mark_image_failure(
-                engine,
-                image_id=int(image.id),
-                now=now,
-                error_code=exc.code.value,
-                error_message=exc.message,
+            _spawn_best_effort(
+                mark_image_failure(
+                    engine,
+                    image_id=int(image.id),
+                    now=now,
+                    error_code=exc.code.value,
+                    error_message=exc.message,
+                )
             )
         raise

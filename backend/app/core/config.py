@@ -12,6 +12,10 @@ from app.core.logging import get_logger
 
 log = get_logger(__name__)
 
+_DEFAULT_PIXIV_OAUTH_CLIENT_ID = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
+_DEFAULT_PIXIV_OAUTH_CLIENT_SECRET = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
+_DEFAULT_PIXIV_OAUTH_HASH_SECRET = "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c"
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -107,12 +111,16 @@ def _ensure_field_encryption_key(env: Mapping[str, str], *, app_env: str) -> str
     return generated
 
 
-def _load_pixiv_oauth_config(env: Mapping[str, str]) -> tuple[str, str, str]:
-    # NOTE: We intentionally do NOT ship any embedded Pixiv OAuth credentials.
-    # If you want token refresh / metadata hydration jobs, configure these via env.
+def _ensure_pixiv_oauth_config(env: Mapping[str, str], *, app_env: str) -> tuple[str, str, str]:
     client_id = _get(env, "PIXIV_OAUTH_CLIENT_ID", "")
     client_secret = _get(env, "PIXIV_OAUTH_CLIENT_SECRET", "")
     hash_secret = _get(env, "PIXIV_OAUTH_HASH_SECRET", "")
+
+    if app_env not in {"prod", "production"}:
+        client_id = client_id or _DEFAULT_PIXIV_OAUTH_CLIENT_ID
+        client_secret = client_secret or _DEFAULT_PIXIV_OAUTH_CLIENT_SECRET
+        hash_secret = hash_secret or _DEFAULT_PIXIV_OAUTH_HASH_SECRET
+
     return client_id, client_secret, hash_secret
 
 
@@ -127,7 +135,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     admin_username = _get(env, "ADMIN_USERNAME", "admin")
     admin_password = _get(env, "ADMIN_PASSWORD", "admin" if app_env != "prod" else "")
 
-    pixiv_oauth_client_id, pixiv_oauth_client_secret, pixiv_oauth_hash_secret = _load_pixiv_oauth_config(env)
+    pixiv_oauth_client_id, pixiv_oauth_client_secret, pixiv_oauth_hash_secret = _ensure_pixiv_oauth_config(
+        env, app_env=app_env
+    )
 
     imgproxy_base_url = _get(env, "IMGPROXY_BASE_URL", "")
     imgproxy_key = _get(env, "IMGPROXY_KEY", "")

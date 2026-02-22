@@ -27,6 +27,8 @@ describe("SettingsPage", () => {
           expect(body.settings.proxy.route_mode).toBe("pixiv_only");
           expect(body.settings.proxy.allowlist_domains).toEqual(["pixiv.net"]);
           expect(body.settings.proxy.default_pool_id).toBe("");
+          expect(body.settings.image_proxy.use_pixiv_cat).toBe(false);
+          expect(body.settings.image_proxy.pximg_mirror_host).toBe("i.pixiv.cat");
           expect(body.settings.random.default_attempts).toBe(3);
           expect(body.settings.random.default_r18_strict).toBe(true);
           expect(body.settings.random.fail_cooldown_ms).toBe(600000);
@@ -52,6 +54,7 @@ describe("SettingsPage", () => {
                   allowlist_domains: ["pixiv.net"],
                   default_pool_id: "",
                 },
+                image_proxy: { use_pixiv_cat: false, pximg_mirror_host: "i.pixiv.cat" },
                 random: { default_attempts: 3, default_r18_strict: true, fail_cooldown_ms: 600000, strategy: "quality", quality_samples: 5 },
                 security: { hide_origin_url_in_public_json: true },
                 rate_limit: {},

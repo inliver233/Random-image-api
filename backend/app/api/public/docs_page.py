@@ -19,6 +19,8 @@ def _build_docs_html(*, base_url: str) -> str:
 
     examples = {
         "img_default": u("/random"),
+        "img_pixiv_cat": u("/random?pixiv_cat=1"),
+        "img_pixiv_re": u("/random?pixiv_cat=1&pximg_mirror_host=re"),
         "img_redirect": u("/random?redirect=1"),
         "json_full": u("/random?format=json"),
         "json_simple": u("/random?format=simple_json"),
@@ -236,6 +238,8 @@ def _build_docs_html(*, base_url: str) -> str:
         <h2>1) 最常用（直接出图）</h2>
         <p>默认返回图片（不是 JSON）。想要稳定 URL 可加 <span class="kbd">redirect=1</span> 跳转到本站缓存/代理路径。</p>
         <pre><code>{examples["img_default"]}
+{examples["img_pixiv_cat"]}
+{examples["img_pixiv_re"]}
 {examples["img_redirect"]}</code></pre>
       </section>
 
@@ -282,6 +286,21 @@ def _build_docs_html(*, base_url: str) -> str:
             <td>
               随机策略：<code>quality</code>（默认，质量优先） / <code>random</code>（纯随机）。<br/>
               <span class="muted">quality 会先抽样 N 张候选再按热度/分辨率打分选图。</span>
+            </td>
+          </tr>
+          <tr>
+            <td><code>pixiv_cat</code></td>
+            <td>
+              <code>0</code>/<code>1</code>：强制使用第三方反向代理拉取图片上游（即使全局未开启）。<br/>
+              <span class="muted">上游可为 i.pixiv.cat / i.pixiv.re / i.pixiv.nl。</span><br/>
+              <span class="muted">仅影响服务端拉图的上游域名，客户端仍访问本站域名。</span>
+            </td>
+          </tr>
+          <tr>
+            <td><code>pximg_mirror_host</code></td>
+            <td>
+              指定镜像域名（可选）：<code>i.pixiv.cat</code> / <code>i.pixiv.re</code> / <code>i.pixiv.nl</code>，也支持简写 <code>cat</code>/<code>re</code>/<code>nl</code>。<br/>
+              示例：<a href="{examples["img_pixiv_re"]}">{examples["img_pixiv_re"]}</a>
             </td>
           </tr>
           <tr>
@@ -358,4 +377,3 @@ def _build_docs_html(*, base_url: str) -> str:
 async def docs_page(request: Request) -> HTMLResponse:
     html = _build_docs_html(base_url=str(getattr(request, "base_url", "") or "").rstrip("/"))
     return HTMLResponse(content=html, status_code=200, headers={"Cache-Control": "no-store"})
-
