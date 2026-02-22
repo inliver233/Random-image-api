@@ -4,6 +4,7 @@ import json
 import time
 
 from fastapi import FastAPI, Request
+from fastapi.responses import Response
 
 from app.api.admin.router import router as admin_router
 from app.api.metrics import router as metrics_router
@@ -232,6 +233,10 @@ def create_app() -> FastAPI:
         engine = getattr(app.state, "engine", None)
         if engine is not None:
             await engine.dispose()
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def _favicon() -> Response:  # type: ignore[no-redef]
+        return Response(status_code=204, headers={"Cache-Control": "public, max-age=86400"})
 
     app.include_router(healthz_router)
     app.include_router(docs_page_router)

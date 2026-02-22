@@ -7,7 +7,7 @@ import math
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Query, Request
 from fastapi.responses import RedirectResponse
 
 from app.core.errors import ApiError, ErrorCode
@@ -109,6 +109,7 @@ def _quality_score(image: Any, *, weights: dict[str, float] | None = None) -> fl
 @router.get("/random")
 async def random_image(
     request: Request,
+    background_tasks: BackgroundTasks,
     format: str = "image",
     redirect: int = 0,
     attempts: int | None = None,
@@ -350,15 +351,9 @@ async def random_image(
     use_pixiv_cat = bool(runtime.image_proxy_use_pixiv_cat) or int(pixiv_cat) == 1
     mirror_host = mirror_host_override or str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
 
-    def _spawn_best_effort(coro) -> None:
-        async def _run() -> None:
-            try:
-                await coro
-            except Exception:
-                pass
-
+    async def _best_effort(fn, *args, timeout_s: float = 1.5, **kwargs) -> None:  # type: ignore[no-untyped-def]
         try:
-            asyncio.create_task(_run())
+            await asyncio.wait_for(fn(*args, **kwargs), timeout=float(timeout_s))
         except Exception:
             pass
 
@@ -713,10 +708,14 @@ async def random_image(
                 tags = await get_tag_names_for_image(session, image_id=image.id)
 
         if _needs_opportunistic_hydrate(image):
-            try:
-                await enqueue_opportunistic_hydrate_metadata(engine, illust_id=int(image.illust_id), reason="random")
-            except Exception:
-                pass
+            background_tasks.add_task(
+                _best_effort,
+                enqueue_opportunistic_hydrate_metadata,
+                engine,
+                illust_id=int(image.illust_id),
+                reason="random",
+                timeout_s=2.5,
+            )
 
         if format == "image" and redirect == 1:
             qp: list[tuple[str, str]] = []
@@ -725,11 +724,17 @@ async def random_image(
             if mirror_host_override is not None:
                 qp.append(("pximg_mirror_host", str(mirror_host_override)))
             qs = ("?" + "&".join([f"{k}={v}" for k, v in qp])) if qp else ""
-            return RedirectResponse(
+            resp = RedirectResponse(
                 url=f"/i/{image.id}.{image.ext}{qs}",
                 status_code=302,
                 headers={"Cache-Control": "no-store"},
             )
+            try:
+                if getattr(resp, "background", None) is None:
+                    resp.background = background_tasks
+            except Exception:
+                pass
+            return resp
 
         origin_url = None if runtime.hide_origin_url_in_public_json else image.original_url
 
@@ -856,16 +861,21 @@ async def random_image(
                 range_header=request.headers.get("Range"),
             )
             if should_mark_ok:
-                _spawn_best_effort(mark_image_ok(engine, image_id=image_id, now=iso_utc_ms()))
+                background_tasks.add_task(_best_effort, mark_image_ok, engine, image_id=image_id, now=iso_utc_ms(), timeout_s=1.5)
             if needs_hydrate:
-                try:
-                    await enqueue_opportunistic_hydrate_metadata(
-                        engine,
-                        illust_id=illust_id_for_hydrate,
-                        reason="random",
-                    )
-                except Exception:
-                    pass
+                background_tasks.add_task(
+                    _best_effort,
+                    enqueue_opportunistic_hydrate_metadata,
+                    engine,
+                    illust_id=illust_id_for_hydrate,
+                    reason="random",
+                    timeout_s=2.5,
+                )
+            try:
+                if getattr(resp, "background", None) is None:
+                    resp.background = background_tasks
+            except Exception:
+                pass
             return resp
         except ApiError as exc:
             if exc.code in {
@@ -874,14 +884,14 @@ async def random_image(
                 ErrorCode.UPSTREAM_404,
                 ErrorCode.UPSTREAM_RATE_LIMIT,
             }:
-                _spawn_best_effort(
-                    mark_image_failure(
-                        engine,
-                        image_id=image_id,
-                        now=iso_utc_ms(),
-                        error_code=exc.code.value,
-                        error_message=exc.message,
-                    )
+                await _best_effort(
+                    mark_image_failure,
+                    engine,
+                    image_id=image_id,
+                    now=iso_utc_ms(),
+                    error_code=exc.code.value,
+                    error_message=exc.message,
+                    timeout_s=1.5,
                 )
                 tried_ids.add(image_id)
                 last_error = exc

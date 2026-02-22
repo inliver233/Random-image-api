@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.core.errors import ApiError, ErrorCode
@@ -250,6 +250,7 @@ async def proxy_image(
     request: Request,
     image_id: int,
     ext: str,
+    background_tasks: BackgroundTasks,
     pixiv_cat: int = 0,
     pximg_mirror_host: str | None = None,
 ):
@@ -305,15 +306,9 @@ async def proxy_image(
     use_pixiv_cat = bool(runtime.image_proxy_use_pixiv_cat) or int(pixiv_cat) == 1
     mirror_host = mirror_host_override or str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
 
-    def _spawn_best_effort(coro) -> None:
-        async def _run() -> None:
-            try:
-                await coro
-            except Exception:
-                pass
-
+    async def _best_effort(fn, *args, timeout_s: float = 1.5, **kwargs) -> None:  # type: ignore[no-untyped-def]
         try:
-            asyncio.create_task(_run())
+            await asyncio.wait_for(fn(*args, **kwargs), timeout=float(timeout_s))
         except Exception:
             pass
 
@@ -340,12 +335,21 @@ async def proxy_image(
             range_header=request.headers.get("Range"),
         )
         if should_mark_ok:
-            _spawn_best_effort(mark_image_ok(engine, image_id=int(image.id), now=now))
+            background_tasks.add_task(_best_effort, mark_image_ok, engine, image_id=int(image.id), now=now, timeout_s=1.5)
         if needs_hydrate:
-            try:
-                await enqueue_opportunistic_hydrate_metadata(engine, illust_id=int(image.illust_id), reason="image_proxy")
-            except Exception:
-                pass
+            background_tasks.add_task(
+                _best_effort,
+                enqueue_opportunistic_hydrate_metadata,
+                engine,
+                illust_id=int(image.illust_id),
+                reason="image_proxy",
+                timeout_s=2.5,
+            )
+        try:
+            if getattr(resp, "background", None) is None:
+                resp.background = background_tasks
+        except Exception:
+            pass
         return resp
     except ApiError as exc:
         if exc.code in {
@@ -354,13 +358,13 @@ async def proxy_image(
             ErrorCode.UPSTREAM_404,
             ErrorCode.UPSTREAM_RATE_LIMIT,
         }:
-            _spawn_best_effort(
-                mark_image_failure(
-                    engine,
-                    image_id=int(image.id),
-                    now=now,
-                    error_code=exc.code.value,
-                    error_message=exc.message,
-                )
+            await _best_effort(
+                mark_image_failure,
+                engine,
+                image_id=int(image.id),
+                now=now,
+                error_code=exc.code.value,
+                error_message=exc.message,
+                timeout_s=1.5,
             )
         raise

@@ -1312,11 +1312,15 @@ LIMIT 1;
 
             pages: list[_IllustPage] = []
             for idx, url in enumerate(urls):
+                url_s = str(url)
                 try:
-                    ext = _parse_pximg_ext(url)
+                    ext = _parse_pximg_ext(url_s)
                 except Exception as exc:
-                    raise JobPermanentError("Pixiv illust detail invalid original url") from exc
-                pages.append(_IllustPage(page_index=int(idx), original_url=str(url), ext=ext))
+                    bad = redact_text(url_s)
+                    if len(bad) > 300:
+                        bad = bad[:297] + "..."
+                    raise JobPermanentError(f"Pixiv illust detail invalid original url: {bad}") from exc
+                pages.append(_IllustPage(page_index=int(idx), original_url=url_s, ext=ext))
 
             width = _as_int(illust.get("width"))
             height = _as_int(illust.get("height"))
