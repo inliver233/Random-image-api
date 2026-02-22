@@ -2,6 +2,12 @@
 
 一个自托管的随机图片 API：把 Pixiv 原图链接导入到本地数据库后，即可通过 `/random` 按 **标签 / 热度 / 分辨率 / R18 / AI / 作品类型** 等条件组合筛选并随机出图；同时提供管理后台（Web UI）+ 后台 Worker，用于导入、补全元数据、代理探测等任务。
 
+官方 Demo（公开站点）：
+
+- `https://i.mukyu.ru/random`
+- `https://i.mukyu.ru/docs`
+- `https://i.mukyu.ru/api/docs`
+
 > 免责声明：本项目为非官方实现；请遵守 Pixiv ToS/版权与当地法律法规，自行承担使用风险。不要将任何 refresh_token / 密钥 / 代理密码提交到仓库。
 
 ## 功能概览
@@ -20,6 +26,13 @@
   - 公网访问保护：启用 Public API Key + 限流
   - `imgproxy`：对外提供签名处理 URL（可隐藏 origin URL）
   - 代理路由：为上游图片/接口选择代理
+
+## 快速体验（使用官方 Demo）
+
+```bash
+curl -L "https://i.mukyu.ru/random?redirect=1"
+curl "https://i.mukyu.ru/random?format=simple_json"
+```
 
 ## 一键部署（Docker Compose，推荐）
 
@@ -119,4 +132,3 @@ npm run dev
 
 - 后端：`python -m pytest -q backend/tests`
 - 前端：`cd frontend && npm test`
-
