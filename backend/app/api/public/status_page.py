@@ -48,33 +48,6 @@ async def _query_gallery_stats(engine) -> dict[str, Any]:
                 (await conn.exec_driver_sql("SELECT COUNT(*) FROM images WHERE status=1 AND ai_type IS NULL;")).scalar_one()
             )
 
-            tag_id = (
-                await conn.exec_driver_sql(
-                    "SELECT id FROM tags WHERE name = ? COLLATE NOCASE LIMIT 1;",
-                    ("loli",),
-                )
-            ).scalar_one_or_none()
-            if tag_id is None:
-                loli_count = 0
-                loli_found = False
-            else:
-                loli_found = True
-                loli_count = int(
-                    (
-                        await conn.exec_driver_sql(
-                            """
-SELECT COUNT(DISTINCT it.image_id)
-FROM image_tags it
-JOIN images i ON i.id = it.image_id
-WHERE it.tag_id = ? AND i.status = 1;
-""".strip(),
-                            (int(tag_id),),
-                        )
-                    ).scalar_one()
-                )
-
-        non_loli_count = max(0, int(images_enabled) - int(loli_count))
-
         return {
             "gallery": {
                 "images_total": images_total,
@@ -85,7 +58,6 @@ WHERE it.tag_id = ? AND i.status = 1;
             "breakdown": {
                 "r18": {"r18": r18_count, "safe": safe_count, "unknown": r18_unknown},
                 "ai": {"ai": ai_count, "non_ai": non_ai_count, "unknown": ai_unknown},
-                "loli": {"loli": loli_count, "non_loli": non_loli_count, "tag_found": bool(loli_found)},
             },
         }
 
@@ -109,6 +81,7 @@ def _build_status_html(*, base_url: str, status_code: int, payload: dict[str, An
 
     gallery = payload.get("gallery") if isinstance(payload.get("gallery"), dict) else {}
     images_total = _clamp_int(gallery.get("images_total"))
+    images_enabled = _clamp_int(gallery.get("images_enabled"))
     illust_total = _clamp_int(gallery.get("illust_total"))
     authors_total = _clamp_int(gallery.get("authors_total"))
 
@@ -124,7 +97,7 @@ def _build_status_html(*, base_url: str, status_code: int, payload: dict[str, An
     json_url = u("/status.json")
     docs_url = u("/docs")
     random_url = u("/random")
-    admin_url = u("/admin")
+    wtf_url = u("/wtf")
 
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -377,7 +350,7 @@ def _build_status_html(*, base_url: str, status_code: int, payload: dict[str, An
       <div class="chips" aria-label="quick-links">
         <a class="chip" href="{random_url}"><strong>/random</strong> 随机出图</a>
         <a class="chip" href="{docs_url}"><strong>/docs</strong> 使用文档</a>
-        <a class="chip" href="{admin_url}"><strong>/admin</strong> 管理后台</a>
+        <a class="chip" href="{wtf_url}"><strong>/wtf</strong> 瀑布流</a>
       </div>
     </div>
 
@@ -388,7 +361,7 @@ def _build_status_html(*, base_url: str, status_code: int, payload: dict[str, An
           <div class="k"><div class="label">总图片数</div><div class="val">{images_total}</div><div class="hint">images</div></div>
           <div class="k"><div class="label">总作品数</div><div class="val">{illust_total}</div><div class="hint">DISTINCT illust_id</div></div>
           <div class="k"><div class="label">总作者数</div><div class="val">{authors_total}</div><div class="hint">DISTINCT user_id</div></div>
-          <div class="k"><div class="label">更多统计</div><div class="val">—</div><div class="hint"><a href="{admin_url}">后台首页</a></div></div>
+          <div class="k"><div class="label">可用图片数</div><div class="val">{images_enabled}</div><div class="hint">status=1</div></div>
         </div>
       </section>
 
@@ -410,7 +383,6 @@ def _build_status_html(*, base_url: str, status_code: int, payload: dict[str, An
         <select id="metric">
           <option value="r18">R18 / 非 R18</option>
           <option value="ai">AI / 非 AI</option>
-          <option value="loli">萝莉 / 非萝莉</option>
         </select>
         <span class="muted" id="metricNote"></span>
       </div>
@@ -478,15 +450,6 @@ def _build_status_html(*, base_url: str, status_code: int, payload: dict[str, An
           {{ label: "AI", value: ai.ai || 0, color: "#c07046" }},
           {{ label: "非 AI", value: ai.non_ai || 0, color: "#1f7a56" }},
           {{ label: "未知", value: ai.unknown || 0, color: "#8f857c" }},
-        ]);
-        return;
-      }}
-      if (metric === "loli") {{
-        const l = bd.loli || {{}};
-        note.textContent = (l.tag_found === false) ? "（tags 表中未找到 loli 标签）" : "（标签：loli）";
-        renderPie([
-          {{ label: "萝莉", value: l.loli || 0, color: "#c07046" }},
-          {{ label: "非萝莉", value: l.non_loli || 0, color: "#1f7a56" }},
         ]);
         return;
       }}

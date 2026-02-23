@@ -22,6 +22,10 @@ def _build_docs_html(*, base_url: str) -> str:
         "img_pixiv_cat": u("/random?pixiv_cat=1"),
         "img_pixiv_re": u("/random?pixiv_cat=1&pximg_mirror_host=re"),
         "img_redirect": u("/random?redirect=1"),
+        "status": u("/status"),
+        "status_json": u("/status.json"),
+        "wtf": u("/wtf"),
+        "wtf_r18": u("/wtf?r18=1"),
         "json_full": u("/random?format=json"),
         "json_simple": u("/random?format=simple_json"),
         "r18_only": u("/random?r18=1"),
@@ -35,9 +39,7 @@ def _build_docs_html(*, base_url: str) -> str:
         "quality_strong": u(
             "/random?strategy=quality&quality_samples=200&min_pixels=2000000&min_bookmarks=100&illust_type=illust&ai_type=0"
         ),
-        "complex": u(
-            "/random?format=json&r18=1&illust_type=illust&orientation=portrait&min_pixels=2500000&min_bookmarks=25&min_comments=50&included_tags=loli"
-        ),
+        "complex": u("/random?r18=1&illust_type=illust&orientation=portrait&min_pixels=2500000&min_bookmarks=2&min_comments=5&included_tags=loli"),
         "tags_api": u("/tags"),
         "authors_api": u("/authors"),
         "swagger": u("/api/docs"),
@@ -250,6 +252,8 @@ def _build_docs_html(*, base_url: str) -> str:
       <p>质量优先随机 + 强力筛选，支持标签/热度/分辨率/R18/AI/作品类型等组合查询。</p>
       <div class="chips" aria-label="quick-links">
         <a class="chip" href="{examples["img_default"]}"><strong>/random</strong> 直接出图</a>
+        <a class="chip" href="{examples["wtf"]}"><strong>/wtf</strong> 瀑布流</a>
+        <a class="chip" href="{examples["status"]}"><strong>/status</strong> 运行状态</a>
         <a class="chip" href="{examples["json_full"]}"><strong>format=json</strong> 返回 JSON</a>
         <a class="chip" href="{examples["pure_random"]}"><strong>strategy=random</strong> 纯随机</a>
         <a class="chip" href="{examples["swagger"]}"><strong>/api/docs</strong> Swagger</a>
@@ -295,7 +299,23 @@ def _build_docs_html(*, base_url: str) -> str:
     </div>
 
     <section class="card" style="margin-top: 14px;">
+      <h2>5) 状态页 / 瀑布流</h2>
+      <p><span class="kbd">/status</span> 为公开仪表盘：展示 API 状态、图库概览、/random 请求统计；<span class="kbd">/status.json</span> 为机器可读 JSON。</p>
+      <pre><code>{examples["status"]}
+{examples["status_json"]}</code></pre>
+      <p><span class="kbd">/wtf</span> 为瀑布流：参数与 <span class="kbd">/random</span> 完全一致（例如 r18/标签/分辨率/热度等），页面内部会自动加上 <span class="kbd">adaptive=1</span> 与 <span class="kbd">redirect=1</span> 来做屏幕适配与稳定链接。</p>
+      <pre><code>{examples["wtf"]}
+{examples["wtf_r18"]}</code></pre>
+    </section>
+
+    <section class="card" style="margin-top: 14px;">
       <h2>筛选语法速记</h2>
+      <div class="note">
+        <strong>标签 AND / OR 速记：</strong>
+        <span class="kbd">AND</span> 用“重复参数”（例如 <span class="kbd">included_tags=a&amp;included_tags=b</span>），
+        <span class="kbd">OR</span> 用同一参数里的 <span class="kbd">|</span>（例如 <span class="kbd">included_tags=a|b</span>）。
+        <span class="muted">如果你的客户端不方便输入 <span class="kbd">|</span>，也可以写成 <span class="kbd">%7C</span>。</span>
+      </div>
       <div class="table-wrap" role="region" aria-label="filters-table" tabindex="0">
         <table>
           <thead>
@@ -340,12 +360,16 @@ def _build_docs_html(*, base_url: str) -> str:
             <td>
               必须包含的标签：参数之间是 <strong>AND</strong>，单个参数内用 <code>|</code> 表示 <strong>OR</strong>。<br/>
               例：<code>included_tags=girl|boy&amp;included_tags=white|black</code> 表示 (girl OR boy) AND (white OR black)。<br/>
+              <span class="muted">提示：URL 里的 <code>&amp;</code> 是“参数分隔符”，要写 AND 就重复参数；要写 OR 就在同一参数里用 <code>|</code>。</span><br/>
               示例：<a href="{examples["tag_loli"]}">{examples["tag_loli"]}</a>
             </td>
           </tr>
           <tr>
             <td><code>excluded_tags</code></td>
-            <td>必须不包含的标签（OR）。可重复传参。示例：<code>excluded_tags=AI生成</code></td>
+            <td>
+              必须不包含的标签：任意命中即排除。可重复传参：<code>excluded_tags=a&amp;excluded_tags=b</code>。<br/>
+              <span class="muted"><code>excluded_tags=a|b</code> 等价于排除 a 或 b（效果同上）。</span>
+            </td>
           </tr>
           <tr>
             <td><code>min_width</code><br/><code>min_height</code><br/><code>min_pixels</code></td>
@@ -390,7 +414,7 @@ def _build_docs_html(*, base_url: str) -> str:
 
     <section class="card" style="margin-top: 14px;">
       <h2>复杂示例（组合查询）</h2>
-      <p>示例：R18 + 插画 + 竖图 + 250万像素以上 + 收藏≥25 + 评论≥50 + 标签包含 loli，并返回 JSON。</p>
+      <p>示例：R18 + 插画 + 竖图 + 250万像素以上 + 收藏≥2 + 评论≥5 + 标签包含 loli（直接出图）。</p>
       <pre><code>{examples["complex"]}</code></pre>
     </section>
   </div>

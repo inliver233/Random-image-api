@@ -64,7 +64,7 @@ def _build_wtf_html(*, base_url: str) -> str:
     a:hover {{ text-decoration: underline; }}
 
     .wrap {{
-      max-width: 1180px;
+      max-width: 980px;
       margin: 0 auto;
       padding: 22px 16px 44px;
     }}
@@ -138,29 +138,18 @@ def _build_wtf_html(*, base_url: str) -> str:
 
     .feed {{
       margin-top: 14px;
-      column-width: 320px;
-      column-gap: 14px;
-    }}
-    @media (max-width: 520px) {{
-      .feed {{ column-width: auto; column-count: 1; column-gap: 0; }}
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
     }}
     .item {{
-      break-inside: avoid;
-      margin: 0 0 14px;
       border: 1px solid var(--border);
       background: var(--card);
       border-radius: 14px;
       overflow: hidden;
       box-shadow: 0 10px 30px rgba(40, 24, 16, 0.06);
-    }}
-    .item .meta {{
-      padding: 8px 10px;
-      font-size: 12px;
-      color: rgba(67, 51, 44, 0.72);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
+      content-visibility: auto;
+      contain-intrinsic-size: 800px;
     }}
     .item img {{
       width: 100%;
@@ -173,12 +162,6 @@ def _build_wtf_html(*, base_url: str) -> str:
     .item.loaded img {{
       opacity: 1;
       transform: translateY(0px);
-    }}
-    .item.fail {{
-      border-color: rgba(180, 35, 24, 0.26);
-    }}
-    .item.fail .meta {{
-      color: rgba(180, 35, 24, 0.86);
     }}
     .sentinel {{
       text-align: center;
@@ -227,91 +210,103 @@ def _build_wtf_html(*, base_url: str) -> str:
     info.textContent = baseQuery ? `当前过滤: ?${{baseQuery}}` : "当前过滤: （无）";
 
     let paused = false;
-    let counter = 0;
+    let seq = 0;
     let inflight = 0;
-
-    function buildUrl() {{
-      const p = new URLSearchParams(baseParams);
-      p.set("t", String(Date.now()) + "_" + String(counter++));
-      return "/random?" + p.toString();
-    }}
-
-    function addItem() {{
-      const item = document.createElement("div");
-      item.className = "item";
-      const img = document.createElement("img");
-      img.loading = "lazy";
-      img.decoding = "async";
-      img.referrerPolicy = "no-referrer";
-
-      const meta = document.createElement("div");
-      meta.className = "meta";
-      meta.innerHTML = `<span class="muted">#${{String(counter)}}</span><span class="muted">加载中…</span>`;
-
-      let tries = 0;
-      const setSrc = () => {{
-        meta.children[1].textContent = tries > 0 ? `重试 ${{tries}}…` : "加载中…";
-        img.src = buildUrl();
-      }};
-
-      img.onload = () => {{
-        item.classList.add("loaded");
-        meta.children[1].textContent = "OK";
-        inflight = Math.max(0, inflight - 1);
-        updateSentinel();
-        maybePrefill();
-      }};
-      img.onerror = () => {{
-        tries += 1;
-        if (tries <= 3) {{
-          setTimeout(setSrc, 200 * tries);
-          return;
-        }}
-        item.classList.add("fail");
-        meta.children[1].textContent = "加载失败";
-        inflight = Math.max(0, inflight - 1);
-        updateSentinel();
-        maybePrefill();
-      }};
-
-      inflight += 1;
-      updateSentinel();
-      item.appendChild(img);
-      item.appendChild(meta);
-      feed.appendChild(item);
-      setSrc();
-    }}
-
-    function batch(n) {{
-      const count = Math.max(1, Number(n) || 1);
-      for (let i = 0; i < count; i++) addItem();
-    }}
+    let rendered = 0;
+    let target = 0;
 
     function isMobile() {{
       return window.matchMedia && window.matchMedia("(max-width: 520px)").matches;
     }}
 
-    function updateSentinel() {{
-      const items = feed.children.length;
-      const status = paused ? "已暂停" : "加载中";
-      sentinel.textContent = `${{status}} · 已渲染 ${{items}} 张 · in-flight ${{inflight}}`;
+    function cfg() {{
+      const mobile = isMobile();
+      const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      const effectiveType = conn && conn.effectiveType ? String(conn.effectiveType) : "";
+      const slow = effectiveType.includes("2g") || effectiveType.includes("3g");
+
+      const base = mobile
+        ? { initial: 8, step: 6, maxInflight: 8 }
+        : { initial: 12, step: 10, maxInflight: 14 };
+
+      return {{
+        initial: base.initial,
+        step: base.step,
+        maxInflight: slow ? Math.max(4, Math.floor(base.maxInflight / 2)) : base.maxInflight,
+      }};
     }}
 
-    function maybePrefill() {{
+    function buildUrl() {{
+      const p = new URLSearchParams(baseParams);
+      p.set("t", String(Date.now()) + "_" + String(seq++));
+      return "/random?" + p.toString();
+    }}
+
+    function updateSentinel() {{
+      const status = paused ? "已暂停" : "加载中";
+      sentinel.textContent = `${{status}} · 已显示 ${{rendered}} 张 · in-flight ${{inflight}}`;
+    }}
+
+    function appendItem(imgEl) {{
+      const item = document.createElement("div");
+      item.className = "item";
+      item.appendChild(imgEl);
+      feed.appendChild(item);
+      requestAnimationFrame(() => item.classList.add("loaded"));
+    }}
+
+    function startOne() {{
       if (paused) return;
-      const items = feed.children.length;
-      const target = isMobile() ? 10 : 18;
-      if (items < target) {{
-        batch(target - items);
+      const c = cfg();
+      if (inflight >= c.maxInflight) return;
+      if ((rendered + inflight) >= target) return;
+
+      inflight += 1;
+      updateSentinel();
+
+      const img = new Image();
+      img.decoding = "async";
+      img.referrerPolicy = "no-referrer";
+      img.alt = "";
+
+      let tries = 0;
+      const load = () => {{
+        tries += 1;
+        img.src = buildUrl();
+      }};
+
+      img.onload = () => {{
+        inflight = Math.max(0, inflight - 1);
+        rendered += 1;
+        appendItem(img);
+        updateSentinel();
+        ensure();
+      }};
+      img.onerror = () => {{
+        if (tries < 3) {{
+          setTimeout(load, 250 * tries);
+          return;
+        }}
+        inflight = Math.max(0, inflight - 1);
+        updateSentinel();
+        ensure();
+      }};
+
+      load();
+    }}
+
+    function ensure() {{
+      if (paused) return;
+      const c = cfg();
+      while (inflight < c.maxInflight && (rendered + inflight) < target) {{
+        startOne();
       }}
     }}
 
-    function loadMore() {{
-      if (paused) return;
-      const maxInflight = isMobile() ? 10 : 18;
-      if (inflight >= maxInflight) return;
-      const n = isMobile() ? 6 : 10;
-      batch(n);
+    function bump() {{
+      const c = cfg();
+      target = Math.max(target, rendered + inflight + c.step);
+      ensure();
     }}
 
     toggle.addEventListener("click", () => {{
@@ -319,22 +314,27 @@ def _build_wtf_html(*, base_url: str) -> str:
       toggle.textContent = paused ? "继续加载" : "暂停加载";
       updateSentinel();
       if (!paused) {{
-        maybePrefill();
-        loadMore();
+        ensure();
       }}
     }});
 
     const io = new IntersectionObserver((entries) => {{
       for (const e of entries) {{
-        if (e.isIntersecting) loadMore();
+        if (e.isIntersecting) bump();
       }}
-    }}, {{ root: null, rootMargin: "900px 0px", threshold: 0 }});
+    }}, {{ root: null, rootMargin: "2200px 0px", threshold: 0 }});
     io.observe(sentinel);
 
     // Initial fill.
-    maybePrefill();
-    loadMore();
+    target = cfg().initial;
+    ensure();
     updateSentinel();
+
+    window.addEventListener("resize", () => {{
+      const c = cfg();
+      target = Math.max(target, c.initial);
+      ensure();
+    }});
   </script>
 </body>
 </html>
@@ -349,4 +349,3 @@ async def wtf_page(request: Request) -> HTMLResponse:
     resp = HTMLResponse(content=html, status_code=200, headers={"Cache-Control": "no-store"})
     set_request_id_header(resp, rid)
     return resp
-

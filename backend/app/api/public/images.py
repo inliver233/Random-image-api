@@ -32,6 +32,8 @@ from app.jobs.enqueue import enqueue_opportunistic_hydrate_metadata
 router = APIRouter()
 
 _MAX_TAG_FILTERS = 50
+_MAX_TAG_OR_TERMS = 20
+_MAX_TAG_TOTAL_TERMS = 200
 
 
 @router.get("/images")
@@ -87,22 +89,40 @@ async def list_images(
     if min_width < 0 or min_height < 0 or min_pixels < 0:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported min_*", status_code=400)
 
-    def _parse_tags(values: list[str] | None) -> list[str]:
+    def _parse_tag_filters(values: list[str] | None) -> list[str]:
         out: list[str] = []
         seen: set[str] = set()
         for raw in values or []:
-            for part in str(raw).split("|"):
-                name = part.strip()
-                if not name or name in seen:
-                    continue
-                seen.add(name)
-                out.append(name)
+            expr = str(raw or "").strip()
+            if not expr or expr in seen:
+                continue
+            seen.add(expr)
+            out.append(expr)
         return out
 
-    included = _parse_tags(included_tags)
-    excluded = _parse_tags(excluded_tags)
+    def _validate_tag_filters(values: list[str]) -> None:
+        total_terms = 0
+        for expr in values:
+            parts: list[str] = []
+            seen_terms: set[str] = set()
+            for part in str(expr).split("|"):
+                term = part.strip()
+                if not term or term in seen_terms:
+                    continue
+                seen_terms.add(term)
+                parts.append(term)
+            if len(parts) > _MAX_TAG_OR_TERMS:
+                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag terms in a group", status_code=400)
+            total_terms += len(parts)
+        if total_terms > _MAX_TAG_TOTAL_TERMS:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag terms", status_code=400)
+
+    included = _parse_tag_filters(included_tags)
+    excluded = _parse_tag_filters(excluded_tags)
     if len(included) > _MAX_TAG_FILTERS or len(excluded) > _MAX_TAG_FILTERS:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag filters", status_code=400)
+    _validate_tag_filters(included)
+    _validate_tag_filters(excluded)
 
     if user_id is not None and int(user_id) <= 0:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported user_id", status_code=400)
