@@ -121,6 +121,81 @@ def test_job_handler_import_images_happy_path_and_enqueues_hydrate(tmp_path: Pat
     asyncio.run(_run())
 
 
+def test_job_handler_import_images_retries_on_sqlite_busy(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SQLITE_BUSY_TIMEOUT_MS", "100")
+    monkeypatch.setenv("SQLITE_BUSY_RETRIES", "20")
+
+    db_path = tmp_path / "handler_import_images_busy.db"
+    engine = create_engine(_sqlite_url(db_path))
+
+    async def _run() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            imp = Import(created_by="admin", source="manual")
+            session.add(imp)
+            await session.commit()
+            await session.refresh(imp)
+
+            payload = {
+                "import_id": int(imp.id),
+                "hydrate_on_import": False,
+                "text_lines": [
+                    "https://i.pximg.net/img-original/img/2020/01/01/00/00/00/111_p0.jpg",
+                    "https://i.pximg.net/img-original/img/2020/01/01/00/00/00/222_p0.png",
+                ],
+            }
+            job = JobRow(
+                type="import_images",
+                status="pending",
+                payload_json=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                ref_type="import",
+                ref_id=str(int(imp.id)),
+            )
+            session.add(job)
+            await session.commit()
+
+        dispatcher = JobDispatcher()
+        dispatcher.register("import_images", build_import_images_handler(engine))
+
+        claimed = await claim_next_job(engine, worker_id="w1")
+        assert claimed is not None
+        assert claimed["type"] == "import_images"
+
+        lock_acquired = asyncio.Event()
+
+        async def _hold_write_lock() -> None:
+            async with engine.connect() as conn:
+                await conn.exec_driver_sql("BEGIN IMMEDIATE")
+                await conn.exec_driver_sql(
+                    "UPDATE imports SET source=source WHERE id=:id",
+                    {"id": int(payload["import_id"])},
+                )
+                lock_acquired.set()
+                await asyncio.sleep(0.6)
+                await conn.exec_driver_sql("COMMIT")
+
+        async def _run_job() -> None:
+            await lock_acquired.wait()
+            transition = await execute_claimed_job(engine, dispatcher, job_row=claimed, worker_id="w1")
+            assert transition is not None
+            assert transition.status.value == "completed"
+
+        await asyncio.gather(_hold_write_lock(), _run_job())
+
+        async with Session() as session:
+            imgs = ((await session.execute(sa.select(Image))).scalars().all())
+            assert len(imgs) == 2
+            for img in imgs:
+                assert img.proxy_path.startswith("/i/")
+
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_job_handler_import_images_supports_file_ref(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "handler_import_images_file_ref.db"
     db_url = _sqlite_url(db_path)

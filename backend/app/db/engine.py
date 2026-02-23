@@ -7,7 +7,11 @@ from sqlalchemy import event
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-SQLITE_BUSY_TIMEOUT_MS = 5_000
+# Under concurrent writers (API requests + worker jobs), large imports/backfills can
+# legitimately hold the SQLite writer lock for several seconds. A higher default
+# busy timeout makes the system much more resilient under load (still overrideable
+# via SQLITE_BUSY_TIMEOUT_MS env).
+SQLITE_BUSY_TIMEOUT_MS = 30_000
 SQLITE_POOL_SIZE = 10
 SQLITE_MAX_OVERFLOW = 10
 SQLITE_POOL_TIMEOUT_S = 5
