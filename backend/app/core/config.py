@@ -37,6 +37,7 @@ class Settings:
     public_api_key_required: bool
     public_api_key_rpm: int
     public_api_key_burst: int
+    random_totals_persist_interval_seconds: int
 
     @property
     def is_prod(self) -> bool:
@@ -168,6 +169,14 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         public_api_key_burst = 0
     public_api_key_burst = max(0, min(int(public_api_key_burst), 10_000_000))
 
+    try:
+        random_totals_persist_interval_seconds = int(
+            _get(env, "RANDOM_TOTALS_PERSIST_INTERVAL_SECONDS", "15") or "15"
+        )
+    except Exception:
+        random_totals_persist_interval_seconds = 15
+    random_totals_persist_interval_seconds = max(2, min(int(random_totals_persist_interval_seconds), 300))
+
     settings = Settings(
         app_env=app_env,
         database_url=database_url,
@@ -187,6 +196,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         public_api_key_required=public_api_key_required,
         public_api_key_rpm=public_api_key_rpm,
         public_api_key_burst=public_api_key_burst,
+        random_totals_persist_interval_seconds=random_totals_persist_interval_seconds,
     )
 
     if settings.is_prod:

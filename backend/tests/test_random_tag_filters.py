@@ -119,6 +119,59 @@ def test_included_tags_requires_all(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_included_tags_supports_or_groups(tmp_path: Path) -> None:
+    db_path = tmp_path / "included_or.db"
+    engine = create_engine("sqlite+aiosqlite:///" + db_path.as_posix())
+
+    async def _run() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            cat = Tag(name="cat")
+            dog = Tag(name="dog")
+            session.add_all([cat, dog])
+
+            img_cat = Image(
+                illust_id=30,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/cat.jpg",
+                proxy_path="/i/1.jpg",
+                random_key=0.1,
+                x_restrict=0,
+            )
+            img_dog = Image(
+                illust_id=31,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/dog.jpg",
+                proxy_path="/i/2.jpg",
+                random_key=0.2,
+                x_restrict=0,
+            )
+            session.add_all([img_cat, img_dog])
+            await session.flush()
+
+            session.add_all(
+                [
+                    ImageTag(image_id=img_cat.id, tag_id=cat.id),
+                    ImageTag(image_id=img_dog.id, tag_id=dog.id),
+                ]
+            )
+            await session.commit()
+
+        async with Session() as session:
+            picked = await pick_random_image(session, r=0.0, included_tags=["cat|dog"])
+            assert picked is not None
+            assert int(picked.illust_id) in {30, 31}
+
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_excluded_tags_filters_images(tmp_path: Path) -> None:
     db_path = tmp_path / "excluded_tags.db"
     engine = create_engine("sqlite+aiosqlite:///" + db_path.as_posix())
@@ -170,4 +223,3 @@ def test_excluded_tags_filters_images(tmp_path: Path) -> None:
         await engine.dispose()
 
     asyncio.run(_run())
-

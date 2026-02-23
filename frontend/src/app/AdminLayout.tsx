@@ -10,6 +10,8 @@ type NavItem = { key: string; label: string; external?: boolean; href?: string }
 const NAV_ITEMS: NavItem[] = [
   { key: "/admin", label: "主页" },
   { key: "docs", label: "使用文档", external: true, href: "/docs" },
+  { key: "status", label: "运行状态", external: true, href: "/status" },
+  { key: "wtf", label: "瀑布流", external: true, href: "/wtf" },
   { key: "/admin/import", label: "导入链接" },
   { key: "/admin/images", label: "图片管理" },
   { key: "/admin/hydration", label: "补全管理" },

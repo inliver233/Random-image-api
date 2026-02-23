@@ -49,6 +49,7 @@ def _build_docs_html(*, base_url: str) -> str:
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light" />
   <title>Random Mage Docs</title>
   <style>
     :root {{
@@ -70,6 +71,7 @@ def _build_docs_html(*, base_url: str) -> str:
     }}
 
     * {{ box-sizing: border-box; }}
+    html, body {{ height: 100%; }}
     body {{
       margin: 0;
       font-family: var(--sans);
@@ -336,8 +338,8 @@ def _build_docs_html(*, base_url: str) -> str:
           <tr>
             <td><code>included_tags</code></td>
             <td>
-              必须包含的标签（AND）。可重复传参：<code>included_tags=a&amp;included_tags=b</code>。<br/>
-              也支持用 <code>|</code> 分隔：<code>included_tags=a|b</code> 等价于同时包含 a 与 b。<br/>
+              必须包含的标签：参数之间是 <strong>AND</strong>，单个参数内用 <code>|</code> 表示 <strong>OR</strong>。<br/>
+              例：<code>included_tags=girl|boy&amp;included_tags=white|black</code> 表示 (girl OR boy) AND (white OR black)。<br/>
               示例：<a href="{examples["tag_loli"]}">{examples["tag_loli"]}</a>
             </td>
           </tr>

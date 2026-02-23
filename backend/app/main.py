@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 
@@ -10,6 +11,8 @@ from app.api.admin.router import router as admin_router
 from app.api.metrics import router as metrics_router
 from app.api.public.healthz import router as healthz_router
 from app.api.public.docs_page import router as docs_page_router
+from app.api.public.status_page import router as status_page_router
+from app.api.public.wtf_page import router as wtf_page_router
 from app.api.public.authors import router as authors_router
 from app.api.public.images import router as images_router
 from app.api.public.legacy import router as legacy_router
@@ -21,6 +24,7 @@ from app.core.api_keys import ApiKeyAuthConfig, ApiKeyAuthenticator, ApiKeyRateL
 from app.core.errors import ApiError, ErrorCode, json_error_response
 from app.core.logging import configure_logging, get_logger
 from app.core.metrics import observe_random_result
+from app.core.random_request_persistence import load_persisted_random_totals, persist_random_totals
 from app.core.random_request_stats import RandomRequestStats
 from app.core.request_id import build_request_id_middleware, get_or_create_request_id, set_request_id_on_state
 from app.core.security import decode_jwt, parse_bearer_token
@@ -81,6 +85,48 @@ def create_app() -> FastAPI:
     app.state.api_key_limiter = ApiKeyRateLimiter(rpm=int(api_key_cfg.rpm), burst=int(api_key_cfg.burst))
     app.state.random_request_stats = RandomRequestStats(window_seconds=60)
 
+    @app.on_event("startup")
+    async def _startup() -> None:  # type: ignore[no-redef]
+        engine = getattr(app.state, "engine", None)
+        stats = getattr(app.state, "random_request_stats", None)
+        if engine is None or stats is None:
+            return
+
+        try:
+            totals = await load_persisted_random_totals(engine)
+            await stats.set_totals(
+                total_requests=int(totals.get("total_requests", 0) or 0),
+                total_ok=int(totals.get("total_ok", 0) or 0),
+                total_error=int(totals.get("total_error", 0) or 0),
+            )
+        except Exception:
+            pass
+
+        try:
+            interval_s = float((settings.random_totals_persist_interval_seconds or 0) or 15)
+        except Exception:
+            interval_s = 15.0
+        interval_s = max(2.0, min(float(interval_s), 300.0))
+
+        async def _loop() -> None:
+            while True:
+                await asyncio.sleep(float(interval_s))
+                try:
+                    snap = await stats.snapshot()
+                    await persist_random_totals(
+                        engine,
+                        total_requests=int(snap.total_requests),
+                        total_ok=int(snap.total_ok),
+                        total_error=int(snap.total_error),
+                        source="api",
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    continue
+
+        app.state.random_totals_persist_task = asyncio.create_task(_loop())
+
     @app.middleware("http")
     async def _public_api_key_middleware(request: Request, call_next):  # type: ignore[no-redef]
         if not bool(settings.public_api_key_required):
@@ -89,7 +135,7 @@ def create_app() -> FastAPI:
         path = request.url.path
         if path.startswith("/admin") or path.startswith("/metrics"):
             return await call_next(request)
-        if path in {"/healthz", "/version", "/openapi.json", "/docs", "/api/docs", "/api/redoc"}:
+        if path in {"/healthz", "/version", "/openapi.json", "/docs", "/status", "/status.json", "/wtf", "/api/docs", "/api/redoc"}:
             return await call_next(request)
 
         rid = get_or_create_request_id(request)
@@ -231,6 +277,36 @@ def create_app() -> FastAPI:
     @app.on_event("shutdown")
     async def _shutdown() -> None:  # type: ignore[no-redef]
         engine = getattr(app.state, "engine", None)
+        stats = getattr(app.state, "random_request_stats", None)
+        if engine is not None and stats is not None:
+            try:
+                snap = await asyncio.wait_for(stats.snapshot(), timeout=1.0)
+                await asyncio.wait_for(
+                    persist_random_totals(
+                        engine,
+                        total_requests=int(snap.total_requests),
+                        total_ok=int(snap.total_ok),
+                        total_error=int(snap.total_error),
+                        source="shutdown",
+                    ),
+                    timeout=2.0,
+                )
+            except Exception:
+                pass
+
+        task = getattr(app.state, "random_totals_persist_task", None)
+        if task is not None:
+            try:
+                task.cancel()
+            except Exception:
+                pass
+            try:
+                await asyncio.wait_for(task, timeout=2.0)
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+
         if engine is not None:
             await engine.dispose()
 
@@ -240,6 +316,8 @@ def create_app() -> FastAPI:
 
     app.include_router(healthz_router)
     app.include_router(docs_page_router)
+    app.include_router(status_page_router)
+    app.include_router(wtf_page_router)
     app.include_router(authors_router)
     app.include_router(images_router)
     app.include_router(legacy_router)

@@ -32,6 +32,16 @@ class RandomRequestStats:
         # (monotonic_seconds, ok)
         self._events: deque[tuple[float, bool]] = deque()
 
+    async def set_totals(self, *, total_requests: int, total_ok: int, total_error: int) -> None:
+        tr = max(0, int(total_requests))
+        tok = max(0, int(total_ok))
+        terr = max(0, int(total_error))
+        async with self._lock:
+            self._total_requests = tr
+            self._total_ok = tok
+            self._total_error = terr
+            self._in_flight = max(0, int(self._in_flight))
+
     def _purge(self, *, now_m: float) -> None:
         cutoff = float(now_m) - float(self._window_s)
         while self._events:
@@ -80,4 +90,3 @@ class RandomRequestStats:
                 last_window_error=int(last_error),
                 last_window_success_rate=float(rate),
             )
-

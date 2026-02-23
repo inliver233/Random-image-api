@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import distinct, func, or_, select
+from sqlalchemy import and_, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.image_tags import ImageTag
@@ -36,45 +36,73 @@ def _orientation_where_clause(*, orientation: int | None) -> object | None:
     return Image.orientation == orientation_i
 
 
-def _clean_tag_names(values: Sequence[str] | None) -> list[str]:
+def _clean_tag_groups(values: Sequence[str] | None) -> list[list[str]]:
     if not values:
         return []
-    out: list[str] = []
-    seen: set[str] = set()
-    for v in values:
-        name = str(v or "").strip()
-        if not name:
+
+    groups: list[list[str]] = []
+    seen_groups: set[str] = set()
+    for raw in values:
+        expr = str(raw or "").strip()
+        if not expr:
             continue
-        if name in seen:
+
+        group: list[str] = []
+        seen_in_group: set[str] = set()
+        for part in expr.split("|"):
+            name = part.strip()
+            if not name or name in seen_in_group:
+                continue
+            seen_in_group.add(name)
+            group.append(name)
+
+        if not group:
             continue
-        seen.add(name)
-        out.append(name)
-    return out
+
+        # Group identity ignores order (girl|boy == boy|girl).
+        key = "\x1f".join(sorted(group))
+        if key in seen_groups:
+            continue
+        seen_groups.add(key)
+        groups.append(group)
+
+    return groups
 
 
 def _included_tags_where_clause(*, tag_names: Sequence[str]) -> object | None:
-    names = _clean_tag_names(tag_names)
-    if not names:
+    groups = _clean_tag_groups(tag_names)
+    if not groups:
         return None
-    subq = (
-        select(ImageTag.image_id)
-        .join(Tag, Tag.id == ImageTag.tag_id)
-        .where(Tag.name.in_(names))
-        .group_by(ImageTag.image_id)
-        .having(func.count(distinct(Tag.name)) == len(names))
-    )
-    return Image.id.in_(subq)
+
+    clauses: list[object] = []
+    for group in groups:
+        tag_ids = select(Tag.id).where(Tag.name.in_(group))
+        subq = select(distinct(ImageTag.image_id)).where(ImageTag.tag_id.in_(tag_ids))
+        clauses.append(Image.id.in_(subq))
+
+    if not clauses:
+        return None
+    return clauses[0] if len(clauses) == 1 else and_(*clauses)
 
 
 def _excluded_tags_where_clause(*, tag_names: Sequence[str]) -> object | None:
-    names = _clean_tag_names(tag_names)
+    groups = _clean_tag_groups(tag_names)
+    if not groups:
+        return None
+
+    names: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for name in group:
+            if name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+
     if not names:
         return None
-    subq = (
-        select(ImageTag.image_id)
-        .join(Tag, Tag.id == ImageTag.tag_id)
-        .where(Tag.name.in_(names))
-    )
+    tag_ids = select(Tag.id).where(Tag.name.in_(names))
+    subq = select(distinct(ImageTag.image_id)).where(ImageTag.tag_id.in_(tag_ids))
     return Image.id.not_in(subq)
 
 
