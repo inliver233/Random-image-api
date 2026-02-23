@@ -350,7 +350,7 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
         )
         max_concurrency = _parse_int_env(
             "WORKER_MAX_CONCURRENCY",
-            default=20,
+            default=50,
             min_v=1,
             max_v=200,
         )

@@ -5,7 +5,11 @@ from fastapi import APIRouter, Request
 from app.core.errors import ApiError, ErrorCode
 from app.core.http_stream import stream_url
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
-from app.core.pximg_reverse_proxy import normalize_pximg_mirror_host, rewrite_pximg_to_mirror
+from app.core.pximg_reverse_proxy import (
+    normalize_pximg_mirror_host,
+    pick_pximg_mirror_host_for_request,
+    rewrite_pximg_to_mirror,
+)
 from app.core.proxy_routing import select_proxy_uri_for_url
 from app.core.runtime_settings import load_runtime_config
 from app.db.images_get_by_illust import get_image_by_illust_page
@@ -52,7 +56,12 @@ async def legacy_multi(
 
     runtime = await load_runtime_config(engine)
     use_pixiv_cat = bool(runtime.image_proxy_use_pixiv_cat) or int(pixiv_cat) == 1
-    mirror_host = mirror_host_override or str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
+    runtime_mirror_host = str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
+    mirror_host = mirror_host_override or (
+        pick_pximg_mirror_host_for_request(headers=request.headers, fallback_host=runtime_mirror_host)
+        if use_pixiv_cat
+        else runtime_mirror_host
+    )
     proxy_uri = None
     source_url = rewrite_pximg_to_mirror(str(image.original_url), mirror_host=mirror_host) if use_pixiv_cat else str(image.original_url)
     if not use_pixiv_cat:
@@ -110,7 +119,12 @@ async def legacy_single(
 
     runtime = await load_runtime_config(engine)
     use_pixiv_cat = bool(runtime.image_proxy_use_pixiv_cat) or int(pixiv_cat) == 1
-    mirror_host = mirror_host_override or str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
+    runtime_mirror_host = str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
+    mirror_host = mirror_host_override or (
+        pick_pximg_mirror_host_for_request(headers=request.headers, fallback_host=runtime_mirror_host)
+        if use_pixiv_cat
+        else runtime_mirror_host
+    )
     proxy_uri = None
     source_url = rewrite_pximg_to_mirror(str(image.original_url), mirror_host=mirror_host) if use_pixiv_cat else str(image.original_url)
     if not use_pixiv_cat:

@@ -12,7 +12,11 @@ from app.core.http_stream import stream_url
 import sqlalchemy as sa
 
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
-from app.core.pximg_reverse_proxy import normalize_pximg_mirror_host, rewrite_pximg_to_mirror
+from app.core.pximg_reverse_proxy import (
+    normalize_pximg_mirror_host,
+    pick_pximg_mirror_host_for_request,
+    rewrite_pximg_to_mirror,
+)
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.runtime_settings import load_runtime_config
 from app.core.time import iso_utc_ms
@@ -304,7 +308,12 @@ async def proxy_image(
 
     runtime = await load_runtime_config(engine)
     use_pixiv_cat = bool(runtime.image_proxy_use_pixiv_cat) or int(pixiv_cat) == 1
-    mirror_host = mirror_host_override or str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
+    runtime_mirror_host = str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
+    mirror_host = mirror_host_override or (
+        pick_pximg_mirror_host_for_request(headers=request.headers, fallback_host=runtime_mirror_host)
+        if use_pixiv_cat
+        else runtime_mirror_host
+    )
 
     async def _best_effort(fn, *args, timeout_s: float = 1.5, **kwargs) -> None:  # type: ignore[no-untyped-def]
         try:

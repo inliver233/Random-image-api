@@ -33,7 +33,7 @@ def is_sqlite_busy_error(exc: BaseException) -> bool:
 async def with_sqlite_busy_retry(
     op: Callable[[], Awaitable[T]],
     *,
-    retries: int = 8,
+    retries: int = 12,
     base_delay_s: float = 0.05,
 ) -> T:
     try:
@@ -49,9 +49,9 @@ async def with_sqlite_busy_retry(
     base_delay = float(max(0.0, min(float(env_base), 5.0)))
 
     try:
-        env_max_delay = float((os.environ.get("SQLITE_BUSY_MAX_DELAY_S") or "").strip() or 2.0)
+        env_max_delay = float((os.environ.get("SQLITE_BUSY_MAX_DELAY_S") or "").strip() or 5.0)
     except Exception:
-        env_max_delay = 2.0
+        env_max_delay = 5.0
     max_delay = float(max(0.0, min(float(env_max_delay), 30.0)))
 
     attempt = 0

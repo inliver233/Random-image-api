@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from urllib.parse import urlparse, urlunparse
 
 
@@ -25,6 +26,71 @@ _PXIMG_MIRROR_ALIASES: dict[str, str] = {
     "pixiv.nl": "i.pixiv.nl",
     "i.pixiv.nl": "i.pixiv.nl",
 }
+
+
+_REQUEST_COUNTRY_HEADERS: tuple[str, ...] = (
+    # Cloudflare
+    "cf-ipcountry",
+    # Vercel
+    "x-vercel-ip-country",
+    # AWS CloudFront
+    "cloudfront-viewer-country",
+    # Google App Engine / GCP
+    "x-appengine-country",
+    # Common self-managed reverse proxies
+    "x-country-code",
+    "x-geo-country",
+)
+
+
+def _get_request_country_code(headers: Mapping[str, str] | None) -> str | None:
+    if not headers:
+        return None
+    lowered: dict[str, str] = {}
+    try:
+        for k, v in headers.items():
+            key = str(k or "").strip().lower()
+            if not key:
+                continue
+            val = str(v or "").strip()
+            if not val:
+                continue
+            lowered[key] = val
+    except Exception:
+        return None
+
+    for key in _REQUEST_COUNTRY_HEADERS:
+        val = lowered.get(key)
+        if not val:
+            continue
+        code = val.strip().upper()
+        if not code:
+            continue
+        # Some CDNs may return "CN,..." or other variants; we only need the first token.
+        code = code.split(",", 1)[0].strip()
+        if len(code) >= 2:
+            return code[:2]
+    return None
+
+
+def pick_pximg_mirror_host_for_request(
+    *,
+    headers: Mapping[str, str] | None,
+    fallback_host: str | None,
+) -> str:
+    """
+    Pick the best pximg mirror host for a request.
+
+    - If request is detected as mainland China, prefer i.pixiv.re (commonly faster inside CN).
+    - Otherwise use the configured fallback host (defaults to i.pixiv.cat).
+
+    Detection is best-effort and relies on CDN/reverse-proxy injected country headers
+    (e.g. Cloudflare's CF-IPCountry). If missing, falls back to the configured host.
+    """
+    fallback = normalize_pximg_mirror_host(fallback_host) or DEFAULT_PXIMG_MIRROR_HOST
+    if _get_request_country_code(headers) == "CN":
+        return "i.pixiv.re"
+    return fallback
 
 
 def is_pximg_image_url(url: str) -> bool:

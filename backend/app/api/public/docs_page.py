@@ -52,17 +52,18 @@ def _build_docs_html(*, base_url: str) -> str:
   <title>Random Mage Docs</title>
   <style>
     :root {{
-      --bg: #0b1220;
-      --card: rgba(255, 255, 255, 0.06);
-      --card-2: rgba(255, 255, 255, 0.08);
-      --border: rgba(255, 255, 255, 0.12);
-      --text: rgba(255, 255, 255, 0.92);
-      --muted: rgba(255, 255, 255, 0.72);
-      --muted2: rgba(255, 255, 255, 0.60);
-      --link: #7dd3fc;
-      --accent: #a78bfa;
-      --ok: #34d399;
-      --warn: #fbbf24;
+      /* Clay / paper-like palette */
+      --bg: #f4efe6;
+      --card: rgba(255, 250, 243, 0.78);
+      --card-2: rgba(255, 250, 243, 0.92);
+      --border: rgba(58, 38, 26, 0.14);
+      --text: rgba(43, 29, 22, 0.94);
+      --muted: rgba(67, 51, 44, 0.78);
+      --muted2: rgba(67, 51, 44, 0.66);
+      --link: #a2522c;
+      --accent: #c07046;
+      --ok: #1f7a56;
+      --warn: #b45309;
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
         "Segoe UI Emoji";
@@ -74,9 +75,9 @@ def _build_docs_html(*, base_url: str) -> str:
       font-family: var(--sans);
       color: var(--text);
       background:
-        radial-gradient(1000px 600px at 15% 10%, rgba(167, 139, 250, 0.22), transparent 55%),
-        radial-gradient(900px 520px at 85% 0%, rgba(125, 211, 252, 0.18), transparent 60%),
-        radial-gradient(700px 700px at 60% 85%, rgba(52, 211, 153, 0.12), transparent 55%),
+        radial-gradient(1000px 620px at 12% 8%, rgba(192, 112, 70, 0.18), transparent 58%),
+        radial-gradient(900px 560px at 88% 0%, rgba(162, 82, 44, 0.14), transparent 60%),
+        radial-gradient(760px 760px at 60% 92%, rgba(31, 122, 86, 0.10), transparent 58%),
         var(--bg);
     }}
 
@@ -88,19 +89,25 @@ def _build_docs_html(*, base_url: str) -> str:
       margin: 0 auto;
       padding: 32px 20px 64px;
     }}
+    @media (max-width: 520px) {{
+      .wrap {{ padding: 22px 14px 46px; }}
+    }}
 
     .hero {{
       padding: 18px 18px 16px;
       border: 1px solid var(--border);
-      background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.04));
+      background: linear-gradient(180deg, rgba(255,250,243,0.92), rgba(255,250,243,0.70));
       border-radius: 14px;
-      backdrop-filter: blur(10px);
+      box-shadow: 0 10px 30px rgba(40, 24, 16, 0.10);
     }}
 
     .hero h1 {{
       margin: 0;
       font-size: 22px;
       letter-spacing: 0.2px;
+    }}
+    @media (max-width: 520px) {{
+      .hero h1 {{ font-size: 20px; }}
     }}
     .hero p {{
       margin: 10px 0 0;
@@ -123,6 +130,10 @@ def _build_docs_html(*, base_url: str) -> str:
       background: var(--card);
       border-radius: 14px;
       padding: 16px 16px 14px;
+      box-shadow: 0 10px 30px rgba(40, 24, 16, 0.06);
+    }}
+    @media (max-width: 520px) {{
+      .card {{ padding: 14px 14px 12px; }}
     }}
     .card h2 {{
       font-size: 16px;
@@ -142,8 +153,8 @@ def _build_docs_html(*, base_url: str) -> str:
       padding: 2px 6px;
       border-radius: 8px;
       border: 1px solid var(--border);
-      background: rgba(0, 0, 0, 0.18);
-      color: rgba(255,255,255,0.86);
+      background: rgba(43, 29, 22, 0.06);
+      color: rgba(43, 29, 22, 0.92);
     }}
 
     pre {{
@@ -151,12 +162,15 @@ def _build_docs_html(*, base_url: str) -> str:
       padding: 12px 12px;
       border-radius: 12px;
       border: 1px solid var(--border);
-      background: rgba(0, 0, 0, 0.22);
+      background: rgba(43, 29, 22, 0.06);
       overflow: auto;
       font-family: var(--mono);
       font-size: 12px;
       line-height: 1.55;
-      color: rgba(255,255,255,0.88);
+      color: rgba(43, 29, 22, 0.92);
+    }}
+    @media (max-width: 520px) {{
+      pre {{ font-size: 11px; }}
     }}
 
     .chips {{
@@ -171,36 +185,43 @@ def _build_docs_html(*, base_url: str) -> str:
       border: 1px solid var(--border);
       background: var(--card-2);
       font-size: 12px;
-      color: rgba(255,255,255,0.85);
+      color: rgba(43, 29, 22, 0.86);
       white-space: nowrap;
     }}
-    .chip strong {{ color: rgba(255,255,255,0.94); }}
+    .chip strong {{ color: rgba(43, 29, 22, 0.94); }}
 
+    .table-wrap {{
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      margin-top: 10px;
+      background: var(--card-2);
+    }}
     table {{
       width: 100%;
       border-collapse: collapse;
-      margin-top: 10px;
-      border-radius: 12px;
-      overflow: hidden;
-      border: 1px solid var(--border);
+      min-width: 680px;
     }}
     th, td {{
       padding: 10px 10px;
-      border-bottom: 1px solid rgba(255,255,255,0.10);
+      border-bottom: 1px solid rgba(58, 38, 26, 0.10);
       vertical-align: top;
       font-size: 13px;
       line-height: 1.45;
+      word-break: break-word;
     }}
     th {{
       text-align: left;
-      background: rgba(255,255,255,0.06);
-      color: rgba(255,255,255,0.92);
+      background: rgba(43, 29, 22, 0.04);
+      color: rgba(43, 29, 22, 0.92);
       font-weight: 600;
     }}
     td code {{
       font-family: var(--mono);
       font-size: 12px;
-      color: rgba(255,255,255,0.9);
+      color: rgba(43, 29, 22, 0.92);
+      word-break: break-all;
     }}
     .muted {{ color: var(--muted2); }}
     .note {{
@@ -208,10 +229,10 @@ def _build_docs_html(*, base_url: str) -> str:
       padding: 12px 12px;
       border-radius: 12px;
       border: 1px solid var(--border);
-      background: rgba(251, 191, 36, 0.10);
-      color: rgba(255,255,255,0.90);
+      background: rgba(180, 83, 9, 0.10);
+      color: rgba(43, 29, 22, 0.92);
     }}
-    .note strong {{ color: rgba(255,255,255,0.95); }}
+    .note strong {{ color: rgba(43, 29, 22, 0.95); }}
     .footer {{
       margin-top: 18px;
       color: var(--muted2);
@@ -273,14 +294,15 @@ def _build_docs_html(*, base_url: str) -> str:
 
     <section class="card" style="margin-top: 14px;">
       <h2>筛选语法速记</h2>
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 170px;">参数</th>
-            <th>说明</th>
-          </tr>
-        </thead>
-        <tbody>
+      <div class="table-wrap" role="region" aria-label="filters-table" tabindex="0">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 170px;">参数</th>
+              <th>说明</th>
+            </tr>
+          </thead>
+          <tbody>
           <tr>
             <td><code>strategy</code></td>
             <td>
@@ -293,6 +315,7 @@ def _build_docs_html(*, base_url: str) -> str:
             <td>
               <code>0</code>/<code>1</code>：强制使用第三方反向代理拉取图片上游（即使全局未开启）。<br/>
               <span class="muted">上游可为 i.pixiv.cat / i.pixiv.re / i.pixiv.nl。</span><br/>
+              <span class="muted">未指定 pximg_mirror_host 时：大陆访问优先 i.pixiv.re，非大陆默认 i.pixiv.cat。</span><br/>
               <span class="muted">仅影响服务端拉图的上游域名，客户端仍访问本站域名。</span>
             </td>
           </tr>
@@ -354,8 +377,9 @@ def _build_docs_html(*, base_url: str) -> str:
             <td><code>attempts</code></td>
             <td>上游失败时重试次数（1–10）。</td>
           </tr>
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
       <div class="footer">
         其它接口：<a href="{examples["tags_api"]}">/tags</a>（标签列表）、<a href="{examples["authors_api"]}">/authors</a>（作者列表）。<br/>
         OpenAPI：<a href="{examples["openapi"]}">/openapi.json</a>，Swagger：<a href="{examples["swagger"]}">/api/docs</a>。<br/>

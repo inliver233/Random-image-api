@@ -11,10 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 # legitimately hold the SQLite writer lock for several seconds. A higher default
 # busy timeout makes the system much more resilient under load (still overrideable
 # via SQLITE_BUSY_TIMEOUT_MS env).
-SQLITE_BUSY_TIMEOUT_MS = 30_000
-SQLITE_POOL_SIZE = 10
-SQLITE_MAX_OVERFLOW = 10
-SQLITE_POOL_TIMEOUT_S = 5
+#
+# NOTE: These defaults favor availability on reasonably powerful servers. For
+# smaller instances you may want to lower pool sizes and/or busy timeout.
+SQLITE_BUSY_TIMEOUT_MS = 60_000
+SQLITE_POOL_SIZE = 30
+SQLITE_MAX_OVERFLOW = 30
+SQLITE_POOL_TIMEOUT_S = 30
 
 
 def apply_sqlite_pragmas(dbapi_connection: Any) -> None:
