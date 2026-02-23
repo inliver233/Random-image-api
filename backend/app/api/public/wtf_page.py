@@ -64,9 +64,12 @@ def _build_wtf_html(*, base_url: str) -> str:
     a:hover {{ text-decoration: underline; }}
 
     .wrap {{
-      max-width: 980px;
+      max-width: 1180px;
       margin: 0 auto;
       padding: 22px 16px 44px;
+    }}
+    @media (min-width: 1400px) {{
+      .wrap {{ max-width: 1280px; }}
     }}
     @media (max-width: 520px) {{
       .wrap {{ padding: 18px 12px 40px; }}
@@ -151,6 +154,25 @@ def _build_wtf_html(*, base_url: str) -> str:
       content-visibility: auto;
       contain-intrinsic-size: 800px;
     }}
+    @keyframes shimmer {{
+      0% {{ background-position: 0% 0; }}
+      100% {{ background-position: 200% 0; }}
+    }}
+    .item.pending {{
+      background: linear-gradient(
+        90deg,
+        rgba(255, 250, 243, 0.86),
+        rgba(255, 250, 243, 0.56),
+        rgba(255, 250, 243, 0.86)
+      );
+      background-size: 200% 100%;
+      animation: shimmer 1100ms ease-in-out infinite;
+      border-color: rgba(58, 38, 26, 0.10);
+      box-shadow: none;
+    }}
+    .item.pending img {{
+      aspect-ratio: var(--ar, 16 / 9);
+    }}
     .item img {{
       width: 100%;
       height: auto;
@@ -165,9 +187,9 @@ def _build_wtf_html(*, base_url: str) -> str:
     }}
     .sentinel {{
       text-align: center;
-      padding: 18px 0 0;
+      padding: 12px 0 0;
       color: var(--muted2);
-      font-size: 12px;
+      font-size: 11px;
     }}
   </style>
 </head>
@@ -214,6 +236,7 @@ def _build_wtf_html(*, base_url: str) -> str:
     let inflight = 0;
     let rendered = 0;
     let target = 0;
+    let failStreak = 0;
 
     function isMobile() {{
       return window.matchMedia && window.matchMedia("(max-width: 520px)").matches;
@@ -226,14 +249,27 @@ def _build_wtf_html(*, base_url: str) -> str:
       const slow = effectiveType.includes("2g") || effectiveType.includes("3g");
 
       const base = mobile
-        ? {{ initial: 8, step: 6, maxInflight: 8 }}
-        : {{ initial: 12, step: 10, maxInflight: 14 }};
+        ? {{ initial: 12, step: 8, maxInflight: 12 }}
+        : {{ initial: 18, step: 14, maxInflight: 22 }};
 
       return {{
         initial: base.initial,
         step: base.step,
-        maxInflight: slow ? Math.max(4, Math.floor(base.maxInflight / 2)) : base.maxInflight,
+        maxInflight: slow ? Math.max(6, Math.floor(base.maxInflight * 0.6)) : base.maxInflight,
       }};
+    }}
+
+    function pickSkeletonRatio() {{
+      const o = String(baseParams.get("orientation") || "").trim().toLowerCase();
+      if (o === "square") return "1 / 1";
+      if (o === "portrait") return "2 / 3";
+      if (o === "landscape") return "16 / 9";
+
+      const adaptiveRaw = String(baseParams.get("adaptive") || "").trim().toLowerCase();
+      const adaptiveOn = baseParams.has("adaptive") && adaptiveRaw !== "0" && adaptiveRaw !== "false";
+      if (adaptiveOn) return isMobile() ? "2 / 3" : "16 / 9";
+
+      return isMobile() ? "3 / 4" : "16 / 9";
     }}
 
     function buildUrl() {{
@@ -264,10 +300,16 @@ def _build_wtf_html(*, base_url: str) -> str:
       inflight += 1;
       updateSentinel();
 
+      const item = document.createElement("div");
+      item.className = "item pending";
+      item.style.setProperty("--ar", pickSkeletonRatio());
+
       const img = new Image();
       img.decoding = "async";
       img.referrerPolicy = "no-referrer";
       img.alt = "";
+      item.appendChild(img);
+      feed.appendChild(item);
 
       let tries = 0;
       const load = () => {{
@@ -278,7 +320,9 @@ def _build_wtf_html(*, base_url: str) -> str:
       img.onload = () => {{
         inflight = Math.max(0, inflight - 1);
         rendered += 1;
-        appendItem(img);
+        failStreak = 0;
+        item.classList.remove("pending");
+        requestAnimationFrame(() => item.classList.add("loaded"));
         updateSentinel();
         ensure();
       }};
@@ -288,7 +332,15 @@ def _build_wtf_html(*, base_url: str) -> str:
           return;
         }}
         inflight = Math.max(0, inflight - 1);
+        failStreak += 1;
+        try {{ item.remove(); }} catch (e) {{}}
         updateSentinel();
+        if (failStreak >= 8) {{
+          paused = true;
+          toggle.textContent = "继续加载";
+          sentinel.textContent = "连续失败较多：可能网络不稳定或当前过滤无匹配，请放宽条件后重试。";
+          return;
+        }}
         ensure();
       }};
 
@@ -305,7 +357,12 @@ def _build_wtf_html(*, base_url: str) -> str:
 
     function bump() {{
       const c = cfg();
-      target = Math.max(target, rendered + inflight + c.step);
+      const dist = Math.max(0, document.documentElement.scrollHeight - (window.scrollY + window.innerHeight));
+      let m = 1;
+      if (dist < window.innerHeight * 0.8) m = 4;
+      else if (dist < window.innerHeight * 1.6) m = 3;
+      else if (dist < window.innerHeight * 2.6) m = 2;
+      target = Math.max(target, rendered + inflight + c.step * m);
       ensure();
     }}
 
@@ -322,8 +379,20 @@ def _build_wtf_html(*, base_url: str) -> str:
       for (const e of entries) {{
         if (e.isIntersecting) bump();
       }}
-    }}, {{ root: null, rootMargin: "2200px 0px", threshold: 0 }});
+    }}, {{ root: null, rootMargin: "5200px 0px", threshold: 0 }});
     io.observe(sentinel);
+
+    let scrollTick = 0;
+    window.addEventListener("scroll", () => {{
+      if (paused) return;
+      if (scrollTick) return;
+      scrollTick = 1;
+      requestAnimationFrame(() => {{
+        scrollTick = 0;
+        const dist = Math.max(0, document.documentElement.scrollHeight - (window.scrollY + window.innerHeight));
+        if (dist < window.innerHeight * 3.2) bump();
+      }});
+    }}, {{ passive: true }});
 
     // Initial fill.
     target = cfg().initial;
