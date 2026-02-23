@@ -226,8 +226,8 @@ def _build_wtf_html(*, base_url: str) -> str:
       const slow = effectiveType.includes("2g") || effectiveType.includes("3g");
 
       const base = mobile
-        ? { initial: 8, step: 6, maxInflight: 8 }
-        : { initial: 12, step: 10, maxInflight: 14 };
+        ? {{ initial: 8, step: 6, maxInflight: 8 }}
+        : {{ initial: 12, step: 10, maxInflight: 14 }};
 
       return {{
         initial: base.initial,
