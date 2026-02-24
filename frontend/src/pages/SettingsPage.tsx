@@ -37,6 +37,7 @@ type SettingsFormValues = {
   proxy_default_pool_id: number;
   image_proxy_use_pixiv_cat: boolean;
   image_proxy_pximg_mirror_host: "i.pixiv.cat" | "i.pixiv.re" | "i.pixiv.nl";
+  image_proxy_extra_pximg_mirror_hosts: string[];
   random_default_attempts: number;
   random_default_r18_strict: boolean;
   random_fail_cooldown_ms: number;
@@ -147,6 +148,7 @@ export function SettingsPage() {
       proxy_default_pool_id: asInt(proxy.default_pool_id, 0),
       image_proxy_use_pixiv_cat: asBool(imageProxy.use_pixiv_cat, false),
       image_proxy_pximg_mirror_host: asPximgMirrorHost(imageProxy.pximg_mirror_host, "i.pixiv.cat"),
+      image_proxy_extra_pximg_mirror_hosts: asStrList(imageProxy.extra_pximg_mirror_hosts),
       random_default_attempts: asInt(random.default_attempts, 3),
       random_default_r18_strict: asBool(random.default_r18_strict, true),
       random_fail_cooldown_ms: asInt(random.fail_cooldown_ms, 600_000),
@@ -174,6 +176,7 @@ export function SettingsPage() {
             image_proxy: {
               use_pixiv_cat: values.image_proxy_use_pixiv_cat,
               pximg_mirror_host: values.image_proxy_pximg_mirror_host,
+              extra_pximg_mirror_hosts: values.image_proxy_extra_pximg_mirror_hosts,
             },
             random: {
               default_attempts: values.random_default_attempts,
@@ -311,6 +314,13 @@ export function SettingsPage() {
                   { value: "i.pixiv.nl", label: "i.pixiv.nl（备用）" },
                 ]}
               />
+            </Form.Item>
+            <Form.Item
+              label="自定义镜像白名单"
+              name="image_proxy_extra_pximg_mirror_hosts"
+              extra="用于公开接口的 proxy= 参数：仅允许这里配置的自定义域名被用作图片上游镜像（防止 SSRF）。示例：i.mirror.example.com"
+            >
+              <Select mode="tags" style={{ maxWidth: 520 }} tokenSeparators={[",", "\n", " "]} placeholder="例如：i.mirror.example.com" />
             </Form.Item>
 
             <Typography.Title level={5} style={{ marginTop: 12 }}>

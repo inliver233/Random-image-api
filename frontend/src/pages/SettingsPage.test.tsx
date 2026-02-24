@@ -29,6 +29,7 @@ describe("SettingsPage", () => {
           expect(body.settings.proxy.default_pool_id).toBe("");
           expect(body.settings.image_proxy.use_pixiv_cat).toBe(false);
           expect(body.settings.image_proxy.pximg_mirror_host).toBe("i.pixiv.cat");
+          expect(body.settings.image_proxy.extra_pximg_mirror_hosts).toEqual([]);
           expect(body.settings.random.default_attempts).toBe(3);
           expect(body.settings.random.default_r18_strict).toBe(true);
           expect(body.settings.random.fail_cooldown_ms).toBe(600000);
@@ -37,7 +38,7 @@ describe("SettingsPage", () => {
           expect(body.settings.security.hide_origin_url_in_public_json).toBe(true);
           expect(body.settings.rate_limit.pixiv_hydrate_min_interval_ms).toBe(800);
           expect(body.settings.rate_limit.pixiv_hydrate_jitter_ms).toBe(200);
-          return new Response(JSON.stringify({ ok: true, updated: 9, request_id: "req_save" }), {
+          return new Response(JSON.stringify({ ok: true, updated: 10, request_id: "req_save" }), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           });
@@ -54,7 +55,7 @@ describe("SettingsPage", () => {
                   allowlist_domains: ["pixiv.net"],
                   default_pool_id: "",
                 },
-                image_proxy: { use_pixiv_cat: false, pximg_mirror_host: "i.pixiv.cat" },
+                image_proxy: { use_pixiv_cat: false, pximg_mirror_host: "i.pixiv.cat", extra_pximg_mirror_hosts: [] },
                 random: { default_attempts: 3, default_r18_strict: true, fail_cooldown_ms: 600000, strategy: "quality", quality_samples: 5 },
                 security: { hide_origin_url_in_public_json: true },
                 rate_limit: {},
@@ -98,7 +99,7 @@ describe("SettingsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /保存设置/ }));
 
     expect(await screen.findByText("保存成功")).toBeInTheDocument();
-    expect(await screen.findByText(/更新条目数:\s*9/)).toBeInTheDocument();
+    expect(await screen.findByText(/更新条目数:\s*10/)).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:\s*req_save/)).toBeInTheDocument();
   });
 });

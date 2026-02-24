@@ -12,7 +12,11 @@ from app.core.runtime_settings import (
     runtime_config_from_values,
     set_runtime_setting,
 )
-from app.core.pximg_reverse_proxy import DEFAULT_PXIMG_MIRROR_HOST, normalize_pximg_mirror_host
+from app.core.pximg_reverse_proxy import (
+    DEFAULT_PXIMG_MIRROR_HOST,
+    normalize_pximg_custom_mirror_host,
+    normalize_pximg_mirror_host,
+)
 
 router = APIRouter()
 
@@ -255,6 +259,7 @@ async def get_settings(
             "image_proxy": {
                 "use_pixiv_cat": bool(runtime.image_proxy_use_pixiv_cat),
                 "pximg_mirror_host": str(runtime.image_proxy_pximg_mirror_host or DEFAULT_PXIMG_MIRROR_HOST),
+                "extra_pximg_mirror_hosts": list(getattr(runtime, "image_proxy_extra_pximg_mirror_hosts", []) or []),
             },
             "random": random_defaults,
             "security": {"hide_origin_url_in_public_json": bool(runtime.hide_origin_url_in_public_json)},
@@ -370,6 +375,28 @@ async def update_settings(
                 if host is None:
                     raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image_proxy.pximg_mirror_host", status_code=400)
                 updates.append(("image_proxy.pximg_mirror_host", str(host)))
+
+        if "extra_pximg_mirror_hosts" in image_proxy:
+            raw = image_proxy.get("extra_pximg_mirror_hosts")
+            if raw is None:
+                updates.append(("image_proxy.extra_pximg_mirror_hosts", []))
+            else:
+                if not isinstance(raw, list):
+                    raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image_proxy.extra_pximg_mirror_hosts", status_code=400)
+                candidates = _as_str_list(raw)
+                if len(candidates) > 200:
+                    raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image_proxy.extra_pximg_mirror_hosts", status_code=400)
+                normalized: list[str] = []
+                seen: set[str] = set()
+                for item in candidates:
+                    host = normalize_pximg_custom_mirror_host(item)
+                    if host is None:
+                        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image_proxy.extra_pximg_mirror_hosts", status_code=400)
+                    if host in seen:
+                        continue
+                    seen.add(host)
+                    normalized.append(host)
+                updates.append(("image_proxy.extra_pximg_mirror_hosts", normalized))
 
     random = body.get("random")
     if random is not None:

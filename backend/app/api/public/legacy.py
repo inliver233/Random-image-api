@@ -7,6 +7,7 @@ from app.core.http_stream import stream_url
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
 from app.core.pximg_reverse_proxy import (
     normalize_pximg_mirror_host,
+    normalize_pximg_proxy,
     pick_pximg_mirror_host_for_request,
     rewrite_pximg_to_mirror,
 )
@@ -26,6 +27,7 @@ async def legacy_multi(
     ext: str,
     pixiv_cat: int = 0,
     pximg_mirror_host: str | None = None,
+    proxy: str | None = None,
 ):
     if int(illust_id) <= 0:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported illust_id", status_code=400)
@@ -38,12 +40,12 @@ async def legacy_multi(
     if pixiv_cat not in {0, 1}:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported pixiv_cat", status_code=400)
 
-    mirror_host_override: str | None = None
+    pximg_mirror_host_override: str | None = None
     if pximg_mirror_host is not None:
         raw = str(pximg_mirror_host or "").strip()
         if raw:
-            mirror_host_override = normalize_pximg_mirror_host(raw)
-            if mirror_host_override is None:
+            pximg_mirror_host_override = normalize_pximg_mirror_host(raw)
+            if pximg_mirror_host_override is None:
                 raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported pximg_mirror_host", status_code=400)
 
     engine = request.app.state.engine
@@ -55,7 +57,17 @@ async def legacy_multi(
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
 
     runtime = await load_runtime_config(engine)
-    use_pixiv_cat = bool(runtime.image_proxy_use_pixiv_cat) or int(pixiv_cat) == 1
+
+    proxy_override: str | None = None
+    if proxy is not None:
+        raw = str(proxy or "").strip()
+        if raw:
+            proxy_override = normalize_pximg_proxy(raw, extra_hosts=runtime.image_proxy_extra_pximg_mirror_hosts)
+            if proxy_override is None:
+                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported proxy", status_code=400)
+
+    mirror_host_override = proxy_override or pximg_mirror_host_override
+    use_pixiv_cat = bool(runtime.image_proxy_use_pixiv_cat) or int(pixiv_cat) == 1 or proxy_override is not None
     runtime_mirror_host = str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
     mirror_host = mirror_host_override or (
         pick_pximg_mirror_host_for_request(headers=request.headers, fallback_host=runtime_mirror_host)
@@ -91,6 +103,7 @@ async def legacy_single(
     ext: str,
     pixiv_cat: int = 0,
     pximg_mirror_host: str | None = None,
+    proxy: str | None = None,
 ):
     if int(illust_id) <= 0:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported illust_id", status_code=400)
@@ -101,12 +114,12 @@ async def legacy_single(
     if pixiv_cat not in {0, 1}:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported pixiv_cat", status_code=400)
 
-    mirror_host_override: str | None = None
+    pximg_mirror_host_override: str | None = None
     if pximg_mirror_host is not None:
         raw = str(pximg_mirror_host or "").strip()
         if raw:
-            mirror_host_override = normalize_pximg_mirror_host(raw)
-            if mirror_host_override is None:
+            pximg_mirror_host_override = normalize_pximg_mirror_host(raw)
+            if pximg_mirror_host_override is None:
                 raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported pximg_mirror_host", status_code=400)
 
     engine = request.app.state.engine
@@ -118,7 +131,17 @@ async def legacy_single(
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
 
     runtime = await load_runtime_config(engine)
-    use_pixiv_cat = bool(runtime.image_proxy_use_pixiv_cat) or int(pixiv_cat) == 1
+
+    proxy_override: str | None = None
+    if proxy is not None:
+        raw = str(proxy or "").strip()
+        if raw:
+            proxy_override = normalize_pximg_proxy(raw, extra_hosts=runtime.image_proxy_extra_pximg_mirror_hosts)
+            if proxy_override is None:
+                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported proxy", status_code=400)
+
+    mirror_host_override = proxy_override or pximg_mirror_host_override
+    use_pixiv_cat = bool(runtime.image_proxy_use_pixiv_cat) or int(pixiv_cat) == 1 or proxy_override is not None
     runtime_mirror_host = str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
     mirror_host = mirror_host_override or (
         pick_pximg_mirror_host_for_request(headers=request.headers, fallback_host=runtime_mirror_host)

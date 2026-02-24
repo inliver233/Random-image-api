@@ -8,7 +8,11 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.core.pximg_reverse_proxy import DEFAULT_PXIMG_MIRROR_HOST, normalize_pximg_mirror_host
+from app.core.pximg_reverse_proxy import (
+    DEFAULT_PXIMG_MIRROR_HOST,
+    normalize_pximg_custom_mirror_host,
+    normalize_pximg_mirror_host,
+)
 from app.core.logging import get_logger
 from app.core.time import iso_utc_ms
 from app.db.models.runtime_settings import RuntimeSetting
@@ -57,6 +61,7 @@ class RuntimeConfig:
     proxy_default_pool_id: int | None
     image_proxy_use_pixiv_cat: bool
     image_proxy_pximg_mirror_host: str
+    image_proxy_extra_pximg_mirror_hosts: list[str]
     random_defaults: dict[str, Any]
     hide_origin_url_in_public_json: bool
     rate_limit: dict[str, Any]
@@ -72,6 +77,7 @@ class RuntimeConfig:
             proxy_default_pool_id=None,
             image_proxy_use_pixiv_cat=False,
             image_proxy_pximg_mirror_host=str(DEFAULT_PXIMG_MIRROR_HOST),
+            image_proxy_extra_pximg_mirror_hosts=[],
             random_defaults={},
             hide_origin_url_in_public_json=True,
             rate_limit={},
@@ -140,6 +146,16 @@ def runtime_config_from_values(values: dict[str, Any]) -> RuntimeConfig:
     mirror_host_raw = values.get("image_proxy.pximg_mirror_host")
     mirror_host = normalize_pximg_mirror_host(mirror_host_raw)
 
+    extra_mirrors_raw = _as_str_list(values.get("image_proxy.extra_pximg_mirror_hosts"))
+    extra_mirrors: list[str] = []
+    seen_extra: set[str] = set()
+    for item in extra_mirrors_raw:
+        host = normalize_pximg_custom_mirror_host(item)
+        if not host or host in seen_extra:
+            continue
+        seen_extra.add(host)
+        extra_mirrors.append(host)
+
     random_defaults_raw = values.get("random.defaults")
     random_defaults = defaults.random_defaults
     if isinstance(random_defaults_raw, dict):
@@ -164,6 +180,7 @@ def runtime_config_from_values(values: dict[str, Any]) -> RuntimeConfig:
         if image_proxy_use_pixiv_cat is not None
         else defaults.image_proxy_use_pixiv_cat,
         image_proxy_pximg_mirror_host=str(mirror_host or defaults.image_proxy_pximg_mirror_host),
+        image_proxy_extra_pximg_mirror_hosts=extra_mirrors,
         random_defaults=random_defaults,
         hide_origin_url_in_public_json=hide_origin_url
         if hide_origin_url is not None
