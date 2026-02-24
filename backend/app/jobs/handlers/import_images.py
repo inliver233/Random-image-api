@@ -4,6 +4,7 @@ import json
 import random
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.core.config import load_settings
 from app.core.data_files import get_sqlite_db_dir, resolve_file_ref
 from app.core.pixiv_urls import parse_pixiv_original_url
+from app.db.models.image_tags import ImageTag
 from app.db.models.images import Image
 from app.db.models.imports import Import
 from app.db.models.jobs import JobRow
+from app.db.models.tags import Tag
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 from app.jobs.errors import JobPermanentError
 
@@ -46,6 +49,71 @@ def _as_bool(value: Any, *, default: bool = False) -> bool:
         if v in {"0", "false", "no", "n", "off"}:
             return False
     return default
+
+
+def _as_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _as_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s if s else None
+
+
+def _parse_pbd_ai_type(value: Any) -> int | None:
+    raw = _as_int(value)
+    if raw is None:
+        return None
+    # PixivBatchDownloader: 0 unknown, 1 non-ai, 2 ai
+    if raw == 1:
+        return 0
+    if raw == 2:
+        return 1
+    return None
+
+
+def _parse_pbd_illust_type(value: Any) -> int | None:
+    raw = _as_int(value)
+    if raw in {0, 1, 2}:
+        return int(raw)
+    return None
+
+
+def _parse_pbd_created_at(value: Any) -> str | None:
+    s = _as_str(value)
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        if len(s) <= 64:
+            return s
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    dt_utc = dt.astimezone(timezone.utc).replace(microsecond=0)
+    return dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _derive_orientation(width: int | None, height: int | None) -> tuple[float | None, int | None]:
+    if width is None or height is None or width <= 0 or height <= 0:
+        return None, None
+    if width > height:
+        orientation = 2
+    elif height > width:
+        orientation = 1
+    else:
+        orientation = 3
+    return float(width) / float(height), orientation
 
 
 def _resolve_payload_file(payload: dict[str, Any]) -> Path | None:
@@ -115,8 +183,17 @@ def build_import_images_handler(engine: AsyncEngine):
         if import_id <= 0:
             raise JobPermanentError("payload.import_id is required")
 
+        input_format_raw = str(payload.get("input_format") or "text").strip().lower()
+        input_format = "pixiv_batch_downloader_json" if input_format_raw in {"pixiv_batch_downloader_json", "pbd_json", "pbd"} else "text"
+
         hydrate_on_import = _as_bool(payload.get("hydrate_on_import"), default=False)
+        if input_format == "pixiv_batch_downloader_json":
+            # PixivBatchDownloader export already contains most metadata;
+            # keep this import token-free by default.
+            hydrate_on_import = False
         file_path = _resolve_payload_file(payload)
+        if input_format == "pixiv_batch_downloader_json" and file_path is None:
+            raise JobPermanentError("payload.file_ref is required for pixiv_batch_downloader_json")
 
         async def _ensure_import_exists() -> None:
             async with Session() as session:
@@ -137,6 +214,7 @@ def build_import_images_handler(engine: AsyncEngine):
 
         chunk_rows: list[dict[str, Any]] = []
         chunk_keys: list[tuple[int, int]] = []
+        chunk_tags: dict[tuple[int, int], list[str]] = {}
 
         async def _persist_chunk(
             rows: list[dict[str, Any]],
@@ -146,6 +224,7 @@ def build_import_images_handler(engine: AsyncEngine):
             accepted_v: int,
             success_v: int,
             failed_v: int,
+            tags_by_key: dict[tuple[int, int], list[str]] | None = None,
         ) -> None:
             if not rows:
                 return
@@ -165,6 +244,47 @@ def build_import_images_handler(engine: AsyncEngine):
                                 else_=Image.proxy_path,
                             ),
                             "created_import_id": stmt.excluded.created_import_id,
+                            "width": sa.case((stmt.excluded.width.is_not(None), stmt.excluded.width), else_=Image.width),
+                            "height": sa.case((stmt.excluded.height.is_not(None), stmt.excluded.height), else_=Image.height),
+                            "aspect_ratio": sa.case(
+                                (stmt.excluded.aspect_ratio.is_not(None), stmt.excluded.aspect_ratio),
+                                else_=Image.aspect_ratio,
+                            ),
+                            "orientation": sa.case(
+                                (stmt.excluded.orientation.is_not(None), stmt.excluded.orientation),
+                                else_=Image.orientation,
+                            ),
+                            "x_restrict": sa.case(
+                                (stmt.excluded.x_restrict.is_not(None), stmt.excluded.x_restrict),
+                                else_=Image.x_restrict,
+                            ),
+                            "ai_type": sa.case((stmt.excluded.ai_type.is_not(None), stmt.excluded.ai_type), else_=Image.ai_type),
+                            "illust_type": sa.case(
+                                (stmt.excluded.illust_type.is_not(None), stmt.excluded.illust_type),
+                                else_=Image.illust_type,
+                            ),
+                            "user_id": sa.case((stmt.excluded.user_id.is_not(None), stmt.excluded.user_id), else_=Image.user_id),
+                            "user_name": sa.case(
+                                (stmt.excluded.user_name.is_not(None), stmt.excluded.user_name),
+                                else_=Image.user_name,
+                            ),
+                            "title": sa.case((stmt.excluded.title.is_not(None), stmt.excluded.title), else_=Image.title),
+                            "created_at_pixiv": sa.case(
+                                (stmt.excluded.created_at_pixiv.is_not(None), stmt.excluded.created_at_pixiv),
+                                else_=Image.created_at_pixiv,
+                            ),
+                            "bookmark_count": sa.case(
+                                (stmt.excluded.bookmark_count.is_not(None), stmt.excluded.bookmark_count),
+                                else_=Image.bookmark_count,
+                            ),
+                            "view_count": sa.case(
+                                (stmt.excluded.view_count.is_not(None), stmt.excluded.view_count),
+                                else_=Image.view_count,
+                            ),
+                            "comment_count": sa.case(
+                                (stmt.excluded.comment_count.is_not(None), stmt.excluded.comment_count),
+                                else_=Image.comment_count,
+                            ),
                             "updated_at": now_expr,
                         },
                     )
@@ -180,6 +300,63 @@ def build_import_images_handler(engine: AsyncEngine):
                             .values(proxy_path=sa.text("'/i/' || id || '.' || ext"))
                         )
 
+                    if tags_by_key and keys:
+                        names: list[str] = []
+                        seen_names: set[str] = set()
+                        for lst in tags_by_key.values():
+                            for raw_name in lst[:64]:
+                                name = str(raw_name or "").strip()
+                                if not name or name in seen_names:
+                                    continue
+                                seen_names.add(name)
+                                names.append(name)
+
+                        if names:
+                            tag_stmt = sqlite_insert(Tag).values([{"name": n, "translated_name": None} for n in names])
+                            tag_stmt = tag_stmt.on_conflict_do_nothing(index_elements=["name"])
+                            await session.execute(tag_stmt)
+
+                            tag_rows = (
+                                (await session.execute(sa.select(Tag.id, Tag.name).where(Tag.name.in_(names))))
+                                .all()
+                            )
+                            tag_id_by_name = {str(name): int(tag_id) for (tag_id, name) in tag_rows}
+
+                            img_rows = (
+                                (
+                                    await session.execute(
+                                        sa.select(Image.id, Image.illust_id, Image.page_index).where(
+                                            sa.tuple_(Image.illust_id, Image.page_index).in_(keys)
+                                        )
+                                    )
+                                )
+                                .all()
+                            )
+                            image_id_by_key = {(int(illust_id), int(page_index)): int(img_id) for (img_id, illust_id, page_index) in img_rows}
+
+                            image_tag_rows: list[dict[str, Any]] = []
+                            for key, lst in tags_by_key.items():
+                                image_id = image_id_by_key.get(key)
+                                if image_id is None:
+                                    continue
+                                seen_for_image: set[str] = set()
+                                for raw_name in lst[:64]:
+                                    name = str(raw_name or "").strip()
+                                    if not name or name in seen_for_image:
+                                        continue
+                                    seen_for_image.add(name)
+                                    tag_id = tag_id_by_name.get(name)
+                                    if tag_id is None:
+                                        continue
+                                    image_tag_rows.append({"image_id": int(image_id), "tag_id": int(tag_id)})
+
+                            if image_tag_rows:
+                                for offset in range(0, len(image_tag_rows), 5000):
+                                    sub = image_tag_rows[offset : offset + 5000]
+                                    it_stmt = sqlite_insert(ImageTag).values(sub)
+                                    it_stmt = it_stmt.on_conflict_do_nothing(index_elements=["image_id", "tag_id"])
+                                    await session.execute(it_stmt)
+
                     await session.execute(
                         sa.update(Import)
                         .where(Import.id == int(import_id))
@@ -194,64 +371,184 @@ def build_import_images_handler(engine: AsyncEngine):
 
             await with_sqlite_busy_retry(_op)
 
-        for line_no, raw in _iter_lines(payload, file_path=file_path):
-            url = raw.strip()
-            if not url:
-                continue
-            total += 1
+        if input_format == "pixiv_batch_downloader_json":
             try:
-                parsed = parse_pixiv_original_url(url)
+                with file_path.open("r", encoding="utf-8-sig", errors="replace") as f:
+                    data = json.load(f)
             except Exception as exc:
-                error_total += 1
-                if len(errors) < _MAX_ERRORS:
-                    errors.append(
-                        ImportLineError(
-                            line=int(line_no),
-                            url=url,
-                            code="unsupported_url",
-                            message=str(exc) or "unsupported_url",
+                raise JobPermanentError("payload.file_ref is not valid JSON") from exc
+
+            items: list[Any] | None = None
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict):
+                if isinstance(data.get("result"), list):
+                    items = data.get("result")
+                elif isinstance(data.get("data"), list):
+                    items = data.get("data")
+            if items is None:
+                raise JobPermanentError("payload.file_ref has unsupported JSON shape")
+
+            for idx, raw_item in enumerate(items, start=1):
+                if not isinstance(raw_item, dict):
+                    continue
+                url = _as_str(raw_item.get("original"))
+                if not url:
+                    continue
+                total += 1
+                try:
+                    parsed = parse_pixiv_original_url(url)
+                except Exception as exc:
+                    error_total += 1
+                    if len(errors) < _MAX_ERRORS:
+                        errors.append(
+                            ImportLineError(
+                                line=int(idx),
+                                url=url,
+                                code="unsupported_url",
+                                message=str(exc) or "unsupported_url",
+                            )
                         )
-                    )
-                continue
+                    continue
 
-            key = (int(parsed.illust_id), int(parsed.page_index))
-            if key in seen:
-                deduped += 1
-                continue
-            seen.add(key)
+                key = (int(parsed.illust_id), int(parsed.page_index))
+                if key in seen:
+                    deduped += 1
+                    continue
+                seen.add(key)
 
-            accepted += 1
-            if hydrate_on_import:
-                illust_ids.add(int(parsed.illust_id))
+                accepted += 1
 
-            chunk_keys.append(key)
-            chunk_rows.append(
-                {
-                    "illust_id": int(parsed.illust_id),
-                    "page_index": int(parsed.page_index),
-                    "ext": str(parsed.ext),
-                    "original_url": url,
-                    "proxy_path": "",
-                    "random_key": float(random.random()),
-                    "created_import_id": int(import_id),
-                }
-            )
+                width = _as_int(raw_item.get("fullWidth"))
+                height = _as_int(raw_item.get("fullHeight"))
+                if width is not None and width <= 0:
+                    width = None
+                if height is not None and height <= 0:
+                    height = None
 
-            if len(chunk_rows) < _CHUNK_SIZE:
-                continue
+                aspect_ratio, orientation = _derive_orientation(width, height)
+                x_restrict = _as_int(raw_item.get("xRestrict"))
+                if x_restrict not in {0, 1, 2}:
+                    x_restrict = None
 
-            success_after = int(success + len(chunk_rows))
-            await _persist_chunk(
-                chunk_rows,
-                chunk_keys,
-                total_v=int(total),
-                accepted_v=int(accepted),
-                success_v=int(success_after),
-                failed_v=int(error_total),
-            )
-            success = success_after
-            chunk_rows.clear()
-            chunk_keys.clear()
+                chunk_keys.append(key)
+                chunk_rows.append(
+                    {
+                        "illust_id": int(parsed.illust_id),
+                        "page_index": int(parsed.page_index),
+                        "ext": str(parsed.ext),
+                        "original_url": url,
+                        "proxy_path": "",
+                        "random_key": float(random.random()),
+                        "created_import_id": int(import_id),
+                        "width": width,
+                        "height": height,
+                        "aspect_ratio": aspect_ratio,
+                        "orientation": orientation,
+                        "x_restrict": x_restrict,
+                        "ai_type": _parse_pbd_ai_type(raw_item.get("aiType")),
+                        "illust_type": _parse_pbd_illust_type(raw_item.get("type")),
+                        "user_id": _as_int(raw_item.get("userId")),
+                        "user_name": _as_str(raw_item.get("user")),
+                        "title": _as_str(raw_item.get("title")),
+                        "created_at_pixiv": _parse_pbd_created_at(raw_item.get("date")),
+                        "bookmark_count": _as_int(raw_item.get("bmk")),
+                        "view_count": _as_int(raw_item.get("viewCount")),
+                        "comment_count": _as_int(raw_item.get("commentCount")),
+                    }
+                )
+
+                raw_tags = raw_item.get("tags")
+                if isinstance(raw_tags, list) and raw_tags:
+                    tags: list[str] = []
+                    seen_tags: set[str] = set()
+                    for v in raw_tags[:128]:
+                        name = str(v or "").strip()
+                        if not name or name in seen_tags:
+                            continue
+                        seen_tags.add(name)
+                        tags.append(name)
+                        if len(tags) >= 64:
+                            break
+                    if tags:
+                        chunk_tags[key] = tags
+
+                if len(chunk_rows) < _CHUNK_SIZE:
+                    continue
+
+                success_after = int(success + len(chunk_rows))
+                await _persist_chunk(
+                    chunk_rows,
+                    chunk_keys,
+                    total_v=int(total),
+                    accepted_v=int(accepted),
+                    success_v=int(success_after),
+                    failed_v=int(error_total),
+                    tags_by_key=dict(chunk_tags),
+                )
+                success = success_after
+                chunk_rows.clear()
+                chunk_keys.clear()
+                chunk_tags.clear()
+        else:
+            for line_no, raw in _iter_lines(payload, file_path=file_path):
+                url = raw.strip()
+                if not url:
+                    continue
+                total += 1
+                try:
+                    parsed = parse_pixiv_original_url(url)
+                except Exception as exc:
+                    error_total += 1
+                    if len(errors) < _MAX_ERRORS:
+                        errors.append(
+                            ImportLineError(
+                                line=int(line_no),
+                                url=url,
+                                code="unsupported_url",
+                                message=str(exc) or "unsupported_url",
+                            )
+                        )
+                    continue
+
+                key = (int(parsed.illust_id), int(parsed.page_index))
+                if key in seen:
+                    deduped += 1
+                    continue
+                seen.add(key)
+
+                accepted += 1
+                if hydrate_on_import:
+                    illust_ids.add(int(parsed.illust_id))
+
+                chunk_keys.append(key)
+                chunk_rows.append(
+                    {
+                        "illust_id": int(parsed.illust_id),
+                        "page_index": int(parsed.page_index),
+                        "ext": str(parsed.ext),
+                        "original_url": url,
+                        "proxy_path": "",
+                        "random_key": float(random.random()),
+                        "created_import_id": int(import_id),
+                    }
+                )
+
+                if len(chunk_rows) < _CHUNK_SIZE:
+                    continue
+
+                success_after = int(success + len(chunk_rows))
+                await _persist_chunk(
+                    chunk_rows,
+                    chunk_keys,
+                    total_v=int(total),
+                    accepted_v=int(accepted),
+                    success_v=int(success_after),
+                    failed_v=int(error_total),
+                )
+                success = success_after
+                chunk_rows.clear()
+                chunk_keys.clear()
 
         if chunk_rows:
             success_after = int(success + len(chunk_rows))
@@ -262,10 +559,12 @@ def build_import_images_handler(engine: AsyncEngine):
                 accepted_v=int(accepted),
                 success_v=int(success_after),
                 failed_v=int(error_total),
+                tags_by_key=dict(chunk_tags) if chunk_tags else None,
             )
             success = success_after
             chunk_rows.clear()
             chunk_keys.clear()
+            chunk_tags.clear()
 
         async def _persist_detail() -> None:
             async with Session() as session:

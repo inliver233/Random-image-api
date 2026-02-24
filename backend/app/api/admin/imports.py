@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict, dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import uuid4
 
 import sqlalchemy as sa
@@ -41,6 +41,13 @@ class ImportRollbackRequest(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
+class ImportUpload:
+    body: ImportCreateRequest
+    payload_bytes: bytes
+    input_format: Literal["text", "pixiv_batch_downloader_json"]
+
+
+@dataclass(frozen=True, slots=True)
 class ImportErrorItem:
     line: int
     url: str
@@ -49,7 +56,8 @@ class ImportErrorItem:
 
 
 def _max_import_text_bytes() -> int:
-    default = 50 * 1024 * 1024
+    default = 200 * 1024 * 1024
+    cap = 600 * 1024 * 1024
     raw = (os.environ.get("IMPORT_MAX_BYTES") or "").strip()
     if not raw:
         return default
@@ -57,7 +65,7 @@ def _max_import_text_bytes() -> int:
         value = int(raw)
     except Exception:
         return default
-    return max(1024, min(int(value), 50 * 1024 * 1024))
+    return max(1024, min(int(value), int(cap)))
 
 
 def _import_inline_max_accepted() -> int:
@@ -166,7 +174,86 @@ def _validate_import_create(data: dict[str, Any]) -> ImportCreateRequest:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="导入请求体无效", status_code=400) from exc
 
 
-async def _load_import_request(request: Request) -> ImportCreateRequest:
+def _parse_pixiv_batch_downloader_json(
+    raw: bytes, *, preview_limit: int = 20
+) -> tuple[int, int, int, int, list[ImportErrorItem], list[dict[str, Any]]]:
+    try:
+        text = raw.decode("utf-8-sig", errors="replace")
+    except Exception:
+        text = raw.decode("utf-8", errors="replace")
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="JSON 文件解析失败", status_code=400) from exc
+
+    items: list[Any] | None = None
+    if isinstance(parsed, list):
+        items = parsed
+    elif isinstance(parsed, dict):
+        if isinstance(parsed.get("result"), list):
+            items = cast(list[Any], parsed.get("result"))
+        elif isinstance(parsed.get("data"), list):
+            items = cast(list[Any], parsed.get("data"))
+
+    if items is None:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="不支持的 JSON 格式（需要数组）", status_code=400)
+
+    total = 0
+    accepted = 0
+    deduped = 0
+    error_total = 0
+    errors: list[ImportErrorItem] = []
+    seen: set[tuple[int, int]] = set()
+    preview: list[dict[str, Any]] = []
+
+    for idx, raw_item in enumerate(items, start=1):
+        if not isinstance(raw_item, dict):
+            continue
+        url = raw_item.get("original")
+        if not isinstance(url, str):
+            continue
+        url = url.strip()
+        if not url:
+            continue
+        total += 1
+
+        try:
+            parsed_url = parse_pixiv_original_url(url)
+        except Exception as exc:
+            error_total += 1
+            if len(errors) < 200:
+                errors.append(
+                    ImportErrorItem(
+                        line=idx,
+                        url=url,
+                        code=ErrorCode.UNSUPPORTED_URL.value,
+                        message=str(exc) or ErrorCode.UNSUPPORTED_URL.value,
+                    )
+                )
+            continue
+
+        key = (parsed_url.illust_id, parsed_url.page_index)
+        if key in seen:
+            deduped += 1
+            continue
+        seen.add(key)
+        accepted += 1
+
+        if len(preview) < int(preview_limit):
+            preview.append(
+                {
+                    "illust_id": parsed_url.illust_id,
+                    "page_index": parsed_url.page_index,
+                    "ext": parsed_url.ext,
+                    "url": url,
+                }
+            )
+
+    return total, accepted, deduped, error_total, errors, preview
+
+
+async def _load_import_request(request: Request) -> ImportUpload:
     content_type = (request.headers.get("content-type") or "").lower()
     max_bytes = _max_import_text_bytes()
 
@@ -175,9 +262,10 @@ async def _load_import_request(request: Request) -> ImportCreateRequest:
         if not isinstance(data, dict):
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
         body = _validate_import_create(data)
-        if len(body.text.encode("utf-8", errors="ignore")) > max_bytes:
+        payload_bytes = body.text.encode("utf-8", errors="ignore")
+        if len(payload_bytes) > max_bytes:
             raise ApiError(code=ErrorCode.PAYLOAD_TOO_LARGE, message="Payload too large", status_code=413)
-        return body
+        return ImportUpload(body=body, payload_bytes=payload_bytes, input_format="text")
 
     if content_type.startswith("multipart/form-data"):
         form = await request.form()
@@ -186,22 +274,25 @@ async def _load_import_request(request: Request) -> ImportCreateRequest:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing file", status_code=400)
 
         filename = (file_obj.filename or "").strip().lower()
-        if filename and not filename.endswith(".txt"):
+        input_format: Literal["text", "pixiv_batch_downloader_json"] = "text"
+        if filename.endswith(".json"):
+            input_format = "pixiv_batch_downloader_json"
+        if filename and not (filename.endswith(".txt") or filename.endswith(".json")):
             raise ApiError(code=ErrorCode.INVALID_UPLOAD_TYPE, message="Unsupported upload type", status_code=400)
 
         raw = await file_obj.read()
         if len(raw) > max_bytes:
             raise ApiError(code=ErrorCode.PAYLOAD_TOO_LARGE, message="Payload too large", status_code=413)
-        text = raw.decode("utf-8", errors="replace")
 
-        return _validate_import_create(
+        body = _validate_import_create(
             {
-                "text": text,
+                "text": "pixiv_batch_downloader_json" if input_format == "pixiv_batch_downloader_json" else raw.decode("utf-8", errors="replace"),
                 "dry_run": _parse_bool(form.get("dry_run"), default=False),
                 "hydrate_on_import": _parse_bool(form.get("hydrate_on_import"), default=False),
                 "source": str(form.get("source") or "manual"),
             }
         )
+        return ImportUpload(body=body, payload_bytes=raw, input_format=input_format)
 
     raise ApiError(code=ErrorCode.INVALID_UPLOAD_TYPE, message="Unsupported content type", status_code=400)
 
@@ -211,10 +302,16 @@ async def create_import(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
-    body = await _load_import_request(request)
+    upload = await _load_import_request(request)
+    body = upload.body
     rid = get_or_create_request_id(request)
 
-    total, accepted, deduped, error_total, errors, preview = _parse_import_text(body.text, preview_limit=20)
+    if upload.input_format == "pixiv_batch_downloader_json":
+        total, accepted, deduped, error_total, errors, preview = _parse_pixiv_batch_downloader_json(
+            upload.payload_bytes, preview_limit=20
+        )
+    else:
+        total, accepted, deduped, error_total, errors, preview = _parse_import_text(body.text, preview_limit=20)
 
     if body.dry_run:
         return {
@@ -231,14 +328,19 @@ async def create_import(
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
 
+    hydrate_on_import = bool(body.hydrate_on_import)
+    if upload.input_format == "pixiv_batch_downloader_json":
+        hydrate_on_import = False
+
     settings = request.app.state.settings
     db_dir = get_sqlite_db_dir(settings.database_url)
     payload_dir = db_dir / "imports_payloads"
     payload_dir.mkdir(parents=True, exist_ok=True)
 
-    payload_path = payload_dir / f"import_payload_{uuid4().hex}.txt"
+    ext = ".json" if upload.input_format == "pixiv_batch_downloader_json" else ".txt"
+    payload_path = payload_dir / f"import_payload_{uuid4().hex}{ext}"
     try:
-        payload_path.write_text(body.text, encoding="utf-8")
+        payload_path.write_bytes(upload.payload_bytes)
     except OSError as exc:
         raise ApiError(code=ErrorCode.INTERNAL_ERROR, message="写入导入内容失败", status_code=500) from exc
 
@@ -269,7 +371,8 @@ async def create_import(
                     {
                         "import_id": int(imp.id),
                         "file_ref": file_ref,
-                        "hydrate_on_import": bool(body.hydrate_on_import),
+                        "hydrate_on_import": bool(hydrate_on_import),
+                        "input_format": upload.input_format,
                     },
                     ensure_ascii=False,
                     separators=(",", ":"),

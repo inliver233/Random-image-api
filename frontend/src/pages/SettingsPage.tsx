@@ -294,21 +294,21 @@ export function SettingsPage() {
               label="使用第三方反向代理（仅图片上游）"
               name="image_proxy_use_pixiv_cat"
               valuePropName="checked"
-              extra="开启后：服务端拉取图片时会把 i.pximg.net 替换为 i.pixiv.*（客户端仍访问本站域名，不会暴露第三方域名）。"
+              extra="开启后：服务端拉取图片时会把 i.pximg.net 替换为 i.pixiv.*（客户端仍访问本站域名，不会暴露第三方域名）。会按访问地区智能选择上游：大陆优先 i.pixiv.re，非大陆默认 i.pixiv.cat。"
             >
               <Switch />
             </Form.Item>
             <Form.Item
               label="镜像域名"
               name="image_proxy_pximg_mirror_host"
-              extra="可选 i.pixiv.cat / i.pixiv.re / i.pixiv.nl（建议就近选择更快更稳的）。"
+              extra="可选 i.pixiv.cat / i.pixiv.re / i.pixiv.nl。未显式指定 pximg_mirror_host 时：大陆访问会自动用 i.pixiv.re；非大陆使用这里选择的镜像（默认 i.pixiv.cat）。"
             >
               <Select
                 style={{ maxWidth: 360 }}
                 options={[
                   { value: "i.pixiv.cat", label: "i.pixiv.cat（默认）" },
-                  { value: "i.pixiv.re", label: "i.pixiv.re（大陆备用）" },
-                  { value: "i.pixiv.nl", label: "i.pixiv.nl（大陆备用）" },
+                  { value: "i.pixiv.re", label: "i.pixiv.re（大陆优先）" },
+                  { value: "i.pixiv.nl", label: "i.pixiv.nl（备用）" },
                 ]}
               />
             </Form.Item>

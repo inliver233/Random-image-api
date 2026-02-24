@@ -74,6 +74,7 @@ export function ImportPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
   const [result, setResult] = useState<ImportCreateResponse | null>(null);
+  const fileIsJson = Boolean(file && String(file.name || "").toLowerCase().endsWith(".json"));
 
   const mutation = useMutation({
     mutationFn: (values: ImportFormValues) => {
@@ -122,12 +123,14 @@ export function ImportPage() {
 
       <Card title="支持的链接格式（重要）">
         <Space direction="vertical" size={4}>
-          <Typography.Text>仅支持 Pixiv 原图（pximg）链接，每行一个：</Typography.Text>
+          <Typography.Text>支持两种导入方式：</Typography.Text>
+          <Typography.Text>- 纯链接：仅支持 Pixiv 原图（pximg）链接，每行一个：</Typography.Text>
           <Typography.Text code copyable>
             https://i.pximg.net/img-original/img/2024/01/01/00/00/00/12345678_p0.png
           </Typography.Text>
           <Typography.Text type="secondary">多P作品需要分别提供 p0/p1/... 的链接。</Typography.Text>
           <Typography.Text type="secondary">不支持作品页链接（例如 www.pixiv.net/artworks/12345678）。</Typography.Text>
+          <Typography.Text>- PixivBatchDownloader：支持直接上传其导出的 <Typography.Text code>.json</Typography.Text>（自动提取原图链接，并尽可能写入元数据/标签，通常不需要 refresh token）。</Typography.Text>
         </Space>
       </Card>
 
@@ -138,16 +141,28 @@ export function ImportPage() {
           initialValues={{ dry_run: false, hydrate_on_import: true, text: "" }}
           onFinish={(values) => mutation.mutate(values)}
         >
-          <Form.Item label="上传文本文件（可选，.txt）">
+          <Form.Item label="上传文件（可选，.txt / PixivBatchDownloader .json）">
             <input
               data-testid="import-file-input"
               type="file"
-              accept=".txt,text/plain"
-              onChange={(e) => setFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+              accept=".txt,.json,text/plain,application/json"
+              onChange={(e) => {
+                const picked = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+                setFile(picked);
+                const isJson = Boolean(picked && String(picked.name || "").toLowerCase().endsWith(".json"));
+                if (isJson) {
+                  form.setFieldsValue({ hydrate_on_import: false });
+                }
+              }}
             />
             <div style={{ marginTop: 8 }}>
               <Typography.Text type="secondary">{file ? `已选择文件：${file.name}` : "未选择文件（可在下方粘贴链接）。"}</Typography.Text>
             </div>
+            {fileIsJson ? (
+              <div style={{ marginTop: 6 }}>
+                <Typography.Text type="secondary">已检测到 PixivBatchDownloader JSON：将自动导入元数据与标签，补全开关已自动关闭。</Typography.Text>
+              </div>
+            ) : null}
           </Form.Item>
 
           <Form.Item
@@ -174,9 +189,13 @@ export function ImportPage() {
               label="导入后立即补全元数据（推荐）"
               name="hydrate_on_import"
               valuePropName="checked"
-              extra="随机质量与筛选依赖元数据覆盖率。需要已配置令牌且 worker 正在运行。"
+              extra={
+                fileIsJson
+                  ? "PixivBatchDownloader JSON 通常已包含元数据/标签（无需令牌）。如需强制补全，请改用纯链接导入。"
+                  : "随机质量与筛选依赖元数据覆盖率。需要已配置令牌且 worker 正在运行。"
+              }
             >
-              <Switch />
+              <Switch disabled={fileIsJson} />
             </Form.Item>
           </Space>
 
