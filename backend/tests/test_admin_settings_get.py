@@ -73,7 +73,7 @@ def test_admin_get_settings_returns_defaults_and_runtime_overrides(tmp_path: Pat
         assert settings["random"]["default_r18_strict"] is True
         assert settings["random"]["fail_cooldown_ms"] == 600000
         assert settings["random"]["strategy"] == "quality"
-        assert settings["random"]["quality_samples"] == 5
+        assert settings["random"]["quality_samples"] == 12
 
         recommendation = settings["random"]["recommendation"]
         assert recommendation["pick_mode"] == "weighted"

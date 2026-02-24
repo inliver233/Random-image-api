@@ -26,6 +26,8 @@ _DEFAULT_SCORE_WEIGHTS: dict[str, float] = {
     "comment": 2.0,
     "pixels": 1.0,
     "bookmark_rate": 3.0,
+    "freshness": 1.0,
+    "bookmark_velocity": 1.2,
 }
 
 _DEFAULT_RECOMMENDATION: dict[str, Any] = {
@@ -49,7 +51,7 @@ _DEFAULT_SETTINGS = {
         "default_r18_strict": True,
         "fail_cooldown_ms": 600_000,
         "strategy": "quality",
-        "quality_samples": 5,
+        "quality_samples": 12,
         "recommendation": dict(_DEFAULT_RECOMMENDATION),
     },
     "proxy": {"allowlist_domains": []},

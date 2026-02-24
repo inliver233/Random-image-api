@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import random
 import os
 import math
+import time
 from datetime import datetime, timedelta, timezone
+from threading import Lock
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
@@ -34,6 +37,55 @@ _MAX_TAG_FILTERS = 50
 _MAX_TAG_OR_TERMS = 20
 _MAX_TAG_TOTAL_TERMS = 200
 
+# Best-effort anti-repeat (process-local): reduce short-term duplicates without extra DB writes.
+_RECENT_LOCK = Lock()
+_RECENT_WINDOW_S = 20.0 * 60.0
+_RECENT_MAX_IMAGES = 600
+_RECENT_MAX_AUTHORS = 200
+_RECENT_IMAGES: deque[tuple[float, int]] = deque()
+_RECENT_AUTHORS: deque[tuple[float, int]] = deque()
+
+
+def _prune_recent(now: float) -> None:
+    cutoff = float(now) - float(_RECENT_WINDOW_S)
+    while _RECENT_IMAGES and float(_RECENT_IMAGES[0][0]) < cutoff:
+        _RECENT_IMAGES.popleft()
+    while _RECENT_AUTHORS and float(_RECENT_AUTHORS[0][0]) < cutoff:
+        _RECENT_AUTHORS.popleft()
+
+    while len(_RECENT_IMAGES) > int(_RECENT_MAX_IMAGES):
+        _RECENT_IMAGES.popleft()
+    while len(_RECENT_AUTHORS) > int(_RECENT_MAX_AUTHORS):
+        _RECENT_AUTHORS.popleft()
+
+
+def _get_recent_sets(now: float) -> tuple[set[int], set[int]]:
+    with _RECENT_LOCK:
+        _prune_recent(now)
+        recent_images = {int(image_id) for _t, image_id in _RECENT_IMAGES}
+        recent_authors = {int(user_id) for _t, user_id in _RECENT_AUTHORS}
+    return recent_images, recent_authors
+
+
+def _record_recent(*, now: float, image_id: int, user_id: int | None) -> None:
+    try:
+        image_id_i = int(image_id)
+    except Exception:
+        return
+    if image_id_i <= 0:
+        return
+    user_id_i: int | None
+    try:
+        user_id_i = int(user_id) if user_id is not None else None
+    except Exception:
+        user_id_i = None
+
+    with _RECENT_LOCK:
+        _prune_recent(now)
+        _RECENT_IMAGES.append((float(now), int(image_id_i)))
+        if user_id_i is not None and user_id_i > 0:
+            _RECENT_AUTHORS.append((float(now), int(user_id_i)))
+
 
 def _as_nonneg_int(value: Any) -> int:
     if value is None:
@@ -53,6 +105,11 @@ _DEFAULT_SCORE_WEIGHTS: dict[str, float] = {
     "comment": 2.0,
     "pixels": 1.0,
     "bookmark_rate": 3.0,
+    # 适度提升“新鲜感”和“成长速度”，避免老热门长期统治。
+    # - freshness: 越新越加分（指数衰减，默认半衰期在代码里固定为 21 天）
+    # - bookmark_velocity: 收藏增长率（收藏数 / 存在天数）的对数项
+    "freshness": 1.0,
+    "bookmark_velocity": 1.2,
 }
 
 _DEFAULT_RECOMMENDATION: dict[str, Any] = {
@@ -487,6 +544,31 @@ async def random_image(
         else None
     )
 
+    def _parse_iso_dt(value: str | None) -> datetime | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        try:
+            if raw.endswith("Z"):
+                raw = raw[:-1] + "+00:00"
+            dt = datetime.fromisoformat(raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            return None
+
+    def _age_days(dt: datetime | None) -> float | None:
+        if dt is None:
+            return None
+        try:
+            secs = float((request_now - dt).total_seconds())
+        except Exception:
+            return None
+        if not math.isfinite(secs):
+            return None
+        return max(0.0, secs / 86400.0)
+
     pick_kwargs: dict[str, Any] = {
         "r18": r18,
         "r18_strict": bool(r18_strict),
@@ -509,6 +591,12 @@ async def random_image(
     }
 
     rng = random.Random(seed_norm) if seed_norm else random
+    time_boost_enabled = not bool(seed_norm)
+    anti_repeat_enabled = bool(time_boost_enabled) and user_id is None and illust_id is None
+    recent_image_ids: set[int] = set()
+    recent_author_ids: set[int] = set()
+    if anti_repeat_enabled:
+        recent_image_ids, recent_author_ids = _get_recent_sets(time.monotonic())
 
     strategy_raw = (strategy or "").strip().lower()
     strategy_source = "query"
@@ -537,18 +625,60 @@ async def random_image(
         raw = random_defaults.get("quality_samples")
         if raw is None:
             quality_samples_source = "fallback"
-            quality_samples_i = 5
+            quality_samples_i = 12
         else:
             quality_samples_source = "runtime"
             try:
                 quality_samples_i = int(raw)
             except Exception:
-                quality_samples_i = 5
+                quality_samples_i = 12
     if quality_samples_i < 1 or quality_samples_i > 1000:
         if quality_samples_source == "query":
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported quality_samples", status_code=400)
         quality_samples_source = "fallback"
-        quality_samples_i = 5
+        quality_samples_i = 12
+
+    quality_samples_base = int(quality_samples_i)
+    quality_samples_multiplier = 1
+    if quality_samples is None and strategy_norm == "quality" and bool(time_boost_enabled):
+        strictness = 0
+        strictness += 3 * int(len(included))
+        strictness += 2 * int(len(excluded))
+        if int(min_bookmarks_i) > 0:
+            strictness += 2
+        if int(min_views_i) > 0:
+            strictness += 1
+        if int(min_comments_i) > 0:
+            strictness += 1
+        if int(min_pixels_i) > 0:
+            strictness += 1
+        if int(min_width_i) > 0 or int(min_height_i) > 0:
+            strictness += 1
+        if ai_type_i is not None:
+            strictness += 1
+        if illust_type_i is not None:
+            strictness += 1
+        if orientation_map[layout_norm] is not None:
+            strictness += 1
+        if created_from_norm is not None or created_to_norm is not None:
+            strictness += 1
+        if int(r18) == 1:
+            strictness += 1
+        if bool(anti_repeat_enabled):
+            strictness += 1
+
+        if strictness >= 9:
+            quality_samples_multiplier = 4
+        elif strictness >= 6:
+            quality_samples_multiplier = 3
+        elif strictness >= 3:
+            quality_samples_multiplier = 2
+        else:
+            quality_samples_multiplier = 1
+
+        quality_samples_i = min(1000, int(max(1, int(quality_samples_base) * int(quality_samples_multiplier))))
+
+    quality_samples_scaled = bool(quality_samples_i != quality_samples_base)
 
     recommendation_raw = random_defaults.get("recommendation")
     recommendation_source = "fallback"
@@ -589,7 +719,12 @@ async def random_image(
         "strategy": strategy_norm,
         "strategy_source": strategy_source,
         "quality_samples": int(quality_samples_i),
+        "quality_samples_base": int(quality_samples_base),
+        "quality_samples_multiplier": int(quality_samples_multiplier),
+        "quality_samples_scaled": bool(quality_samples_scaled),
         "quality_samples_source": quality_samples_source,
+        "anti_repeat_enabled": bool(anti_repeat_enabled),
+        "time_boost_enabled": bool(time_boost_enabled),
         "recommendation_source": recommendation_source,
     }
 
@@ -599,7 +734,14 @@ async def random_image(
         exclude_image_ids: list[int] | None = None,
     ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
         if strategy_norm == "random":
-            image = await pick_random_image(session, r=rng.random(), exclude_image_ids=exclude_image_ids, **pick_kwargs)
+            base_exclude = list(exclude_image_ids or [])
+            exclude_set: set[int] = set(int(x) for x in base_exclude)
+            if bool(anti_repeat_enabled) and recent_image_ids:
+                exclude_set.update(int(x) for x in recent_image_ids)
+
+            image = await pick_random_image(session, r=rng.random(), exclude_image_ids=list(exclude_set), **pick_kwargs)
+            if image is None and bool(anti_repeat_enabled) and recent_image_ids:
+                image = await pick_random_image(session, r=rng.random(), exclude_image_ids=base_exclude, **pick_kwargs)
             if image is None:
                 return None, {**debug_base, "attempts_used": 1, "picked_by": "random_key"}
             return image, {**debug_base, "attempts_used": 1, "picked_by": "random_key"}
@@ -629,8 +771,12 @@ async def random_image(
                 return 0.0
             return float(m)
 
-        exclude_set: set[int] = set(int(x) for x in exclude_image_ids or [])
-        candidates: list[tuple[Any, float, float, float]] = []
+        base_exclude_set: set[int] = set(int(x) for x in exclude_image_ids or [])
+        exclude_set: set[int] = set(base_exclude_set)
+        if bool(anti_repeat_enabled) and recent_image_ids:
+            exclude_set.update(int(x) for x in recent_image_ids)
+        # candidates: (image, score_total, multiplier, logit, score_base, freshness_contrib, velocity_contrib)
+        candidates: list[tuple[Any, float, float, float, float, float, float]] = []
 
         # 批量抽样：一次性取 N 个候选（必要时 wrap-around 再取一次），避免 N 次 DB 循环查询。
         # 若用户把某些类别倍率设为 0（例如 manga=0），直接在 SQL 抽样阶段剔除，减少无效候选。
@@ -672,17 +818,84 @@ async def random_image(
             illust_type_allowed=illust_allowed,
             **pick_kwargs,
         )
+        if not images and bool(anti_repeat_enabled) and recent_image_ids:
+            images = await pick_random_images(
+                session,
+                r=rng.random(),
+                limit=int(quality_samples_i),
+                exclude_image_ids=list(base_exclude_set),
+                ai_type_allowed=ai_allowed,
+                illust_type_allowed=illust_allowed,
+                **pick_kwargs,
+            )
 
         drawn = int(len(images))
         accepted = 0
         for image in images:
-            score = _quality_score(image, weights=score_weights)
+            score_base = _quality_score(image, weights=score_weights)
+
+            # 时间因素（适度）：默认使用 created_at_pixiv；若缺失则 freshness 退化到 added_at，
+            # 以便新导入/新补全的图片也能获得“新鲜感”提升。
+            freshness_w = float(score_weights.get("freshness", 0.0)) if bool(time_boost_enabled) else 0.0
+            velocity_w = float(score_weights.get("bookmark_velocity", 0.0)) if bool(time_boost_enabled) else 0.0
+            freshness_contrib = 0.0
+            velocity_contrib = 0.0
+
+            if freshness_w != 0.0:
+                # 半衰期固定为 21 天：足够提升新图，但不会让老图完全失去竞争力。
+                half_life_days = 21.0
+                dt_created = _parse_iso_dt(getattr(image, "created_at_pixiv", None))
+                if dt_created is None:
+                    dt_created = _parse_iso_dt(getattr(image, "added_at", None))
+                age_days = _age_days(dt_created)
+                if age_days is not None:
+                    try:
+                        freshness_contrib = float(freshness_w) * math.exp(-float(age_days) / float(half_life_days))
+                    except Exception:
+                        freshness_contrib = 0.0
+
+            if velocity_w != 0.0:
+                dt_created = _parse_iso_dt(getattr(image, "created_at_pixiv", None))
+                age_days = _age_days(dt_created)
+                bookmark_count = _as_nonneg_int(getattr(image, "bookmark_count", None))
+                if age_days is not None and bookmark_count > 0:
+                    try:
+                        # +2 天平滑，避免“刚发布/刚补全”的极端值。
+                        denom = float(age_days) + 2.0
+                        velocity_term = math.log1p(float(bookmark_count) / max(1.0, denom))
+                        velocity_contrib = float(velocity_w) * float(velocity_term)
+                    except Exception:
+                        velocity_contrib = 0.0
+
+            score = float(score_base) + float(freshness_contrib) + float(velocity_contrib)
             multiplier = _multiplier_for_image(image)
             if multiplier <= 0.0:
                 continue
 
             logit = float(score) / float(temperature) + math.log(float(multiplier))
-            candidates.append((image, float(score), float(multiplier), float(logit)))
+            if bool(anti_repeat_enabled):
+                try:
+                    if int(getattr(image, "id", 0) or 0) in recent_image_ids:
+                        logit -= 8.0
+                except Exception:
+                    pass
+                try:
+                    uid = getattr(image, "user_id", None)
+                    if uid is not None and int(uid) in recent_author_ids:
+                        logit -= 2.5
+                except Exception:
+                    pass
+            candidates.append(
+                (
+                    image,
+                    float(score),
+                    float(multiplier),
+                    float(logit),
+                    float(score_base),
+                    float(freshness_contrib),
+                    float(velocity_contrib),
+                )
+            )
             accepted += 1
 
         if not candidates:
@@ -717,7 +930,7 @@ async def random_image(
                 picked = candidates[int(max(0, min(idx, len(candidates) - 1)))]
                 picked_by = "quality_weighted"
 
-        best_image, best_score, best_multiplier, _best_logit = picked
+        best_image, best_score, best_multiplier, _best_logit, best_base, best_fresh, best_vel = picked
 
         return (
             best_image,
@@ -730,6 +943,9 @@ async def random_image(
                 "quality_pick_mode": pick_mode_raw,
                 "quality_temperature": float(temperature),
                 "quality_score": float(best_score),
+                "quality_score_base": float(best_base),
+                "quality_score_freshness": float(best_fresh),
+                "quality_score_bookmark_velocity": float(best_vel),
                 "quality_multiplier": float(best_multiplier),
             },
         )
@@ -756,6 +972,16 @@ async def random_image(
                 raise _no_match_error()
             if format == "json":
                 tags = await get_tag_names_for_image(session, image_id=image.id)
+
+        if bool(anti_repeat_enabled):
+            try:
+                _record_recent(
+                    now=time.monotonic(),
+                    image_id=int(image.id),
+                    user_id=int(image.user_id) if getattr(image, "user_id", None) is not None else None,
+                )
+            except Exception:
+                pass
 
         if _needs_opportunistic_hydrate(image):
             background_tasks.add_task(
@@ -897,6 +1123,7 @@ async def random_image(
             illust_id_for_hydrate = int(image.illust_id)
             needs_hydrate = _needs_opportunistic_hydrate(image)
             should_mark_ok = image.last_ok_at is None or image.last_error_code is not None
+            user_id_for_recent = int(image.user_id) if getattr(image, "user_id", None) is not None else None
 
         transport = getattr(request.app.state, "httpx_transport", None)
         proxy_uri = None
@@ -917,6 +1144,11 @@ async def random_image(
                 cache_control="no-store",
                 range_header=request.headers.get("Range"),
             )
+            if bool(anti_repeat_enabled):
+                try:
+                    _record_recent(now=time.monotonic(), image_id=int(image_id), user_id=user_id_for_recent)
+                except Exception:
+                    pass
             if should_mark_ok:
                 background_tasks.add_task(_best_effort, mark_image_ok, engine, image_id=image_id, now=iso_utc_ms(), timeout_s=1.5)
             if needs_hydrate:
