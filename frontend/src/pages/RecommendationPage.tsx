@@ -33,6 +33,8 @@ type FormValues = {
   w_comment: number;
   w_pixels: number;
   w_bookmark_rate: number;
+  w_freshness: number;
+  w_bookmark_velocity: number;
 
   m_ai: number;
   m_non_ai: number;
@@ -50,7 +52,7 @@ const PICK_MODE_VALUES = new Set<FormValues["pick_mode"]>(["weighted", "best"]);
 
 const DEFAULTS: Omit<FormValues, "preview_seed"> = {
   random_strategy: "quality",
-  random_quality_samples: 5,
+  random_quality_samples: 12,
   pick_mode: "weighted",
   temperature: 1.0,
   w_bookmark: 4.0,
@@ -58,6 +60,8 @@ const DEFAULTS: Omit<FormValues, "preview_seed"> = {
   w_comment: 2.0,
   w_pixels: 1.0,
   w_bookmark_rate: 3.0,
+  w_freshness: 1.0,
+  w_bookmark_velocity: 1.2,
   m_ai: 1.0,
   m_non_ai: 1.0,
   m_unknown_ai: 1.0,
@@ -147,6 +151,8 @@ export function RecommendationPage() {
       w_comment: asFloat(scoreWeights.comment, DEFAULTS.w_comment),
       w_pixels: asFloat(scoreWeights.pixels, DEFAULTS.w_pixels),
       w_bookmark_rate: asFloat(scoreWeights.bookmark_rate, DEFAULTS.w_bookmark_rate),
+      w_freshness: asFloat(scoreWeights.freshness, DEFAULTS.w_freshness),
+      w_bookmark_velocity: asFloat(scoreWeights.bookmark_velocity, DEFAULTS.w_bookmark_velocity),
       m_ai: asFloat(multipliers.ai, DEFAULTS.m_ai),
       m_non_ai: asFloat(multipliers.non_ai, DEFAULTS.m_non_ai),
       m_unknown_ai: asFloat(multipliers.unknown_ai, DEFAULTS.m_unknown_ai),
@@ -166,7 +172,10 @@ export function RecommendationPage() {
       "+ w_comment * ln(1 + comment_count)",
       "+ w_pixels * ln(1 + (width*height)/1_000_000)",
       "+ w_bookmark_rate * ln(1 + (bookmark_count/view_count)*1000)",
+      "+ w_freshness * exp(-age_days / 21)",
+      "+ w_bookmark_velocity * ln(1 + bookmark_count / (age_days + 2))",
       "",
+      "说明：有 seed 时，为保证可复现，会自动关闭 freshness/bookmark_velocity 两项。",
       "最终得分会再乘以“类别倍率”（AI/插画/漫画/动图等）。",
       "倍率=0 表示彻底不返回该类别。",
     ].join("\n");
@@ -190,6 +199,8 @@ export function RecommendationPage() {
                   comment: values.w_comment,
                   pixels: values.w_pixels,
                   bookmark_rate: values.w_bookmark_rate,
+                  freshness: values.w_freshness,
+                  bookmark_velocity: values.w_bookmark_velocity,
                 },
                 multipliers: {
                   ai: values.m_ai,
@@ -383,6 +394,16 @@ export function RecommendationPage() {
                 <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
               </Form.Item>
               <Form.Item label="收藏率权重（bookmark_rate）" name="w_bookmark_rate">
+                <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
+              </Form.Item>
+              <Form.Item label="新鲜度权重（freshness）" name="w_freshness" extra="指数衰减：exp(-age_days/21)，越新越加分。">
+                <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
+              </Form.Item>
+              <Form.Item
+                label="收藏增长率权重（bookmark_velocity）"
+                name="w_bookmark_velocity"
+                extra="ln(1 + bookmark_count/(age_days+2))，帮助“好看的新图”被选中。"
+              >
                 <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
               </Form.Item>
             </Space>

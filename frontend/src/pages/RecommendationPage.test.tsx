@@ -23,10 +23,12 @@ describe("RecommendationPage", () => {
         if (url.endsWith("/admin/api/settings") && init?.method === "PUT") {
           const body = init.body ? JSON.parse(String(init.body)) : {};
           expect(body.settings.random.strategy).toBe("quality");
-          expect(body.settings.random.quality_samples).toBe(5);
+          expect(body.settings.random.quality_samples).toBe(12);
           expect(body.settings.random.recommendation.pick_mode).toBe("weighted");
           expect(body.settings.random.recommendation.temperature).toBe(1);
           expect(body.settings.random.recommendation.score_weights.bookmark).toBe(4);
+          expect(body.settings.random.recommendation.score_weights.freshness).toBe(1);
+          expect(body.settings.random.recommendation.score_weights.bookmark_velocity).toBe(1.2);
           expect(body.settings.random.recommendation.multipliers.ai).toBe(0.5);
           expect(body.settings.random.recommendation.multipliers.manga).toBe(0);
           return new Response(JSON.stringify({ ok: true, updated: 3, request_id: "req_save" }), {
@@ -41,11 +43,11 @@ describe("RecommendationPage", () => {
               settings: {
                 random: {
                   strategy: "quality",
-                  quality_samples: 5,
+                  quality_samples: 12,
                   recommendation: {
                     pick_mode: "weighted",
                     temperature: 1,
-                    score_weights: { bookmark: 4, view: 0.5, comment: 2, pixels: 1, bookmark_rate: 3 },
+                    score_weights: { bookmark: 4, view: 0.5, comment: 2, pixels: 1, bookmark_rate: 3, freshness: 1, bookmark_velocity: 1.2 },
                     multipliers: {
                       ai: 1,
                       non_ai: 1,
