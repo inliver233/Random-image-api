@@ -811,6 +811,10 @@ async def random_image(
                         "bookmark_count": getattr(image, "bookmark_count", None),
                         "view_count": getattr(image, "view_count", None),
                         "comment_count": getattr(image, "comment_count", None),
+                        "user": {
+                            "id": str(image.user_id) if image.user_id is not None else None,
+                            "name": image.user_name,
+                        },
                     },
                     "urls": {
                         "proxy": f"/i/{image.id}.{image.ext}",
