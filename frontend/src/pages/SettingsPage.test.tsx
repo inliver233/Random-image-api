@@ -34,7 +34,7 @@ describe("SettingsPage", () => {
           expect(body.settings.random.default_r18_strict).toBe(true);
           expect(body.settings.random.fail_cooldown_ms).toBe(600000);
           expect(body.settings.random.strategy).toBe("quality");
-          expect(body.settings.random.quality_samples).toBe(5);
+          expect(body.settings.random.quality_samples).toBe(12);
           expect(body.settings.security.hide_origin_url_in_public_json).toBe(true);
           expect(body.settings.rate_limit.pixiv_hydrate_min_interval_ms).toBe(800);
           expect(body.settings.rate_limit.pixiv_hydrate_jitter_ms).toBe(200);
@@ -56,7 +56,7 @@ describe("SettingsPage", () => {
                   default_pool_id: "",
                 },
                 image_proxy: { use_pixiv_cat: false, pximg_mirror_host: "i.pixiv.cat", extra_pximg_mirror_hosts: [] },
-                random: { default_attempts: 3, default_r18_strict: true, fail_cooldown_ms: 600000, strategy: "quality", quality_samples: 5 },
+                random: { default_attempts: 3, default_r18_strict: true, fail_cooldown_ms: 600000, strategy: "quality", quality_samples: 12 },
                 security: { hide_origin_url_in_public_json: true },
                 rate_limit: {},
               },

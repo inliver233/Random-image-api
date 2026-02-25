@@ -157,6 +157,87 @@ def test_random_quality_strategy_picks_weighted_by_score(tmp_path: Path, monkeyp
         assert isinstance(body["data"]["debug"]["quality_score"], float)
 
 
+def test_random_quality_strategy_supports_rec_query_overrides(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "random_quality_rec_overrides.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            session.add_all(
+                [
+                    Image(
+                        illust_id=11,
+                        page_index=0,
+                        ext="jpg",
+                        original_url="https://example.test/11.jpg",
+                        proxy_path="/i/11.jpg",
+                        random_key=0.10,
+                        x_restrict=0,
+                        ai_type=0,
+                        illust_type=0,
+                        width=1000,
+                        height=1000,
+                        bookmark_count=100,
+                        view_count=100,
+                        comment_count=0,
+                    ),
+                    Image(
+                        illust_id=22,
+                        page_index=0,
+                        ext="jpg",
+                        original_url="https://example.test/22.jpg",
+                        proxy_path="/i/22.jpg",
+                        random_key=0.20,
+                        x_restrict=0,
+                        ai_type=0,
+                        illust_type=0,
+                        width=1000,
+                        height=1000,
+                        bookmark_count=1,
+                        view_count=100000,
+                        comment_count=0,
+                    ),
+                ]
+            )
+            await session.commit()
+
+        await app.state.engine.dispose()
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        resp = client.get(
+            "/random",
+            params={
+                "format": "json",
+                "attempts": 1,
+                "seed": "seed_rec_override_001",
+                "strategy": "quality",
+                "quality_samples": 2,
+                "rec_pick_mode": "best",
+                "rec_w_bookmark": 0,
+                "rec_w_view": 2,
+                "rec_w_comment": 0,
+                "rec_w_pixels": 0,
+                "rec_w_bookmark_rate": 0,
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        # With bookmark weight disabled and view weight boosted, the high-view image should win.
+        assert int(body["data"]["image"]["illust_id"]) == 22
+
+
 def test_random_strategy_random_key_matches_pick_random_image(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "random_strategy_random_key.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()

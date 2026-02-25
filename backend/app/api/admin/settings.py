@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -34,6 +35,8 @@ _DEFAULT_RECOMMENDATION: dict[str, Any] = {
     "pick_mode": "weighted",
     "temperature": 1.0,
     "score_weights": dict(_DEFAULT_SCORE_WEIGHTS),
+    "freshness_half_life_days": 21.0,
+    "velocity_smooth_days": 2.0,
     "multipliers": {
         "ai": 1.0,
         "non_ai": 1.0,
@@ -52,6 +55,15 @@ _DEFAULT_SETTINGS = {
         "fail_cooldown_ms": 600_000,
         "strategy": "quality",
         "quality_samples": 12,
+        "dedup": {
+            "enabled": True,
+            "window_s": 20 * 60,
+            "max_images": 5000,
+            "max_authors": 2000,
+            "strict": False,
+            "image_penalty": 8.0,
+            "author_penalty": 2.5,
+        },
         "recommendation": dict(_DEFAULT_RECOMMENDATION),
     },
     "proxy": {"allowlist_domains": []},
@@ -99,6 +111,79 @@ def _as_float(value: Any) -> float | None:
         return None
 
 
+def _normalize_dedup(value: Any, *, strict: bool) -> dict[str, Any]:
+    default = dict(_DEFAULT_SETTINGS["random"]["dedup"])
+    if value is None:
+        return default
+    if not isinstance(value, dict):
+        if strict:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup", status_code=400)
+        return default
+
+    if strict:
+        for k in value.keys():
+            if str(k) not in default:
+                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup", status_code=400)
+
+    enabled = default["enabled"]
+    v = _as_bool(value.get("enabled"))
+    if v is not None:
+        enabled = bool(v)
+
+    window_s = int(default["window_s"])
+    if "window_s" in value:
+        try:
+            n = int(value.get("window_s"))
+        except Exception as exc:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup.window_s", status_code=400) from exc
+        window_s = int(max(0, min(n, 24 * 60 * 60)))
+
+    max_images = int(default["max_images"])
+    if "max_images" in value:
+        try:
+            n = int(value.get("max_images"))
+        except Exception as exc:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup.max_images", status_code=400) from exc
+        max_images = int(max(1, min(n, 200_000)))
+
+    max_authors = int(default["max_authors"])
+    if "max_authors" in value:
+        try:
+            n = int(value.get("max_authors"))
+        except Exception as exc:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup.max_authors", status_code=400) from exc
+        max_authors = int(max(1, min(n, 200_000)))
+
+    strict_mode = bool(default["strict"])
+    v = _as_bool(value.get("strict"))
+    if v is not None:
+        strict_mode = bool(v)
+
+    image_penalty = float(default["image_penalty"])
+    if "image_penalty" in value:
+        v = _as_float(value.get("image_penalty"))
+        if v is None or not math.isfinite(float(v)):
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup.image_penalty", status_code=400)
+        image_penalty = float(max(0.0, min(float(v), 1000.0)))
+
+    author_penalty = float(default["author_penalty"])
+    if "author_penalty" in value:
+        v = _as_float(value.get("author_penalty"))
+        if v is None or not math.isfinite(float(v)):
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup.author_penalty", status_code=400)
+        author_penalty = float(max(0.0, min(float(v), 1000.0)))
+
+    return {
+        "enabled": bool(enabled),
+        "window_s": int(window_s),
+        "max_images": int(max_images),
+        "max_authors": int(max_authors),
+        "strict": bool(strict_mode),
+        "image_penalty": float(image_penalty),
+        "author_penalty": float(author_penalty),
+    }
+
+
 def _normalize_recommendation(value: Any, *, strict: bool) -> dict[str, Any]:
     if value is None:
         return dict(_DEFAULT_RECOMMENDATION)
@@ -131,6 +216,34 @@ def _normalize_recommendation(value: Any, *, strict: bool) -> dict[str, Any]:
                 )
         else:
             temperature = float(max(0.05, min(float(v), 100.0)))
+
+    freshness_half_life_default = float(_DEFAULT_RECOMMENDATION["freshness_half_life_days"])
+    freshness_half_life_days = freshness_half_life_default
+    if "freshness_half_life_days" in value:
+        v = _as_float(value.get("freshness_half_life_days"))
+        if v is None or not math.isfinite(float(v)):
+            if strict:
+                raise ApiError(
+                    code=ErrorCode.BAD_REQUEST,
+                    message="Invalid random.recommendation.freshness_half_life_days",
+                    status_code=400,
+                )
+        else:
+            freshness_half_life_days = float(max(0.1, min(float(v), 3650.0)))
+
+    velocity_smooth_default = float(_DEFAULT_RECOMMENDATION["velocity_smooth_days"])
+    velocity_smooth_days = velocity_smooth_default
+    if "velocity_smooth_days" in value:
+        v = _as_float(value.get("velocity_smooth_days"))
+        if v is None or not math.isfinite(float(v)):
+            if strict:
+                raise ApiError(
+                    code=ErrorCode.BAD_REQUEST,
+                    message="Invalid random.recommendation.velocity_smooth_days",
+                    status_code=400,
+                )
+        else:
+            velocity_smooth_days = float(max(0.0, min(float(v), 3650.0)))
 
     score_weights_default = _DEFAULT_RECOMMENDATION["score_weights"]
     score_weights_raw = value.get("score_weights")
@@ -202,6 +315,8 @@ def _normalize_recommendation(value: Any, *, strict: bool) -> dict[str, Any]:
         "pick_mode": pick_mode,
         "temperature": temperature,
         "score_weights": score_weights,
+        "freshness_half_life_days": float(freshness_half_life_days),
+        "velocity_smooth_days": float(velocity_smooth_days),
         "multipliers": multipliers,
     }
 
@@ -244,8 +359,10 @@ async def get_settings(
             if k in runtime.random_defaults:
                 random_defaults[k] = runtime.random_defaults[k]
         random_defaults["recommendation"] = _normalize_recommendation(runtime.random_defaults.get("recommendation"), strict=False)
+        random_defaults["dedup"] = _normalize_dedup(runtime.random_defaults.get("dedup"), strict=False)
     else:
         random_defaults["recommendation"] = _normalize_recommendation(None, strict=False)
+        random_defaults["dedup"] = _normalize_dedup(None, strict=False)
 
     return {
         "ok": True,
@@ -433,6 +550,9 @@ async def update_settings(
 
         if "recommendation" in random:
             defaults["recommendation"] = _normalize_recommendation(random.get("recommendation"), strict=True)
+
+        if "dedup" in random:
+            defaults["dedup"] = _normalize_dedup(random.get("dedup"), strict=True)
 
         if defaults:
             values = await fetch_runtime_settings(request.app.state.engine)

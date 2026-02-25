@@ -74,10 +74,19 @@ def test_admin_get_settings_returns_defaults_and_runtime_overrides(tmp_path: Pat
         assert settings["random"]["fail_cooldown_ms"] == 600000
         assert settings["random"]["strategy"] == "quality"
         assert settings["random"]["quality_samples"] == 12
+        assert settings["random"]["dedup"]["enabled"] is True
+        assert settings["random"]["dedup"]["window_s"] == 1200
+        assert settings["random"]["dedup"]["max_images"] == 5000
+        assert settings["random"]["dedup"]["max_authors"] == 2000
+        assert settings["random"]["dedup"]["strict"] is False
+        assert settings["random"]["dedup"]["image_penalty"] == 8.0
+        assert settings["random"]["dedup"]["author_penalty"] == 2.5
 
         recommendation = settings["random"]["recommendation"]
         assert recommendation["pick_mode"] == "weighted"
         assert recommendation["temperature"] == 1.0
+        assert recommendation["freshness_half_life_days"] == 21.0
+        assert recommendation["velocity_smooth_days"] == 2.0
         assert recommendation["score_weights"]["bookmark"] == 4.0
         assert recommendation["score_weights"]["view"] == 0.5
         assert recommendation["multipliers"]["ai"] == 1.0

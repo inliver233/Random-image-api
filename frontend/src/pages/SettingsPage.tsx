@@ -153,7 +153,7 @@ export function SettingsPage() {
       random_default_r18_strict: asBool(random.default_r18_strict, true),
       random_fail_cooldown_ms: asInt(random.fail_cooldown_ms, 600_000),
       random_strategy: asLowerEnum(random.strategy, RANDOM_STRATEGY_VALUES, "quality"),
-      random_quality_samples: asInt(random.quality_samples, 5),
+      random_quality_samples: asInt(random.quality_samples, 12),
       security_hide_origin_url_in_public_json: asBool(security.hide_origin_url_in_public_json, true),
       pixiv_hydrate_min_interval_ms: asInt(rateLimit.pixiv_hydrate_min_interval_ms, 800),
       pixiv_hydrate_jitter_ms: asInt(rateLimit.pixiv_hydrate_jitter_ms, 200),

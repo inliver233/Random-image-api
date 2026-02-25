@@ -24,8 +24,17 @@ describe("RecommendationPage", () => {
           const body = init.body ? JSON.parse(String(init.body)) : {};
           expect(body.settings.random.strategy).toBe("quality");
           expect(body.settings.random.quality_samples).toBe(12);
+          expect(body.settings.random.dedup.enabled).toBe(true);
+          expect(body.settings.random.dedup.window_s).toBe(1200);
+          expect(body.settings.random.dedup.max_images).toBe(5000);
+          expect(body.settings.random.dedup.max_authors).toBe(2000);
+          expect(body.settings.random.dedup.strict).toBe(false);
+          expect(body.settings.random.dedup.image_penalty).toBe(8);
+          expect(body.settings.random.dedup.author_penalty).toBe(2.5);
           expect(body.settings.random.recommendation.pick_mode).toBe("weighted");
           expect(body.settings.random.recommendation.temperature).toBe(1);
+          expect(body.settings.random.recommendation.freshness_half_life_days).toBe(21);
+          expect(body.settings.random.recommendation.velocity_smooth_days).toBe(2);
           expect(body.settings.random.recommendation.score_weights.bookmark).toBe(4);
           expect(body.settings.random.recommendation.score_weights.freshness).toBe(1);
           expect(body.settings.random.recommendation.score_weights.bookmark_velocity).toBe(1.2);
@@ -44,9 +53,20 @@ describe("RecommendationPage", () => {
                 random: {
                   strategy: "quality",
                   quality_samples: 12,
+                  dedup: {
+                    enabled: true,
+                    window_s: 1200,
+                    max_images: 5000,
+                    max_authors: 2000,
+                    strict: false,
+                    image_penalty: 8,
+                    author_penalty: 2.5,
+                  },
                   recommendation: {
                     pick_mode: "weighted",
                     temperature: 1,
+                    freshness_half_life_days: 21,
+                    velocity_smooth_days: 2,
                     score_weights: { bookmark: 4, view: 0.5, comment: 2, pixels: 1, bookmark_rate: 3, freshness: 1, bookmark_velocity: 1.2 },
                     multipliers: {
                       ai: 1,

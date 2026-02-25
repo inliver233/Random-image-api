@@ -23,6 +23,11 @@ def _build_docs_html(*, base_url: str) -> str:
         "img_pixiv_cat": u("/random?pixiv_cat=1"),
         "img_pixiv_re": u("/random?pixiv_cat=1&pximg_mirror_host=re"),
         "img_redirect": u("/random?redirect=1"),
+        "rec_tune": u(
+            "/random?strategy=quality&rec_pick_mode=weighted&rec_temperature=1"
+            "&rec_w_freshness=2&rec_fresh_half_life_days=14"
+            "&rec_w_bookmark_velocity=2&rec_velocity_smooth_days=2"
+        ),
         "status": u("/status"),
         "status_json": u("/status.json"),
         "wtf": u("/wtf"),
@@ -416,6 +421,19 @@ def _build_docs_html(*, base_url: str) -> str:
           </tr>
           </tbody>
         </table>
+      </div>
+      <div class="note" style="margin-top: 12px;">
+        <strong>推荐策略 URL 覆盖（rec_*）</strong><br/>
+        这些参数仅影响<strong>本次请求</strong>，不需要登录，也不会修改后台默认配置：
+        <ul style="margin: 10px 0 0 18px;">
+          <li><code>rec_pick_mode</code>: <code>best</code> / <code>weighted</code></li>
+          <li><code>rec_temperature</code>: 随机温度（越小越“挑最高分”）</li>
+          <li><code>rec_w_*</code>: 覆盖 score_weights（如 <code>rec_w_bookmark</code> / <code>rec_w_freshness</code>）</li>
+          <li><code>rec_m_*</code>: 覆盖 multipliers（如 <code>rec_m_ai</code> / <code>rec_m_manga</code>）</li>
+          <li><code>rec_fresh_half_life_days</code>: 新鲜度半衰期（天）</li>
+          <li><code>rec_velocity_smooth_days</code>: 增长率平滑（天）</li>
+        </ul>
+        示例：<a href="{examples["rec_tune"]}">{examples["rec_tune"]}</a>
       </div>
       <div class="footer">
         其它接口：<a href="{examples["tags_api"]}">/tags</a>（标签列表）、<a href="{examples["authors_api"]}">/authors</a>（作者列表）。<br/>

@@ -84,8 +84,12 @@ def test_admin_put_settings_updates_and_get_reflects(tmp_path: Path, monkeypatch
         assert settings["random"]["fail_cooldown_ms"] == 12345
         assert settings["random"]["strategy"] == "random"
         assert settings["random"]["quality_samples"] == 7
+        assert settings["random"]["dedup"]["enabled"] is True
+        assert settings["random"]["dedup"]["window_s"] == 1200
         assert settings["random"]["recommendation"]["pick_mode"] == "best"
         assert settings["random"]["recommendation"]["temperature"] == 2.5
+        assert settings["random"]["recommendation"]["freshness_half_life_days"] == 21.0
+        assert settings["random"]["recommendation"]["velocity_smooth_days"] == 2.0
         assert settings["random"]["recommendation"]["score_weights"]["bookmark"] == 10.0
         assert settings["random"]["recommendation"]["score_weights"]["view"] == 1.0
         assert settings["random"]["recommendation"]["multipliers"]["ai"] == 0.5

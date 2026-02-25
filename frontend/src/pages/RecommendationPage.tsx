@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, InputNumber, Select, Skeleton, Space, Typography } from "antd";
+import { Alert, Button, Card, Form, Input, InputNumber, Select, Skeleton, Space, Switch, Typography } from "antd";
 import React, { useEffect, useMemo, useState } from "react";
 
 import { ApiError, apiJson } from "../api/client";
@@ -35,6 +35,8 @@ type FormValues = {
   w_bookmark_rate: number;
   w_freshness: number;
   w_bookmark_velocity: number;
+  freshness_half_life_days: number;
+  velocity_smooth_days: number;
 
   m_ai: number;
   m_non_ai: number;
@@ -43,6 +45,14 @@ type FormValues = {
   m_manga: number;
   m_ugoira: number;
   m_unknown_illust_type: number;
+
+  dedup_enabled: boolean;
+  dedup_window_s: number;
+  dedup_max_images: number;
+  dedup_max_authors: number;
+  dedup_strict: boolean;
+  dedup_image_penalty: number;
+  dedup_author_penalty: number;
 
   preview_seed: string;
 };
@@ -62,6 +72,8 @@ const DEFAULTS: Omit<FormValues, "preview_seed"> = {
   w_bookmark_rate: 3.0,
   w_freshness: 1.0,
   w_bookmark_velocity: 1.2,
+  freshness_half_life_days: 21.0,
+  velocity_smooth_days: 2.0,
   m_ai: 1.0,
   m_non_ai: 1.0,
   m_unknown_ai: 1.0,
@@ -69,6 +81,13 @@ const DEFAULTS: Omit<FormValues, "preview_seed"> = {
   m_manga: 1.0,
   m_ugoira: 1.0,
   m_unknown_illust_type: 1.0,
+  dedup_enabled: true,
+  dedup_window_s: 20 * 60,
+  dedup_max_images: 5000,
+  dedup_max_authors: 2000,
+  dedup_strict: false,
+  dedup_image_penalty: 8.0,
+  dedup_author_penalty: 2.5,
 };
 
 function requestIdFromError(err: unknown): string | null {
@@ -79,6 +98,17 @@ function requestIdFromError(err: unknown): string | null {
 function asObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+}
+
+function asBool(value: unknown, fallback: boolean): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && (value === 0 || value === 1)) return Boolean(value);
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") return true;
+    if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") return false;
+  }
+  return fallback;
 }
 
 function asInt(value: unknown, fallback: number): number {
@@ -138,6 +168,7 @@ export function RecommendationPage() {
     const settings = asObject(query.data.settings);
     const random = asObject(settings.random);
     const recommendation = asObject(random.recommendation);
+    const dedup = asObject(random.dedup);
     const scoreWeights = asObject(recommendation.score_weights);
     const multipliers = asObject(recommendation.multipliers);
 
@@ -146,6 +177,8 @@ export function RecommendationPage() {
       random_quality_samples: asInt(random.quality_samples, DEFAULTS.random_quality_samples),
       pick_mode: asLowerEnum(recommendation.pick_mode, PICK_MODE_VALUES, DEFAULTS.pick_mode),
       temperature: asFloat(recommendation.temperature, DEFAULTS.temperature),
+      freshness_half_life_days: asFloat(recommendation.freshness_half_life_days, DEFAULTS.freshness_half_life_days),
+      velocity_smooth_days: asFloat(recommendation.velocity_smooth_days, DEFAULTS.velocity_smooth_days),
       w_bookmark: asFloat(scoreWeights.bookmark, DEFAULTS.w_bookmark),
       w_view: asFloat(scoreWeights.view, DEFAULTS.w_view),
       w_comment: asFloat(scoreWeights.comment, DEFAULTS.w_comment),
@@ -160,6 +193,13 @@ export function RecommendationPage() {
       m_manga: asFloat(multipliers.manga, DEFAULTS.m_manga),
       m_ugoira: asFloat(multipliers.ugoira, DEFAULTS.m_ugoira),
       m_unknown_illust_type: asFloat(multipliers.unknown_illust_type, DEFAULTS.m_unknown_illust_type),
+      dedup_enabled: asBool(dedup.enabled, DEFAULTS.dedup_enabled),
+      dedup_window_s: asInt(dedup.window_s, DEFAULTS.dedup_window_s),
+      dedup_max_images: asInt(dedup.max_images, DEFAULTS.dedup_max_images),
+      dedup_max_authors: asInt(dedup.max_authors, DEFAULTS.dedup_max_authors),
+      dedup_strict: asBool(dedup.strict, DEFAULTS.dedup_strict),
+      dedup_image_penalty: asFloat(dedup.image_penalty, DEFAULTS.dedup_image_penalty),
+      dedup_author_penalty: asFloat(dedup.author_penalty, DEFAULTS.dedup_author_penalty),
       preview_seed: "",
     });
   }, [form, query.data]);
@@ -172,8 +212,8 @@ export function RecommendationPage() {
       "+ w_comment * ln(1 + comment_count)",
       "+ w_pixels * ln(1 + (width*height)/1_000_000)",
       "+ w_bookmark_rate * ln(1 + (bookmark_count/view_count)*1000)",
-      "+ w_freshness * exp(-age_days / 21)",
-      "+ w_bookmark_velocity * ln(1 + bookmark_count / (age_days + 2))",
+      "- w_freshness * (age_days / freshness_half_life_days)",
+      "+ w_bookmark_velocity * ln(1 + bookmark_count / (age_days + velocity_smooth_days))",
       "",
       "说明：有 seed 时，为保证可复现，会自动关闭 freshness/bookmark_velocity 两项。",
       "最终得分会再乘以“类别倍率”（AI/插画/漫画/动图等）。",
@@ -190,9 +230,20 @@ export function RecommendationPage() {
             random: {
               strategy: values.random_strategy,
               quality_samples: values.random_quality_samples,
+              dedup: {
+                enabled: values.dedup_enabled,
+                window_s: Math.max(0, Math.trunc(values.dedup_window_s || 0)),
+                max_images: Math.max(1, Math.trunc(values.dedup_max_images || 1)),
+                max_authors: Math.max(1, Math.trunc(values.dedup_max_authors || 1)),
+                strict: values.dedup_strict,
+                image_penalty: values.dedup_image_penalty,
+                author_penalty: values.dedup_author_penalty,
+              },
               recommendation: {
                 pick_mode: values.pick_mode,
                 temperature: values.temperature,
+                freshness_half_life_days: values.freshness_half_life_days,
+                velocity_smooth_days: values.velocity_smooth_days,
                 score_weights: {
                   bookmark: values.w_bookmark,
                   view: values.w_view,
@@ -375,6 +426,36 @@ export function RecommendationPage() {
             </Form.Item>
 
             <Typography.Title level={5} style={{ marginTop: 12 }}>
+              全局防重复（dedup）
+            </Typography.Title>
+            <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+              开启后，同一张图片在窗口期内会尽量不重复返回（进程内 best-effort；严格模式可禁止回退重复）。
+            </Typography.Paragraph>
+            <Space wrap align="start">
+              <Form.Item label="启用" name="dedup_enabled" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+              <Form.Item label="窗口（秒）" name="dedup_window_s" extra="例如 1200 表示 20 分钟。">
+                <InputNumber min={0} max={24 * 60 * 60} step={10} style={{ width: 240 }} />
+              </Form.Item>
+              <Form.Item label="最大图片缓存" name="dedup_max_images">
+                <InputNumber min={1} max={200000} step={100} style={{ width: 240 }} />
+              </Form.Item>
+              <Form.Item label="最大作者缓存" name="dedup_max_authors">
+                <InputNumber min={1} max={200000} step={50} style={{ width: 240 }} />
+              </Form.Item>
+              <Form.Item label="严格模式" name="dedup_strict" valuePropName="checked" extra="开启后，当窗口内无可用图时不会回退重复。">
+                <Switch />
+              </Form.Item>
+              <Form.Item label="图片重复惩罚" name="dedup_image_penalty">
+                <InputNumber min={0} max={1000} step={0.5} style={{ width: 240 }} />
+              </Form.Item>
+              <Form.Item label="作者重复惩罚" name="dedup_author_penalty">
+                <InputNumber min={0} max={1000} step={0.5} style={{ width: 240 }} />
+              </Form.Item>
+            </Space>
+
+            <Typography.Title level={5} style={{ marginTop: 12 }}>
               评分公式（score_weights）
             </Typography.Title>
             <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
@@ -396,15 +477,21 @@ export function RecommendationPage() {
               <Form.Item label="收藏率权重（bookmark_rate）" name="w_bookmark_rate">
                 <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
               </Form.Item>
-              <Form.Item label="新鲜度权重（freshness）" name="w_freshness" extra="指数衰减：exp(-age_days/21)，越新越加分。">
+              <Form.Item label="新鲜度权重（freshness）" name="w_freshness" extra="时间衰减（loss）：-w * (age_days/half_life)，越老越扣分。">
                 <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
+              </Form.Item>
+              <Form.Item label="新鲜度半衰期（天）" name="freshness_half_life_days" extra="半衰期越小，衰减越强。">
+                <InputNumber min={0.1} max={3650} step={0.5} style={{ width: 240 }} />
               </Form.Item>
               <Form.Item
                 label="收藏增长率权重（bookmark_velocity）"
                 name="w_bookmark_velocity"
-                extra="ln(1 + bookmark_count/(age_days+2))，帮助“好看的新图”被选中。"
+                extra="ln(1 + bookmark_count/(age_days + smooth_days))，帮助“好看的新图”被选中。"
               >
                 <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
+              </Form.Item>
+              <Form.Item label="增长率平滑（天）" name="velocity_smooth_days" extra="值越大，越不容易因为“刚发布”而爆表。">
+                <InputNumber min={0} max={3650} step={0.5} style={{ width: 240 }} />
               </Form.Item>
             </Space>
 
