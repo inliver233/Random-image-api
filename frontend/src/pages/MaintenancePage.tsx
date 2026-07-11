@@ -340,8 +340,8 @@ export function MaintenancePage() {
 
       <Card title="模块端口（Phase 4）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          Catalog / JobQueue / RecentDedup 端口只读状态。默认均为本地实现；Redis/NATS/Postgres
-          仅端口就绪，生产切换仍属运维。不展示密钥或连接串。
+          Catalog / JobQueue / RecentDedup 端口只读状态。Catalog/JobQueue 默认本地；RecentDedup
+          支持 RECENT_DEDUP_BACKEND=redis + REDIS_URL（失败回落 memory）。不展示密钥或连接串。
         </Typography.Paragraph>
 
         <QueryState query={modularPortsStatus}>

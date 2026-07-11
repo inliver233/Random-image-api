@@ -30,6 +30,7 @@ from app.core.redact import redact_text
 from app.core.runtime_settings import RuntimeConfig, load_runtime_config
 from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
+from app.db.catalog import CatalogStore, build_catalog_store
 from app.db.models.image_tags import ImageTag
 from app.db.models.images import Image
 from app.db.models.hydration_runs import HydrationRun
@@ -164,6 +165,7 @@ def build_hydrate_metadata_handler(
     *,
     transport: httpx.BaseTransport | None = None,
     token_strategy: str = "least_error",
+    catalog: CatalogStore | None = None,
 ) -> Any:
     settings = load_settings()
     encryptor = FieldEncryptor.from_key(settings.field_encryption_key)
@@ -172,6 +174,7 @@ def build_hydrate_metadata_handler(
         client_secret=settings.pixiv_oauth_client_secret,
         hash_secret=(settings.pixiv_oauth_hash_secret or "").strip() or None,
     )
+    catalog_store = catalog if catalog is not None else build_catalog_store(database_url=str(engine.url))
 
     Session = create_sessionmaker(engine)
 
@@ -1008,7 +1011,6 @@ LIMIT 1;
         tags: list[tuple[str, str | None]],
         source_import_id: int | None,
     ) -> list[int]:
-        now_expr = sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
         normalized_tag_names = [name for name, _t in tags]
 
         async def _op() -> list[int]:
@@ -1042,12 +1044,12 @@ LIMIT 1;
 
                 image_ids: list[int] = []
                 for page in pages:
-                    stmt = sqlite_insert(Image).values(
+                    image_id = await catalog_store.upsert_hydrated_image_page(
+                        session,
                         illust_id=int(illust_id),
                         page_index=int(page.page_index),
                         ext=str(page.ext),
                         original_url=str(page.original_url),
-                        proxy_path="",
                         random_key=random.random(),
                         width=width,
                         height=height,
@@ -1065,37 +1067,7 @@ LIMIT 1;
                         comment_count=comment_count,
                         created_import_id=int(source_import_id) if source_import_id else None,
                     )
-                    stmt = stmt.on_conflict_do_update(
-                        index_elements=["illust_id", "page_index"],
-                        set_={
-                            "ext": stmt.excluded.ext,
-                            "original_url": stmt.excluded.original_url,
-                            "width": stmt.excluded.width,
-                            "height": stmt.excluded.height,
-                            "aspect_ratio": stmt.excluded.aspect_ratio,
-                            "orientation": stmt.excluded.orientation,
-                            "x_restrict": stmt.excluded.x_restrict,
-                            "ai_type": stmt.excluded.ai_type,
-                            "illust_type": stmt.excluded.illust_type,
-                            "user_id": stmt.excluded.user_id,
-                            "user_name": stmt.excluded.user_name,
-                            "title": stmt.excluded.title,
-                            "created_at_pixiv": stmt.excluded.created_at_pixiv,
-                            "bookmark_count": stmt.excluded.bookmark_count,
-                            "view_count": stmt.excluded.view_count,
-                            "comment_count": stmt.excluded.comment_count,
-                            "updated_at": now_expr,
-                        },
-                    ).returning(Image.id)
-
-                    result = await session.execute(stmt)
-                    image_id = int(result.scalar_one())
                     image_ids.append(image_id)
-
-                    proxy_path = f"/i/{image_id}.{page.ext}"
-                    await session.execute(
-                        sa.update(Image).where(Image.id == image_id).values(proxy_path=proxy_path)
-                    )
 
                 if image_ids:
                     await session.execute(sa.delete(ImageTag).where(ImageTag.image_id.in_(image_ids)))

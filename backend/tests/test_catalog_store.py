@@ -72,6 +72,96 @@ def test_sqlite_catalog_store_upsert(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_sqlite_catalog_store_upsert_hydrated(tmp_path: Path) -> None:
+    engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_hydrate.db").as_posix())
+
+    async def _run() -> None:
+        import sqlalchemy as sa
+
+        from app.db.models.images import Image
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        store = build_catalog_store(database_url=str(engine.url))
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            image_id = await store.upsert_hydrated_image_page(
+                session,
+                illust_id=42,
+                page_index=0,
+                ext="png",
+                original_url="https://example.test/b.png",
+                random_key=0.3,
+                width=800,
+                height=600,
+                aspect_ratio=800 / 600,
+                orientation=2,
+                x_restrict=0,
+                ai_type=0,
+                illust_type=0,
+                user_id=7,
+                user_name="u",
+                title="t",
+                created_at_pixiv="2020-01-01T00:00:00+00:00",
+                bookmark_count=10,
+                view_count=100,
+                comment_count=1,
+                created_import_id=None,
+            )
+            await session.commit()
+            row = (
+                await session.execute(
+                    sa.select(
+                        Image.illust_id,
+                        Image.width,
+                        Image.bookmark_count,
+                        Image.proxy_path,
+                    ).where(Image.id == int(image_id))
+                )
+            ).one()
+            assert int(row.illust_id) == 42
+            assert int(row.width or 0) == 800
+            assert int(row.bookmark_count or 0) == 10
+            assert str(row.proxy_path) == f"/i/{image_id}.png"
+            # Update metadata on conflict; proxy_path stays id-based.
+            image_id2 = await store.upsert_hydrated_image_page(
+                session,
+                illust_id=42,
+                page_index=0,
+                ext="png",
+                original_url="https://example.test/b2.png",
+                random_key=0.9,
+                width=900,
+                height=700,
+                aspect_ratio=900 / 700,
+                orientation=2,
+                x_restrict=0,
+                ai_type=0,
+                illust_type=0,
+                user_id=7,
+                user_name="u2",
+                title="t2",
+                created_at_pixiv="2020-01-02T00:00:00+00:00",
+                bookmark_count=20,
+                view_count=200,
+                comment_count=2,
+                created_import_id=None,
+            )
+            await session.commit()
+            assert int(image_id2) == int(image_id)
+            row2 = (
+                await session.execute(
+                    sa.select(Image.width, Image.bookmark_count, Image.title).where(Image.id == int(image_id))
+                )
+            ).one()
+            assert int(row2.width or 0) == 900
+            assert int(row2.bookmark_count or 0) == 20
+            assert str(row2.title) == "t2"
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_resolve_catalog_store_fallback() -> None:
     from app.core.random_delivery import resolve_catalog_store
 

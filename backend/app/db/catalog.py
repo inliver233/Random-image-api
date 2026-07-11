@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.images_get import get_image_by_id, get_images_by_ids
 from app.db.images_mark import mark_image_failure, mark_image_ok
-from app.db.images_upsert import upsert_image_by_illust_page
+from app.db.images_upsert import upsert_hydrated_image_page, upsert_image_by_illust_page
 from app.db.models.images import Image
 
 
@@ -31,6 +31,32 @@ class CatalogStore(Protocol):
         original_url: str,
         proxy_path: str,
         random_key: float,
+        created_import_id: int | None,
+    ) -> int: ...
+
+    async def upsert_hydrated_image_page(
+        self,
+        session: AsyncSession,
+        *,
+        illust_id: int,
+        page_index: int,
+        ext: str,
+        original_url: str,
+        random_key: float,
+        width: int | None,
+        height: int | None,
+        aspect_ratio: float | None,
+        orientation: int | None,
+        x_restrict: int | None,
+        ai_type: int | None,
+        illust_type: int | None,
+        user_id: int | None,
+        user_name: str | None,
+        title: str | None,
+        created_at_pixiv: str | None,
+        bookmark_count: int | None,
+        view_count: int | None,
+        comment_count: int | None,
         created_import_id: int | None,
     ) -> int: ...
 
@@ -76,6 +102,55 @@ class SqliteCatalogStore:
             original_url=original_url,
             proxy_path=proxy_path,
             random_key=random_key,
+            created_import_id=created_import_id,
+        )
+
+    async def upsert_hydrated_image_page(
+        self,
+        session: AsyncSession,
+        *,
+        illust_id: int,
+        page_index: int,
+        ext: str,
+        original_url: str,
+        random_key: float,
+        width: int | None,
+        height: int | None,
+        aspect_ratio: float | None,
+        orientation: int | None,
+        x_restrict: int | None,
+        ai_type: int | None,
+        illust_type: int | None,
+        user_id: int | None,
+        user_name: str | None,
+        title: str | None,
+        created_at_pixiv: str | None,
+        bookmark_count: int | None,
+        view_count: int | None,
+        comment_count: int | None,
+        created_import_id: int | None,
+    ) -> int:
+        return await upsert_hydrated_image_page(
+            session,
+            illust_id=illust_id,
+            page_index=page_index,
+            ext=ext,
+            original_url=original_url,
+            random_key=random_key,
+            width=width,
+            height=height,
+            aspect_ratio=aspect_ratio,
+            orientation=orientation,
+            x_restrict=x_restrict,
+            ai_type=ai_type,
+            illust_type=illust_type,
+            user_id=user_id,
+            user_name=user_name,
+            title=title,
+            created_at_pixiv=created_at_pixiv,
+            bookmark_count=bookmark_count,
+            view_count=view_count,
+            comment_count=comment_count,
             created_import_id=created_import_id,
         )
 
