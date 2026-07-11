@@ -9,6 +9,7 @@ from typing import Any
 
 from app.easy_proxies.auto_refresh import EasyProxiesAutoRefreshConfig, EasyProxiesAutoRefresher
 from app.core.config import load_settings
+from app.core.env_parse import parse_bool_env, parse_int_env
 from app.core.logging import configure_logging, get_logger
 from app.core.redact import redact_text
 from app.core.time import iso_utc_ms
@@ -66,29 +67,6 @@ def build_default_dispatcher(engine) -> JobDispatcher:
     _safe_register("proxy_probe", lambda: build_proxy_probe_handler(engine))
     _safe_register("easy_proxies_import", lambda: build_easy_proxies_import_handler(engine))
     return dispatcher
-
-
-def _parse_int_env(name: str, *, default: int, min_v: int, max_v: int) -> int:
-    raw = (os.environ.get(name) or "").strip()
-    if not raw:
-        return int(default)
-    try:
-        value = int(raw)
-    except Exception:
-        return int(default)
-    return max(int(min_v), min(int(value), int(max_v)))
-
-
-def _parse_bool_env(name: str, *, default: bool) -> bool:
-    raw = (os.environ.get(name) or "").strip()
-    if raw == "":
-        return bool(default)
-    v = raw.lower()
-    if v in {"1", "true", "yes", "y", "on"}:
-        return True
-    if v in {"0", "false", "no", "n", "off"}:
-        return False
-    return bool(default)
 
 
 def compute_desired_worker_concurrency(
@@ -304,7 +282,7 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
             if attach_pool_id is not None and int(attach_pool_id) <= 0:
                 attach_pool_id = None
 
-        attach_weight = _parse_int_env(
+        attach_weight = parse_int_env(
             "EASY_PROXIES_ATTACH_WEIGHT",
             default=1,
             min_v=0,
@@ -315,7 +293,7 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
         recompute_disabled = raw_recompute in {"0", "false", "no", "n", "off"}
         recompute_bindings = not recompute_disabled
 
-        max_tokens_per_proxy = _parse_int_env(
+        max_tokens_per_proxy = parse_int_env(
             "EASY_PROXIES_MAX_TOKENS_PER_PROXY",
             default=2,
             min_v=1,
@@ -343,26 +321,26 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
             log.info("easy_proxies_auto_refresh_enabled base_url=%s interval_s=%s", base_url, interval_s)
 
         worker_id = (os.environ.get("WORKER_ID") or f"pid{os.getpid()}").strip()
-        jobs_lock_ttl_s = _parse_int_env(
+        jobs_lock_ttl_s = parse_int_env(
             "WORKER_JOBS_LOCK_TTL_SECONDS",
             default=int(DEFAULT_LOCK_TTL_S),
             min_v=5,
             max_v=3600,
         )
-        max_jobs_per_tick = _parse_int_env(
+        max_jobs_per_tick = parse_int_env(
             "WORKER_MAX_JOBS_PER_TICK",
             default=10,
             min_v=1,
             max_v=1000,
         )
-        max_concurrency = _parse_int_env(
+        max_concurrency = parse_int_env(
             "WORKER_MAX_CONCURRENCY",
             default=50,
             min_v=1,
             max_v=200,
         )
-        auto_concurrency = _parse_bool_env("WORKER_AUTO_CONCURRENCY", default=True)
-        auto_refresh_s = _parse_int_env(
+        auto_concurrency = parse_bool_env("WORKER_AUTO_CONCURRENCY", default=True)
+        auto_refresh_s = parse_int_env(
             "WORKER_AUTO_CONCURRENCY_REFRESH_SECONDS",
             default=15,
             min_v=1,

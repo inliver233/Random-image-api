@@ -18,6 +18,7 @@ from app.core.random_query import normalize_iso_utc_optional
 from app.core.coerce import as_int, as_optional_int, as_str, derive_orientation, truncate_text
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor, mask_secret
+from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
 from app.core.failover import classify_pixiv_rate_limit, pixiv_rate_limit_backoff_seconds
 from app.core.metrics import TOKEN_REFRESH_FAIL_TOTAL
@@ -179,39 +180,31 @@ def build_hydrate_metadata_handler(
     pixiv_throttle_locks_by_token: dict[int, asyncio.Lock] = {}
     last_pixiv_request_m_by_token: dict[int, float] = {}
 
-    def _env_int(name: str, *, default: int, min_v: int, max_v: int) -> int:
-        raw = (os.environ.get(name) or "").strip()
-        try:
-            value = int(raw)
-        except Exception:
-            value = int(default)
-        return max(int(min_v), min(int(value), int(max_v)))
-
-    proxy_blacklist_ttl_s = _env_int(
+    proxy_blacklist_ttl_s = parse_int_env(
         "HYDRATE_PROXY_BLACKLIST_TTL_S",
         default=5 * 60,
         min_v=0,
         max_v=24 * 60 * 60,
     )
-    proxy_override_ttl_s = _env_int(
+    proxy_override_ttl_s = parse_int_env(
         "HYDRATE_PROXY_OVERRIDE_TTL_S",
         default=30 * 60,
         min_v=0,
         max_v=7 * 24 * 60 * 60,
     )
-    proxy_failover_attempts = _env_int(
+    proxy_failover_attempts = parse_int_env(
         "HYDRATE_PROXY_FAILOVER_ATTEMPTS",
         default=4,
         min_v=0,
         max_v=50,
     )
-    recoverable_defer_base_s = _env_int(
+    recoverable_defer_base_s = parse_int_env(
         "HYDRATE_RECOVERABLE_DEFER_BASE_S",
         default=20,
         min_v=1,
         max_v=24 * 60 * 60,
     )
-    recoverable_defer_jitter_s = _env_int(
+    recoverable_defer_jitter_s = parse_int_env(
         "HYDRATE_RECOVERABLE_DEFER_JITTER_S",
         default=20,
         min_v=0,
