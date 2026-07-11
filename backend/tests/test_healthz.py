@@ -40,7 +40,42 @@ def test_healthz_ok_includes_request_id() -> None:
     assert modules["api_key_rate_limit"]["redis_url_configured"] is False
     assert modules["api_key_rate_limit"]["required"] is False
     assert modules["job_queue"]["backend"] == "sqlite"
+    assert modules["job_queue"]["requested"] == "sqlite"
+    assert modules["job_queue"]["implemented"] is True
+    assert modules["job_queue"]["using_sqlite_fallback"] is False
     assert modules["catalog"]["backend"] == "sqlite"
+
+
+def test_healthz_job_queue_reports_settings_fallback(tmp_path: Path, monkeypatch) -> None:
+    """JOB_QUEUE_BACKEND via Settings: reserved nats → sqlite active + fallback honesty."""
+    from app.main import create_app
+
+    db_path = tmp_path / "healthz_job_queue.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
+    monkeypatch.setenv("JOB_QUEUE_BACKEND", "nats")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        resp = client.get("/healthz", headers={"X-Request-Id": "req_test"})
+        assert resp.status_code == 200
+        modules = resp.json().get("modules") or {}
+        jq = modules.get("job_queue") or {}
+        assert jq.get("backend") == "sqlite"
+        assert jq.get("requested") == "nats"
+        assert jq.get("implemented") is False
+        assert jq.get("using_sqlite_fallback") is True
 
 
 def test_healthz_uses_request_id_header_if_provided() -> None:
