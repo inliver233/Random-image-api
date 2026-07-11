@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
+from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.api_keys import api_key_hint, hmac_sha256_hex
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -83,12 +84,7 @@ async def list_api_keys(
         for row in items_rows
     ]
 
-    return {
-        "ok": True,
-        "items": items,
-        "next_cursor": str(next_cursor) if next_cursor is not None else "",
-        "request_id": rid,
-    }
+    return admin_cursor_list(request, items=items, next_cursor=next_cursor, request_id=rid)
 
 
 @router.post("/api-keys")
@@ -145,7 +141,11 @@ async def create_api_key(
             return int(row.id)
 
     api_key_id = await with_sqlite_busy_retry(_op)
-    return {"ok": True, "api_key_id": str(api_key_id), "hint": hint, "request_id": rid}
+    return admin_ok(
+        request,
+        payload={"api_key_id": str(api_key_id), "hint": hint},
+        request_id=rid,
+    )
 
 
 @router.put("/api-keys/{api_key_id}")
@@ -189,7 +189,7 @@ async def update_api_key(
             row.updated_at = now
             await session.commit()
 
-        return {"ok": True, "api_key_id": str(api_key_id), "request_id": rid}
+        return admin_ok(request, payload={"api_key_id": str(api_key_id)}, request_id=rid)
 
     return await with_sqlite_busy_retry(_op)
 

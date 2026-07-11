@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
+from app.core.admin_json import admin_cursor_list
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.db.models.image_tags import ImageTag
@@ -151,12 +152,7 @@ async def list_admin_images(
             }
         )
 
-    return {
-        "ok": True,
-        "items": items,
-        "next_cursor": str(next_cursor) if next_cursor is not None else "",
-        "request_id": rid,
-    }
+    return admin_cursor_list(request, items=items, next_cursor=next_cursor, request_id=rid)
 
 
 async def _load_bulk_delete_json(request: Request) -> dict[str, Any]:

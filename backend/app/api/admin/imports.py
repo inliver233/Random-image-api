@@ -14,6 +14,7 @@ from starlette.datastructures import UploadFile
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
+from app.core.admin_json import admin_cursor_list
 from app.core.data_files import get_sqlite_db_dir, make_file_ref
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -537,12 +538,7 @@ async def list_imports(
             }
         )
 
-    return {
-        "ok": True,
-        "items": items,
-        "next_cursor": str(next_cursor_i) if next_cursor_i is not None else "",
-        "request_id": rid,
-    }
+    return admin_cursor_list(request, items=items, next_cursor=next_cursor_i, request_id=rid)
 
 
 @router.get("/imports/{import_id}")

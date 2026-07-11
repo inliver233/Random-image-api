@@ -10,6 +10,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
+from app.core.admin_json import admin_cursor_list
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.crypto import FieldEncryptor
 from app.core.errors import ApiError, ErrorCode
@@ -202,12 +203,7 @@ async def list_proxy_endpoints(
         for p in endpoints
     ]
 
-    return {
-        "ok": True,
-        "items": items,
-        "next_cursor": str(next_cursor_i) if next_cursor_i is not None else "",
-        "request_id": rid,
-    }
+    return admin_cursor_list(request, items=items, next_cursor=next_cursor_i, request_id=rid)
 
 
 def _parse_conflict_policy(value: Any) -> str:

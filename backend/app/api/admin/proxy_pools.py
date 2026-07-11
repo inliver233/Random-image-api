@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.exc import IntegrityError
 
 from app.api.admin.deps import get_admin_claims
+from app.core.admin_json import admin_ok
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.db.models.proxy_endpoints import ProxyEndpoint
@@ -160,7 +161,7 @@ async def list_proxy_pools(
         for p in pools
     ]
 
-    return {"ok": True, "items": items, "request_id": rid}
+    return admin_ok(request, payload={"items": items}, request_id=rid)
 
 
 @router.post("/proxy-pools")

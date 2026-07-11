@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
+from app.core.admin_json import admin_ok
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.errors import ApiError, ErrorCode
 from app.core.proxy_routing import select_proxy_uri_for_url
@@ -173,7 +174,7 @@ async def list_tokens(
         for t in tokens
     ]
 
-    return {"ok": True, "items": items, "request_id": rid}
+    return admin_ok(request, payload={"items": items}, request_id=rid)
 
 
 @router.post("/tokens")

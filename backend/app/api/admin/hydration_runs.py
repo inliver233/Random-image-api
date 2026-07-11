@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
+from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
@@ -196,12 +197,7 @@ async def list_hydration_runs(
     next_cursor = int(current_rows[-1].id) if len(rows) > limit and current_rows else None
     items = [_serialize_run(row, latest_job=jobs_by_run_id.get(str(int(row.id)))) for row in current_rows]
 
-    return {
-        "ok": True,
-        "items": items,
-        "next_cursor": str(next_cursor) if next_cursor is not None else "",
-        "request_id": rid,
-    }
+    return admin_cursor_list(request, items=items, next_cursor=next_cursor, request_id=rid)
 
 
 @router.get("/hydration-runs/{run_id}")
@@ -226,7 +222,7 @@ async def get_hydration_run(
         jobs = await _latest_jobs_by_run_ids(session, run_ids=[str(run_id)])
         item = _serialize_run(run, latest_job=jobs.get(str(run_id)))
 
-    return {"ok": True, "item": item, "request_id": rid}
+    return admin_ok(request, payload={"item": item}, request_id=rid)
 
 
 @router.post("/hydration-runs/manual")

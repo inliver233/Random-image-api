@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
+from app.core.admin_json import admin_ok
 from app.core.request_id import get_or_create_request_id
 
 router = APIRouter()
@@ -36,5 +37,5 @@ async def get_random_stats(
         snap = await stats.snapshot()
         snapshot = asdict(snap)
 
-    return {"ok": True, "stats": snapshot, "request_id": rid}
+    return admin_ok(request, payload={"stats": snapshot}, request_id=rid)
 

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
+from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
@@ -80,12 +81,7 @@ async def list_jobs(
         for row in items_rows
     ]
 
-    return {
-        "ok": True,
-        "items": items,
-        "next_cursor": str(next_cursor) if next_cursor is not None else "",
-        "request_id": rid,
-    }
+    return admin_cursor_list(request, items=items, next_cursor=next_cursor, request_id=rid)
 
 
 @router.get("/jobs/{job_id}")
@@ -116,28 +112,30 @@ async def get_job(
         except Exception:
             payload = None
 
-    return {
-        "ok": True,
-        "item": {
-            "id": str(row.id),
-            "type": row.type,
-            "status": row.status,
-            "priority": int(row.priority),
-            "run_after": row.run_after,
-            "attempt": int(row.attempt),
-            "max_attempts": int(row.max_attempts),
-            "payload": payload,
-            "payload_json": payload_json,
-            "last_error": row.last_error,
-            "locked_by": row.locked_by,
-            "locked_at": row.locked_at,
-            "ref_type": row.ref_type,
-            "ref_id": row.ref_id,
-            "created_at": row.created_at,
-            "updated_at": row.updated_at,
+    return admin_ok(
+        request,
+        payload={
+            "item": {
+                "id": str(row.id),
+                "type": row.type,
+                "status": row.status,
+                "priority": int(row.priority),
+                "run_after": row.run_after,
+                "attempt": int(row.attempt),
+                "max_attempts": int(row.max_attempts),
+                "payload": payload,
+                "payload_json": payload_json,
+                "last_error": row.last_error,
+                "locked_by": row.locked_by,
+                "locked_at": row.locked_at,
+                "ref_type": row.ref_type,
+                "ref_id": row.ref_id,
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+            }
         },
-        "request_id": rid,
-    }
+        request_id=rid,
+    )
 
 
 @router.post("/jobs/{job_id}/retry")
@@ -172,7 +170,11 @@ async def retry_job(
             row.updated_at = now
             await session.commit()
 
-        return {"ok": True, "job_id": str(job_id), "status": "pending", "request_id": rid}
+        return admin_ok(
+            request,
+            payload={"job_id": str(job_id), "status": "pending"},
+            request_id=rid,
+        )
 
     return await with_sqlite_busy_retry(_op)
 
@@ -205,7 +207,11 @@ async def cancel_job(
             row.updated_at = now
             await session.commit()
 
-        return {"ok": True, "job_id": str(job_id), "status": "canceled", "request_id": rid}
+        return admin_ok(
+            request,
+            payload={"job_id": str(job_id), "status": "canceled"},
+            request_id=rid,
+        )
 
     return await with_sqlite_busy_retry(_op)
 
@@ -239,6 +245,10 @@ async def move_job_to_dlq(
             row.updated_at = now
             await session.commit()
 
-        return {"ok": True, "job_id": str(job_id), "status": "dlq", "request_id": rid}
+        return admin_ok(
+            request,
+            payload={"job_id": str(job_id), "status": "dlq"},
+            request_id=rid,
+        )
 
     return await with_sqlite_busy_retry(_op)

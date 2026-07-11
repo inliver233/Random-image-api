@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
+from app.core.admin_json import admin_ok
 from app.core.request_id import get_or_create_request_id
 from app.db.session import with_sqlite_busy_retry
 
@@ -153,4 +154,4 @@ WHERE status=1
         }
 
     counts = await with_sqlite_busy_retry(_op)
-    return {"ok": True, "counts": counts, "request_id": rid}
+    return admin_ok(request, payload={"counts": counts}, request_id=rid)
