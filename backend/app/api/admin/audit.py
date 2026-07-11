@@ -11,8 +11,7 @@ from app.core.admin_cursor_query import parse_admin_int_cursor, slice_id_cursor_
 from app.core.admin_json import admin_cursor_list
 from app.core.request_id import get_or_create_request_id
 from app.db.models.admin_audit import AdminAudit
-from app.db.session import create_sessionmaker
-
+from app.db.session import resolve_sessionmaker
 router = APIRouter()
 
 
@@ -31,7 +30,7 @@ async def list_admin_audit(
     rid = get_or_create_request_id(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     stmt = sa.select(AdminAudit).order_by(AdminAudit.id.desc()).limit(limit + 1)
     if cursor_i is not None:

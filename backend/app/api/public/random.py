@@ -27,7 +27,7 @@ from app.core.random_request import (
 )
 from app.core.random_response import build_json_body, build_simple_json_body, resolve_public_item_urls
 from app.core.runtime_config_cache import resolve_runtime_for_request
-from app.db.session import create_sessionmaker
+from app.db.session import resolve_sessionmaker
 from app.db.tag_store import resolve_tag_store
 
 router = APIRouter()
@@ -60,7 +60,7 @@ async def random_image(
     random_service = resolve_random_service_factory(getattr(request.app.state, "random_service", None))
     random_pick = getattr(request.app.state, "random_pick", None)
     job_queue = getattr(request.app.state, "job_queue", None)
-    Session = getattr(request.app.state, "sessionmaker", None) or create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     runtime = await resolve_runtime_for_request(request, engine)
 
     resolved_proxy = resolve_proxy_mirror(

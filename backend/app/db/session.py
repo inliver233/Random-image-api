@@ -5,7 +5,7 @@ import random
 import sqlite3
 import weakref
 from collections.abc import AsyncIterator, Awaitable, Callable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from sqlalchemy.exc import OperationalError, TimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -91,6 +91,25 @@ def create_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]
     sm = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
     _SESSIONMAKER_BY_ENGINE[engine] = sm
     return sm
+
+
+def resolve_sessionmaker(request: Any, engine: AsyncEngine | None = None) -> async_sessionmaker[AsyncSession]:
+    """Prefer ``app.state.sessionmaker`` (wired at startup); fall back to process cache.
+
+    Public and admin routes share this so DI stays one path without re-allocating
+    when state is present.
+    """
+    # Local import keeps session.py free of FastAPI at module import for pure DB tests.
+    eng = engine
+    if eng is None:
+        eng = getattr(getattr(request, "app", None), "state", None)
+        eng = getattr(eng, "engine", None) if eng is not None else None
+    state_sm = getattr(getattr(getattr(request, "app", None), "state", None), "sessionmaker", None)
+    if state_sm is not None:
+        return state_sm
+    if eng is None:
+        raise RuntimeError("resolve_sessionmaker requires app.state.engine or engine=")
+    return create_sessionmaker(eng)
 
 
 async def get_session(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncSession]:

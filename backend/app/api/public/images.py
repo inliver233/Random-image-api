@@ -20,16 +20,11 @@ from app.core.random_delivery import resolve_catalog_store
 from app.core.random_request import force_local_from_query, prefer_image_edge
 from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.runtime_config_cache import resolve_runtime_for_request
-from app.db.session import create_sessionmaker
+from app.db.session import resolve_sessionmaker
 from app.db.tag_store import resolve_tag_store
 
 router = APIRouter()
 
-
-def _resolve_sessionmaker(request: Request):
-    return getattr(request.app.state, "sessionmaker", None) or create_sessionmaker(
-        request.app.state.engine
-    )
 
 
 @router.get("/images")
@@ -70,7 +65,7 @@ async def list_images(
     )
 
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
-    Session = _resolve_sessionmaker(request)
+    Session = resolve_sessionmaker(request)
     async with Session() as session:
         images, next_cursor = await catalog.list_images(
             session,
@@ -107,7 +102,7 @@ async def get_image(
 
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     tag_store = resolve_tag_store(getattr(request.app.state, "tag_store", None))
-    Session = _resolve_sessionmaker(request)
+    Session = resolve_sessionmaker(request)
 
     async with Session() as session:
         image = await catalog.get_image_by_id(session, image_id=image_id)
@@ -142,7 +137,7 @@ async def proxy_image(
     engine = request.app.state.engine
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     tag_store = resolve_tag_store(getattr(request.app.state, "tag_store", None))
-    Session = _resolve_sessionmaker(request)
+    Session = resolve_sessionmaker(request)
 
     async with Session() as session:
         image = await catalog.get_image_by_id(session, image_id=image_id)

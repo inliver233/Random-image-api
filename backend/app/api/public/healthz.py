@@ -13,6 +13,7 @@ from app.core.env_parse import parse_int_env
 from app.core.errors import ErrorCode, error_body
 from app.core.cf_api_proxy import load_cf_api_proxy_config_from_settings
 from app.core.image_edge import load_image_edge_config_from_settings
+from app.core.r2_prewarm import r2_prewarm_enabled, r2_prewarm_secret
 from app.core.random_engine_client import random_engine_base_url
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.runtime_settings import worker_last_seen_from_value_json
@@ -173,14 +174,17 @@ async def healthz(request: Request) -> Any:
                 "has_secret": bool(cf_api_cfg.secret) if cf_api_cfg is not None else False,
             },
             "r2_prewarm": {
+                # Parity with admin /maintenance/r2-prewarm: ready requires secret.
                 "enabled_flag": bool(getattr(settings, "r2_prewarm_enabled", False)) if settings is not None else False,
-                "ready": bool(getattr(settings, "r2_prewarm_enabled", False))
-                and bool(str(getattr(settings, "r2_prewarm_url", "") or "").strip())
-                if settings is not None
-                else False,
+                "ready": (
+                    bool(r2_prewarm_enabled(settings) and r2_prewarm_secret(settings))
+                    if settings is not None
+                    else False
+                ),
                 "url_configured": bool(str(getattr(settings, "r2_prewarm_url", "") or "").strip())
                 if settings is not None
                 else False,
+                "secret_configured": bool(r2_prewarm_secret(settings)) if settings is not None else False,
             },
             "random_engine": {
                 "url_configured": bool(engine_url),

@@ -27,8 +27,7 @@ from app.db.request_logs_cleanup import (
     cleanup_request_logs,
     preview_request_logs_cleanup,
 )
-from app.db.session import create_sessionmaker
-
+from app.db.session import resolve_sessionmaker
 router = APIRouter()
 
 
@@ -584,7 +583,7 @@ async def random_engine_compare_filters(
     )
 
     pick_port = resolve_random_pick(getattr(request.app.state, "random_pick", None))
-    Session = create_sessionmaker(request.app.state.engine)
+    Session = resolve_sessionmaker(request)
     async with Session() as session:
         python_count = await pick_port.count_candidates(
             session,

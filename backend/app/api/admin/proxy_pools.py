@@ -22,8 +22,7 @@ from app.core.request_id import get_or_create_request_id
 from app.db.models.proxy_endpoints import ProxyEndpoint
 from app.db.models.proxy_pool_endpoints import ProxyPoolEndpoint
 from app.db.models.proxy_pools import ProxyPool
-from app.db.session import create_sessionmaker
-
+from app.db.session import resolve_sessionmaker
 router = APIRouter()
 
 
@@ -111,7 +110,7 @@ async def list_proxy_pools(
     rid = get_or_create_request_id(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     async with Session() as session:
         pools = (
             (await session.execute(sa.select(ProxyPool).order_by(ProxyPool.id.desc())))
@@ -142,7 +141,7 @@ async def create_proxy_pool(
     body = await _load_create_json(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async with Session() as session:
         row = ProxyPool(
@@ -175,7 +174,7 @@ async def update_proxy_pool(
     body = await _load_update_json(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     async with Session() as session:
         row = await session.get(ProxyPool, pool_id)
         if row is None:
@@ -211,7 +210,7 @@ async def set_proxy_pool_endpoints(
     items = await _load_set_endpoints_json(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     created = 0
     updated = 0

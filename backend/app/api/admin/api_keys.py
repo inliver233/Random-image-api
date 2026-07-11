@@ -15,7 +15,7 @@ from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
 from app.db.models.api_keys import ApiKey
-from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.db.session import resolve_sessionmaker, with_sqlite_busy_retry
 
 router = APIRouter()
 
@@ -35,7 +35,7 @@ async def list_api_keys(
     rid = get_or_create_request_id(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     stmt = sa.select(ApiKey).order_by(ApiKey.id.desc()).limit(limit + 1)
     if cursor_i is not None:
@@ -107,7 +107,7 @@ async def create_api_key(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async def _op() -> int:
         async with Session() as session:
@@ -169,7 +169,7 @@ async def update_api_key(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:

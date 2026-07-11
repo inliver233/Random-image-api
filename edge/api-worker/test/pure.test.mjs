@@ -10,6 +10,7 @@ import { describe, it } from "node:test";
 
 import {
   authorizeSecret,
+  buildUpstreamHeaderPairs,
   DEFAULT_ALLOWED,
   hostAllowed,
   parseAllowedHosts,
@@ -78,6 +79,31 @@ describe("strip headers set", () => {
     assert.ok(STRIP_REQ_HEADERS.has("cf-connecting-ip"));
     assert.ok(STRIP_REQ_HEADERS.has("x-forwarded-for"));
     assert.ok(STRIP_REQ_HEADERS.has("x-proxy-secret"));
-    assert.ok(STRIP_REQ_HEADERS.has("cookie") === false); // cookie stripped in buildUpstreamHeaders
+    assert.ok(STRIP_REQ_HEADERS.has("cookie") === false); // cookie stripped in buildUpstreamHeaderPairs
+  });
+});
+
+describe("buildUpstreamHeaderPairs", () => {
+  it("strips cookie, CF identity, and gate secret; sets Host", () => {
+    const pairs = buildUpstreamHeaderPairs(
+      [
+        ["Authorization", "Bearer tok"],
+        ["Cookie", "sid=abc"],
+        ["cf-connecting-ip", "1.2.3.4"],
+        ["X-Forwarded-For", "9.9.9.9"],
+        ["X-Proxy-Secret", "sekrit"],
+        ["Accept", "application/json"],
+        ["Host", "client-spoof.example"],
+      ],
+      "app-api.pixiv.net",
+    );
+    const map = new Map(pairs.map(([k, v]) => [String(k).toLowerCase(), v]));
+    assert.equal(map.get("authorization"), "Bearer tok");
+    assert.equal(map.get("accept"), "application/json");
+    assert.equal(map.get("host"), "app-api.pixiv.net");
+    assert.equal(map.has("cookie"), false);
+    assert.equal(map.has("cf-connecting-ip"), false);
+    assert.equal(map.has("x-forwarded-for"), false);
+    assert.equal(map.has("x-proxy-secret"), false);
   });
 });

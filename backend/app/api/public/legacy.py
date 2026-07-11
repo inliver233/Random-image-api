@@ -6,8 +6,7 @@ from app.core.admin_request import require_positive_id
 from app.core.errors import ApiError, ErrorCode
 from app.core.image_delivery import deliver_public_image_from_request, normalize_image_ext
 from app.core.random_delivery import resolve_catalog_store
-from app.db.session import create_sessionmaker
-
+from app.db.session import resolve_sessionmaker
 router = APIRouter()
 
 
@@ -26,7 +25,7 @@ async def legacy_multi(
     ext = normalize_image_ext(ext)
 
     engine = request.app.state.engine
-    Session = getattr(request.app.state, "sessionmaker", None) or create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async with Session() as session:
@@ -62,7 +61,7 @@ async def legacy_single(
     ext = normalize_image_ext(ext)
 
     engine = request.app.state.engine
-    Session = getattr(request.app.state, "sessionmaker", None) or create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async with Session() as session:

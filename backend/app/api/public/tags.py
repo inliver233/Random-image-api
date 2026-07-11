@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 
 from app.core.public_json import public_cursor_list_json
 from app.core.public_search_query import parse_public_search_query
-from app.db.session import create_sessionmaker
+from app.db.session import resolve_sessionmaker
 from app.db.tag_store import resolve_tag_store
 
 router = APIRouter()
@@ -22,7 +22,7 @@ async def list_tags(
     parsed = parse_public_search_query(q=q, limit=limit, cursor=cursor, cursor_kind="str")
 
     engine = request.app.state.engine
-    Session = getattr(request.app.state, "sessionmaker", None) or create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     tags = resolve_tag_store(getattr(request.app.state, "tag_store", None))
     async with Session() as session:
         items, next_cursor = await tags.list_tags(

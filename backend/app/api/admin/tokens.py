@@ -26,7 +26,7 @@ from app.core.runtime_settings import load_runtime_config
 from app.core.time import iso_utc_ms
 from app.db.models.pixiv_tokens import PixivToken
 from app.db.models.token_proxy_bindings import TokenProxyBinding
-from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.db.session import resolve_sessionmaker, with_sqlite_busy_retry
 from app.pixiv.oauth import OAUTH_TOKEN_PATH, PixivOauthConfig, PixivOauthError, refresh_access_token
 from app.pixiv.refresh_backoff import refresh_backoff_seconds
 
@@ -103,7 +103,7 @@ async def list_tokens(
     rid = get_or_create_request_id(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     stmt = sa.select(PixivToken).order_by(PixivToken.id.desc()).limit(int(limit) + 1)
     if cursor_i is not None:
@@ -154,7 +154,7 @@ async def create_token(
     refresh_token_masked = mask_secret(refresh_token)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     async with Session() as session:
         row = PixivToken(
             label=body["label"],
@@ -185,7 +185,7 @@ async def update_token(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async with Session() as session:
         row = await session.get(PixivToken, token_id)
@@ -218,7 +218,7 @@ async def delete_token(
     rid = get_or_create_request_id(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
@@ -266,7 +266,7 @@ async def test_refresh_token(
     transport = getattr(request.app.state, "httpx_transport", None)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async with Session() as session:
         row = await session.get(PixivToken, token_id)
@@ -381,7 +381,7 @@ async def reset_failures(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async with Session() as session:
         row = await session.get(PixivToken, token_id)

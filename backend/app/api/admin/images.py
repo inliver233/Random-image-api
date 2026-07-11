@@ -12,7 +12,7 @@ from app.core.errors import ApiError, ErrorCode
 from app.core.random_delivery import resolve_catalog_store
 from app.core.random_engine_sync import maybe_publish_engine_deletes, maybe_publish_engine_empty_snapshot
 from app.core.request_id import get_or_create_request_id
-from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.db.session import resolve_sessionmaker, with_sqlite_busy_retry
 from app.db.tag_store import resolve_tag_store
 
 router = APIRouter()
@@ -54,7 +54,7 @@ async def list_admin_images(
     rid = get_or_create_request_id(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async with Session() as session:
@@ -144,7 +144,7 @@ async def delete_admin_image(
 
     rid = get_or_create_request_id(request)
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     tags = resolve_tag_store(getattr(request.app.state, "tag_store", None))
 
@@ -179,7 +179,7 @@ async def bulk_delete_admin_images(
     ids = list(body["image_ids"])
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     tags = resolve_tag_store(getattr(request.app.state, "tag_store", None))
 
@@ -235,7 +235,7 @@ async def clear_admin_images(
     delete_tags = bool(body["delete_tags"])
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     tags = resolve_tag_store(getattr(request.app.state, "tag_store", None))
 

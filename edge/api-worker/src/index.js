@@ -20,10 +20,10 @@
 
 import {
   authorizeSecret,
+  buildUpstreamHeaderPairs,
   hostAllowed,
   parseAllowedHosts,
   parseProxyPath,
-  STRIP_REQ_HEADERS,
 } from "./pure.js";
 
 function corsHeaders() {
@@ -54,14 +54,9 @@ function authorize(request, env) {
 
 function buildUpstreamHeaders(request, host) {
   const headers = new Headers();
-  for (const [k, v] of request.headers.entries()) {
-    const key = k.toLowerCase();
-    if (STRIP_REQ_HEADERS.has(key)) continue;
-    // Avoid leaking browser cookies from random clients if worker URL is guessed.
-    if (key === "cookie") continue;
+  for (const [k, v] of buildUpstreamHeaderPairs(request.headers.entries(), host)) {
     headers.set(k, v);
   }
-  headers.set("Host", host);
   return headers;
 }
 

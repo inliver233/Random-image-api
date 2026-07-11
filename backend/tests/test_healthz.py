@@ -34,8 +34,14 @@ def test_healthz_ok_includes_request_id() -> None:
     assert modules["cf_api_proxy"]["enabled_flag"] is False
     assert modules["cf_api_proxy"]["base_url_count"] == 0
     assert modules["cf_api_proxy"]["has_secret"] is False
+    assert modules["r2_prewarm"]["enabled_flag"] is False
+    assert modules["r2_prewarm"]["ready"] is False
+    assert modules["r2_prewarm"]["url_configured"] is False
+    assert modules["r2_prewarm"]["secret_configured"] is False
     assert modules["random_engine"]["enabled"] is False
     assert modules["random_engine"]["url_configured"] is False
+    assert modules["random_service"]["backend"] == "default"
+    assert modules["random_pick"]["backend"] == "sqlite"
     assert modules["api_key_rate_limit"]["backend"] == "memory"
     assert modules["api_key_rate_limit"]["requested"] == "memory"
     assert modules["api_key_rate_limit"]["redis_url_configured"] is False
@@ -179,6 +185,77 @@ def test_healthz_api_key_rate_limit_reports_settings_fallback(tmp_path: Path, mo
         assert rl.get("requested") == "redis"
         assert rl.get("using_memory_fallback") is True
         assert rl.get("redis_url_configured") is False
+
+
+def test_healthz_r2_prewarm_ready_requires_secret(tmp_path: Path, monkeypatch) -> None:
+    """enabled+url without secret → not ready (parity with admin r2-prewarm)."""
+    from app.main import create_app
+
+    db_path = tmp_path / "healthz_r2_no_secret.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
+    monkeypatch.setenv("R2_PREWARM_ENABLED", "1")
+    monkeypatch.setenv("R2_PREWARM_URL", "https://prewarm.example.com/hook")
+    monkeypatch.delenv("R2_PREWARM_SECRET", raising=False)
+    monkeypatch.delenv("IMAGE_EDGE_SECRET", raising=False)
+    monkeypatch.delenv("PREWARM_SECRET", raising=False)
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        resp = client.get("/healthz", headers={"X-Request-Id": "req_test"})
+        assert resp.status_code == 200
+        r2 = (resp.json().get("modules") or {}).get("r2_prewarm") or {}
+        assert r2.get("enabled_flag") is True
+        assert r2.get("url_configured") is True
+        assert r2.get("secret_configured") is False
+        assert r2.get("ready") is False
+
+
+def test_healthz_r2_prewarm_ready_with_secret(tmp_path: Path, monkeypatch) -> None:
+    """enabled+url+secret → ready; never leak secret material."""
+    from app.main import create_app
+
+    db_path = tmp_path / "healthz_r2_ready.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
+    monkeypatch.setenv("R2_PREWARM_ENABLED", "1")
+    monkeypatch.setenv("R2_PREWARM_URL", "https://prewarm.example.com/hook?token=super-secret")
+    monkeypatch.setenv("IMAGE_EDGE_SECRET", "edge-secret-for-prewarm")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        resp = client.get("/healthz", headers={"X-Request-Id": "req_test"})
+        assert resp.status_code == 200
+        body = resp.json()
+        r2 = (body.get("modules") or {}).get("r2_prewarm") or {}
+        assert r2.get("enabled_flag") is True
+        assert r2.get("url_configured") is True
+        assert r2.get("secret_configured") is True
+        assert r2.get("ready") is True
+        assert "super-secret" not in str(body)
+        assert "edge-secret-for-prewarm" not in str(body)
 
 
 def test_healthz_uses_request_id_header_if_provided() -> None:

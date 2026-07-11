@@ -23,7 +23,7 @@ from app.core.time import iso_utc_ms
 from app.db.models.hydration_runs import HydrationRun
 from app.core.random_delivery import resolve_catalog_store
 from app.db.models.jobs import JobRow
-from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.db.session import resolve_sessionmaker, with_sqlite_busy_retry
 from app.jobs.queue import enqueue_pending_in_session
 
 router = APIRouter()
@@ -160,7 +160,7 @@ async def list_hydration_runs(
 
     rid = get_or_create_request_id(request)
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async with Session() as session:
         stmt = sa.select(HydrationRun).order_by(HydrationRun.id.desc()).limit(limit + 1)
@@ -190,7 +190,7 @@ async def get_hydration_run(
 
     rid = get_or_create_request_id(request)
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async with Session() as session:
         run = await session.get(HydrationRun, run_id)
@@ -214,7 +214,7 @@ async def create_manual_hydration_job(
     body = await _load_manual_job_json(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async def _op() -> dict[str, Any]:
@@ -286,7 +286,7 @@ async def create_hydration_run(
     criteria = dict(body["criteria"])
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async def _op() -> tuple[int, int]:
         async with Session() as session:
@@ -344,7 +344,7 @@ async def _set_run_and_job_status(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:

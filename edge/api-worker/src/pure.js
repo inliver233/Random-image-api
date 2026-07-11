@@ -87,3 +87,22 @@ export function parseProxyPath(url) {
 export function hostAllowed(host, allowed) {
   return Array.isArray(allowed) && allowed.includes(String(host || "").toLowerCase());
 }
+
+/**
+ * Build upstream request headers: strip CF/client identity + cookie + gate secret.
+ * @param {Iterable<[string, string]>} headerEntries request.headers.entries()
+ * @param {string} host upstream Host
+ * @returns {Map<string, string>} lower-case keys not used; preserves original names for kept headers
+ */
+export function buildUpstreamHeaderPairs(headerEntries, host) {
+  const out = [];
+  for (const [k, v] of headerEntries) {
+    const key = String(k || "").toLowerCase();
+    if (STRIP_REQ_HEADERS.has(key)) continue;
+    // Avoid leaking browser cookies from random clients if worker URL is guessed.
+    if (key === "cookie") continue;
+    out.push([k, v]);
+  }
+  out.push(["Host", host]);
+  return out;
+}

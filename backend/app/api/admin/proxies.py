@@ -34,7 +34,7 @@ from app.db.models.proxy_endpoints import ProxyEndpoint
 from app.db.models.proxy_pool_endpoints import ProxyPoolEndpoint
 from app.db.models.proxy_pools import ProxyPool
 from app.db.models.token_proxy_bindings import TokenProxyBinding
-from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.db.session import resolve_sessionmaker, with_sqlite_busy_retry
 from app.jobs.queue import resolve_job_queue
 from app.easy_proxies.client import EasyProxiesError, easy_proxies_auth, easy_proxies_export
 from app.easy_proxies.normalize import normalize_exported_proxy_host, resolve_export_host
@@ -57,7 +57,7 @@ async def list_proxy_endpoints(
     rid = get_or_create_request_id(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     async with Session() as session:
         stmt = sa.select(ProxyEndpoint).order_by(ProxyEndpoint.id.desc()).limit(int(limit) + 1)
         if cursor_i is not None:
@@ -369,7 +369,7 @@ async def import_proxy_endpoints(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     settings = request.app.state.settings
     encryptor: FieldEncryptor | None = None
@@ -473,7 +473,7 @@ async def update_proxy_endpoint(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     async with Session() as session:
         row = await session.get(ProxyEndpoint, endpoint_id)
         if row is None:
@@ -500,7 +500,7 @@ async def reset_proxy_failures(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async with Session() as session:
         row = await session.get(ProxyEndpoint, endpoint_id)
@@ -537,7 +537,7 @@ async def cleanup_invalid_hosts(
     invalid_hosts = {"0.0.0.0", "127.0.0.1", "localhost", "::", "::1", "[::]", "[::1]"}
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     now = iso_utc_ms()
 
     async with Session() as session:
@@ -766,7 +766,7 @@ async def import_easy_proxies(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     settings = request.app.state.settings
     encryptor: FieldEncryptor | None = None

@@ -14,7 +14,7 @@ from app.core.request_id import get_or_create_request_id
 from app.core.soft_json import soft_json_value
 from app.core.time import iso_utc_ms
 from app.db.models.jobs import JobRow
-from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.db.session import resolve_sessionmaker, with_sqlite_busy_retry
 
 router = APIRouter()
 
@@ -71,7 +71,7 @@ async def list_jobs(
     rid = get_or_create_request_id(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     stmt = sa.select(JobRow).order_by(JobRow.id.desc()).limit(limit + 1)
     if cursor_i is not None:
@@ -102,7 +102,7 @@ async def get_job(
     rid = get_or_create_request_id(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async with Session() as session:
         row = await session.get(JobRow, job_id)
@@ -129,7 +129,7 @@ async def retry_job(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
@@ -169,7 +169,7 @@ async def cancel_job(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
@@ -205,7 +205,7 @@ async def move_job_to_dlq(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:

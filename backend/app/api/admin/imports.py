@@ -25,7 +25,7 @@ from app.core.pixiv_urls import parse_pixiv_original_url
 from app.core.random_delivery import resolve_catalog_store
 from app.db.models.imports import Import
 from app.db.models.jobs import JobRow
-from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.db.session import resolve_sessionmaker, with_sqlite_busy_retry
 from app.jobs.dispatch import JobDispatcher
 from app.jobs.executor import execute_claimed_job
 from app.jobs.handlers.import_images import build_import_images_handler
@@ -296,7 +296,7 @@ async def create_import(
             "preview": preview}, request_id=rid)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     hydrate_on_import = bool(body.hydrate_on_import)
     if upload.input_format == "pixiv_batch_downloader_json":
@@ -418,7 +418,7 @@ async def rollback_import(
     now_expr = sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async def _op() -> int:
@@ -456,7 +456,7 @@ async def list_imports(
 
     rid = get_or_create_request_id(request)
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async with Session() as session:
         stmt = sa.select(Import).order_by(Import.id.desc()).limit(int(limit) + 1)
@@ -516,7 +516,7 @@ async def get_import(
     rid = get_or_create_request_id(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async with Session() as session:
         imp = await session.get(Import, import_id)

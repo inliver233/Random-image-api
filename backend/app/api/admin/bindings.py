@@ -27,7 +27,7 @@ from app.db.models.proxy_endpoints import ProxyEndpoint
 from app.db.models.proxy_pool_endpoints import ProxyPoolEndpoint
 from app.db.models.proxy_pools import ProxyPool
 from app.db.models.token_proxy_bindings import TokenProxyBinding
-from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.db.session import resolve_sessionmaker, with_sqlite_busy_retry
 
 router = APIRouter()
 
@@ -73,7 +73,7 @@ async def list_bindings(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     Primary = aliased(ProxyEndpoint)
     Override = aliased(ProxyEndpoint)
@@ -179,7 +179,7 @@ async def recompute_bindings(
     strict = bool(body.get("strict", True))
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
@@ -221,7 +221,7 @@ async def set_binding_override(
     expires_at = iso_utc_ms(datetime.now(timezone.utc) + timedelta(milliseconds=ttl_ms))
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
@@ -271,7 +271,7 @@ async def clear_binding_override(
     now = iso_utc_ms()
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = resolve_sessionmaker(request, engine)
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
