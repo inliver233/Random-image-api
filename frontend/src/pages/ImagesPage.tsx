@@ -94,6 +94,9 @@ export function ImagesPage() {
   const qc = useQueryClient();
   const [missing, setMissing] = useState<string[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
+  const [items, setItems] = useState<ImageItem[]>([]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [listRequestId, setListRequestId] = useState<string | null>(null);
   const [actionAlert, setActionAlert] = useState<{ type: "success" | "error"; message: string; requestId: string | null } | null>(null);
 
   const query = useQuery({
@@ -102,6 +105,37 @@ export function ImagesPage() {
       const sp = new URLSearchParams({ limit: "50" });
       for (const key of missing) sp.append("missing", key);
       return apiJson<ImagesListResponse>(`/admin/api/images?${sp.toString()}`);
+    },
+  });
+
+  React.useEffect(() => {
+    if (!query.data) return;
+    setItems(query.data.items);
+    setNextCursor(query.data.next_cursor || "");
+    setListRequestId(query.data.request_id);
+    setSelectedRowKeys([]);
+  }, [query.data]);
+
+  const loadMore = useMutation({
+    mutationFn: (cursor: string) => {
+      const sp = new URLSearchParams({ limit: "50", cursor });
+      for (const key of missing) sp.append("missing", key);
+      return apiJson<ImagesListResponse>(`/admin/api/images?${sp.toString()}`);
+    },
+    onSuccess: (data) => {
+      setItems((prev) => {
+        const seen = new Set(prev.map((x) => x.id));
+        const merged = [...prev];
+        for (const item of data.items) {
+          if (!seen.has(item.id)) merged.push(item);
+        }
+        return merged;
+      });
+      setNextCursor(data.next_cursor || "");
+      setListRequestId(data.request_id);
+    },
+    onError: (err) => {
+      setActionAlert({ type: "error", message: messageFromError(err), requestId: requestIdFromError(err) });
     },
   });
 
@@ -352,15 +386,15 @@ export function ImagesPage() {
         />
       ) : !query.data ? (
         <Skeleton active />
-      ) : query.data.items.length === 0 ? (
+      ) : items.length === 0 ? (
         <Alert type="info" showIcon message="暂无图片" description="请先导入图片链接，或取消筛选条件。" />
       ) : (
         <Card>
-          <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
+          {listRequestId ? <Typography.Text type="secondary">请求ID: {listRequestId}</Typography.Text> : null}
           <Table<ImageItem>
             rowKey={(row) => row.id}
             columns={columns}
-            dataSource={query.data.items}
+            dataSource={items}
             rowSelection={{
               selectedRowKeys,
               onChange: (keys) => setSelectedRowKeys(keys),
@@ -370,6 +404,13 @@ export function ImagesPage() {
             scroll={{ x: 2000 }}
             style={{ marginTop: 12 }}
           />
+          {nextCursor ? (
+            <div style={{ marginTop: 12 }}>
+              <Button onClick={() => loadMore.mutate(nextCursor)} loading={loadMore.isPending}>
+                加载更多
+              </Button>
+            </div>
+          ) : null}
         </Card>
       )}
     </Space>

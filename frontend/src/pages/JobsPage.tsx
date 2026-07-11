@@ -104,6 +104,9 @@ export function JobsPage() {
   const [status, setStatus] = useState<string>("all");
   const [type, setType] = useState<string>("all");
   const [detailJobId, setDetailJobId] = useState<string | null>(null);
+  const [items, setItems] = useState<JobItem[]>([]);
+  const [nextCursor, setNextCursor] = useState("");
+  const [listRequestId, setListRequestId] = useState<string | null>(null);
   const [actionAlert, setActionAlert] = useState<{ type: "success" | "error"; message: string; requestId: string | null } | null>(null);
 
   const query = useQuery({
@@ -113,6 +116,37 @@ export function JobsPage() {
       if (status && status !== "all") sp.set("status", status);
       if (type !== "all") sp.set("type", type);
       return apiJson<JobsListResponse>(`/admin/api/jobs?${sp.toString()}`);
+    },
+  });
+
+  React.useEffect(() => {
+    if (!query.data) return;
+    setItems(query.data.items);
+    setNextCursor(query.data.next_cursor || "");
+    setListRequestId(query.data.request_id);
+  }, [query.data]);
+
+  const loadMore = useMutation({
+    mutationFn: (cursor: string) => {
+      const sp = new URLSearchParams({ limit: "50", cursor });
+      if (status && status !== "all") sp.set("status", status);
+      if (type !== "all") sp.set("type", type);
+      return apiJson<JobsListResponse>(`/admin/api/jobs?${sp.toString()}`);
+    },
+    onSuccess: (data) => {
+      setItems((prev) => {
+        const seen = new Set(prev.map((x) => x.id));
+        const merged = [...prev];
+        for (const item of data.items) {
+          if (!seen.has(item.id)) merged.push(item);
+        }
+        return merged;
+      });
+      setNextCursor(data.next_cursor || "");
+      setListRequestId(data.request_id);
+    },
+    onError: (err) => {
+      setActionAlert({ type: "error", message: err instanceof Error ? err.message : "加载更多失败", requestId: requestIdFromError(err) });
     },
   });
 
@@ -262,20 +296,27 @@ export function JobsPage() {
           />
         ) : !query.data ? (
           <Skeleton active />
-        ) : query.data.items.length === 0 ? (
+        ) : items.length === 0 ? (
           <Alert type="info" showIcon message="暂无任务" description="可先触发导入/补全/代理探测任务。" />
         ) : (
           <>
-            <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
+            {listRequestId ? <Typography.Text type="secondary">请求ID: {listRequestId}</Typography.Text> : null}
             <Table<JobItem>
               rowKey={(row) => row.id}
               columns={columns}
-              dataSource={query.data.items}
+              dataSource={items}
               pagination={false}
               size="small"
               scroll={{ x: 1600 }}
               style={{ marginTop: 12 }}
             />
+            {nextCursor ? (
+              <div style={{ marginTop: 12 }}>
+                <Button onClick={() => loadMore.mutate(nextCursor)} loading={loadMore.isPending}>
+                  加载更多
+                </Button>
+              </div>
+            ) : null}
           </>
         )}
       </Card>

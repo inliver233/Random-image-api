@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Skeleton, Space, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
@@ -32,10 +32,45 @@ const baseColumns: ColumnsType<TagItem> = [
 
 export function TagsPage() {
   const navigate = useNavigate();
+  const [items, setItems] = React.useState<TagItem[]>([]);
+  const [nextCursor, setNextCursor] = React.useState("");
+  const [requestId, setRequestId] = React.useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = React.useState<string | null>(null);
 
   const query = useQuery({
     queryKey: ["public", "tags", { limit: 50 }],
     queryFn: () => apiJson<TagsListResponse>("/tags?limit=50"),
+  });
+
+  React.useEffect(() => {
+    if (!query.data) return;
+    setItems(query.data.items);
+    setNextCursor(query.data.next_cursor || "");
+    setRequestId(query.data.request_id);
+    setLoadMoreError(null);
+  }, [query.data]);
+
+  const loadMore = useMutation({
+    mutationFn: (cursor: string) => {
+      const sp = new URLSearchParams({ limit: "50", cursor });
+      return apiJson<TagsListResponse>(`/tags?${sp.toString()}`);
+    },
+    onSuccess: (data) => {
+      setItems((prev) => {
+        const seen = new Set(prev.map((x) => x.name));
+        const merged = [...prev];
+        for (const item of data.items) {
+          if (!seen.has(item.name)) merged.push(item);
+        }
+        return merged;
+      });
+      setNextCursor(data.next_cursor || "");
+      setRequestId(data.request_id);
+      setLoadMoreError(null);
+    },
+    onError: (err) => {
+      setLoadMoreError(err instanceof Error ? err.message : "加载更多失败");
+    },
   });
 
   const columns: ColumnsType<TagItem> = [
@@ -60,6 +95,8 @@ export function TagsPage() {
         标签列表
       </Typography.Title>
 
+      {loadMoreError ? <Alert type="error" showIcon message={loadMoreError} /> : null}
+
       {query.isLoading ? (
         <Skeleton active />
       ) : query.isError ? (
@@ -71,7 +108,7 @@ export function TagsPage() {
         />
       ) : !query.data ? (
         <Skeleton active />
-      ) : query.data.items.length === 0 ? (
+      ) : items.length === 0 ? (
         <Alert
           type="info"
           showIcon
@@ -80,18 +117,24 @@ export function TagsPage() {
         />
       ) : (
         <Card>
-          <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
+          {requestId ? <Typography.Text type="secondary">请求ID: {requestId}</Typography.Text> : null}
           <Table<TagItem>
             rowKey={(row) => row.name}
             columns={columns}
-            dataSource={query.data.items}
+            dataSource={items}
             pagination={false}
             size="small"
             style={{ marginTop: 12 }}
           />
+          {nextCursor ? (
+            <div style={{ marginTop: 12 }}>
+              <Button onClick={() => loadMore.mutate(nextCursor)} loading={loadMore.isPending}>
+                加载更多
+              </Button>
+            </div>
+          ) : null}
         </Card>
       )}
     </Space>
   );
 }
-

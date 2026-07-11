@@ -20,6 +20,7 @@ const NAV_ITEMS: NavItem[] = [
   { key: "/admin/hydration", label: "补全管理" },
   { key: "/admin/jobs", label: "任务队列" },
   { key: "/admin/tokens", label: "令牌管理" },
+  { key: "/admin/api-keys", label: "API Keys" },
   { key: "/admin/proxies", label: "代理节点" },
   { key: "/admin/proxy-pools", label: "代理池" },
   { key: "/admin/bindings", label: "绑定关系" },

@@ -1,5 +1,5 @@
-﻿import { useQuery } from "@tanstack/react-query";
-import { Alert, Card, Descriptions, Progress, Skeleton, Space, Typography } from "antd";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Alert, Button, Card, Descriptions, Popconfirm, Progress, Skeleton, Space, Typography } from "antd";
 import React from "react";
 import { useParams } from "react-router-dom";
 
@@ -33,9 +33,22 @@ type ImportDetailResponse = {
   request_id: string;
 };
 
+type ImportRollbackResponse = {
+  ok: true;
+  mode: "disable" | "delete";
+  updated: number;
+  request_id: string;
+};
+
 function requestIdFromError(err: unknown): string | null {
   if (!(err instanceof ApiError)) return null;
   return err.body?.request_id ? String(err.body.request_id) : null;
+}
+
+function messageFromError(err: unknown): string {
+  if (err instanceof ApiError) return err.message;
+  if (err instanceof Error) return err.message;
+  return "未知错误";
 }
 
 function statusLabel(status: string): string {
@@ -57,8 +70,12 @@ function statusLabel(status: string): string {
 
 export function ImportDetailPage() {
   const params = useParams();
+  const qc = useQueryClient();
   const idRaw = String(params.id || "").trim();
   const id = idRaw && /^\d+$/.test(idRaw) ? idRaw : "";
+  const [actionAlert, setActionAlert] = React.useState<{ type: "success" | "error"; message: string; requestId: string | null } | null>(
+    null,
+  );
 
   const query = useQuery({
     queryKey: ["admin", "imports", id],
@@ -71,15 +88,45 @@ export function ImportDetailPage() {
     },
   });
 
+  const rollback = useMutation({
+    mutationFn: (mode: "disable" | "delete") =>
+      apiJson<ImportRollbackResponse>(`/admin/api/imports/${id}/rollback`, {
+        method: "POST",
+        body: JSON.stringify({ mode }),
+      }),
+    onMutate: () => setActionAlert(null),
+    onSuccess: (data) => {
+      const modeLabel = data.mode === "disable" ? "禁用" : "标记删除";
+      setActionAlert({
+        type: "success",
+        message: `回滚完成（${modeLabel}），影响 ${data.updated} 张图片`,
+        requestId: data.request_id,
+      });
+      qc.invalidateQueries({ queryKey: ["admin", "imports", id] });
+      qc.invalidateQueries({ queryKey: ["admin", "images"] });
+      qc.invalidateQueries({ queryKey: ["admin", "summary"] });
+    },
+    onError: (err) => {
+      setActionAlert({ type: "error", message: messageFromError(err), requestId: requestIdFromError(err) });
+    },
+  });
+
   if (!id) {
     return <Alert type="error" showIcon message="导入ID不合法" />;
   }
+
+  const jobStatus = String(query.data?.item.job?.status || "");
+  const rollbackDisabled = jobStatus === "pending" || jobStatus === "running" || rollback.isPending;
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       <Typography.Title level={3} style={{ margin: 0 }}>
         导入任务 #{id}
       </Typography.Title>
+
+      {actionAlert ? (
+        <Alert type={actionAlert.type} showIcon message={actionAlert.message} description={actionAlert.requestId ? `请求ID: ${actionAlert.requestId}` : ""} />
+      ) : null}
 
       {query.isLoading ? (
         <Skeleton active />
@@ -126,7 +173,38 @@ export function ImportDetailPage() {
             return null;
           })()}
 
-          <Card title="导入概览">
+          <Card
+            title="导入概览"
+            extra={
+              <Space wrap>
+                <Popconfirm
+                  title="确定禁用本批次导入的图片？"
+                  description="会将 created_import_id 匹配的图片 status 设为禁用（可再启用）。"
+                  okText="禁用"
+                  cancelText="取消"
+                  disabled={rollbackDisabled}
+                  onConfirm={() => rollback.mutate("disable")}
+                >
+                  <Button disabled={rollbackDisabled} loading={rollback.isPending && rollback.variables === "disable"}>
+                    回滚禁用
+                  </Button>
+                </Popconfirm>
+                <Popconfirm
+                  title="确定标记删除本批次导入的图片？"
+                  description="会将 created_import_id 匹配的图片 status 设为删除标记（软删除）。"
+                  okText="标记删除"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                  disabled={rollbackDisabled}
+                  onConfirm={() => rollback.mutate("delete")}
+                >
+                  <Button danger disabled={rollbackDisabled} loading={rollback.isPending && rollback.variables === "delete"}>
+                    回滚删除
+                  </Button>
+                </Popconfirm>
+              </Space>
+            }
+          >
             <Descriptions size="small" column={2}>
               <Descriptions.Item label="创建时间">{query.data?.item.import.created_at}</Descriptions.Item>
               <Descriptions.Item label="创建人">{query.data?.item.import.created_by}</Descriptions.Item>
@@ -186,4 +264,3 @@ export function ImportDetailPage() {
     </Space>
   );
 }
-

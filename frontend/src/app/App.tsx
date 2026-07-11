@@ -14,6 +14,7 @@ import { PlaygroundPage } from "../pages/PlaygroundPage";
 import { TagsPage } from "../pages/TagsPage";
 import { AuthorsPage } from "../pages/AuthorsPage";
 import { TokensPage } from "../pages/TokensPage";
+import { ApiKeysPage } from "../pages/ApiKeysPage";
 import { ProxiesPage } from "../pages/ProxiesPage";
 import { ProxyPoolsPage } from "../pages/ProxyPoolsPage";
 import { BindingsPage } from "../pages/BindingsPage";
@@ -113,6 +114,7 @@ export function App() {
             <Route path="tags" element={<TagsPage />} />
             <Route path="authors" element={<AuthorsPage />} />
             <Route path="tokens" element={<TokensPage />} />
+            <Route path="api-keys" element={<ApiKeysPage />} />
             <Route path="proxies" element={<ProxiesPage />} />
             <Route path="proxy-pools" element={<ProxyPoolsPage />} />
             <Route path="bindings" element={<BindingsPage />} />
