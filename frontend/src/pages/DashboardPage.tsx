@@ -94,6 +94,26 @@ type ModularPortsStatusResponse = {
   request_id: string;
 };
 
+type ImageEdgeStatusResponse = {
+  ok: true;
+  enabled_flag: boolean;
+  ready: boolean;
+  base_url_count: number;
+  has_secret: boolean;
+  request_id: string;
+};
+
+type RandomEngineStatusResponse = {
+  ok: true;
+  enabled: boolean;
+  traffic_percent?: number;
+  healthy: boolean;
+  index_empty?: boolean | null;
+  ready_for_traffic?: boolean;
+  cutover_warning?: string | null;
+  request_id: string;
+};
+
 export function DashboardPage() {
   const navigate = useNavigate();
 
@@ -130,6 +150,18 @@ export function DashboardPage() {
     queryKey: ["admin", "maintenance", "modular-ports"],
     queryFn: () => apiJson<ModularPortsStatusResponse>("/admin/api/maintenance/modular-ports"),
     refetchInterval: 30_000,
+  });
+
+  const imageEdge = useQuery({
+    queryKey: ["admin", "maintenance", "image-edge"],
+    queryFn: () => apiJson<ImageEdgeStatusResponse>("/admin/api/maintenance/image-edge"),
+    refetchInterval: 30_000,
+  });
+
+  const randomEngine = useQuery({
+    queryKey: ["admin", "maintenance", "random-engine"],
+    queryFn: () => apiJson<RandomEngineStatusResponse>("/admin/api/maintenance/random-engine"),
+    refetchInterval: 15_000,
   });
 
   const version = useQuery({
@@ -348,10 +380,13 @@ export function DashboardPage() {
 
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} md={24} xl={24}>
-          <Card title="模块端口（Phase 4）">
-            <QueryState query={modularPorts} errorMessage="加载模块端口失败">
-              {modularPorts.data ? (
-                <Space direction="vertical" style={{ width: "100%" }}>
+          <Card title="模块端口 / 边缘切流（Phase 4）">
+            <QueryState
+              queries={[modularPorts, imageEdge, randomEngine]}
+              errorMessages={["加载模块端口失败", "加载 Image Edge 失败", "加载 Random Engine 失败"]}
+            >
+              <Space direction="vertical" style={{ width: "100%" }}>
+                {modularPorts.data ? (
                   <Space wrap size={[8, 8]}>
                     <Tag>catalog={modularPorts.data.catalog.backend}</Tag>
                     <Tag>tags={modularPorts.data.tags.backend}</Tag>
@@ -395,14 +430,59 @@ export function DashboardPage() {
                     <Tag>random_service={modularPorts.data.random_service?.backend ?? "default"}</Tag>
                     <Tag>random_pick={modularPorts.data.random_pick?.backend ?? "sqlite"}</Tag>
                   </Space>
-                  <Typography.Text type="secondary">
-                    请求ID: {modularPorts.data.request_id}
-                  </Typography.Text>
-                  <Button size="small" onClick={() => navigate("/admin/maintenance")}>
-                    打开维护页（完整状态）
-                  </Button>
+                ) : null}
+
+                <Space wrap size={[8, 8]}>
+                  {imageEdge.data ? (
+                    <>
+                      <Tag color={imageEdge.data.ready ? "green" : imageEdge.data.enabled_flag ? "orange" : undefined}>
+                        image_edge={imageEdge.data.ready ? "ready" : imageEdge.data.enabled_flag ? "flag-on-not-ready" : "off"}
+                      </Tag>
+                      <Tag>
+                        bases={imageEdge.data.base_url_count}
+                        {imageEdge.data.has_secret ? "" : " · no-secret"}
+                      </Tag>
+                    </>
+                  ) : null}
+                  {randomEngine.data ? (
+                    <>
+                      <Tag
+                        color={
+                          randomEngine.data.ready_for_traffic
+                            ? "green"
+                            : randomEngine.data.enabled
+                              ? "orange"
+                              : undefined
+                        }
+                      >
+                        engine=
+                        {randomEngine.data.ready_for_traffic
+                          ? "ready"
+                          : randomEngine.data.enabled
+                            ? "enabled-not-ready"
+                            : "off"}
+                      </Tag>
+                      <Tag>traffic={randomEngine.data.traffic_percent ?? 0}%</Tag>
+                      {randomEngine.data.enabled && randomEngine.data.index_empty ? (
+                        <Tag color="orange">engine index empty</Tag>
+                      ) : null}
+                      {randomEngine.data.cutover_warning ? (
+                        <Tag color="orange">cutover: {randomEngine.data.cutover_warning}</Tag>
+                      ) : null}
+                    </>
+                  ) : null}
                 </Space>
-              ) : null}
+
+                <Typography.Text type="secondary">
+                  请求ID:{" "}
+                  {[modularPorts.data?.request_id, imageEdge.data?.request_id, randomEngine.data?.request_id]
+                    .filter(Boolean)
+                    .join(" / ") || "—"}
+                </Typography.Text>
+                <Button size="small" onClick={() => navigate("/admin/maintenance")}>
+                  打开维护页（完整状态 / 推送快照）
+                </Button>
+              </Space>
             </QueryState>
           </Card>
         </Col>

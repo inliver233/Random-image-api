@@ -167,6 +167,34 @@ describe("DashboardPage", () => {
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
+        if (url.endsWith("/admin/api/maintenance/image-edge")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              enabled_flag: true,
+              ready: false,
+              base_url_count: 0,
+              has_secret: false,
+              request_id: "req_edge",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.endsWith("/admin/api/maintenance/random-engine")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              enabled: true,
+              traffic_percent: 0,
+              healthy: false,
+              index_empty: true,
+              ready_for_traffic: false,
+              cutover_warning: "traffic_percent=0 (engine not receiving picks)",
+              request_id: "req_engine",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
         return new Response(JSON.stringify({ ok: false, code: "NOT_FOUND", message: "not found", request_id: "req_x", details: {} }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
@@ -207,12 +235,15 @@ describe("DashboardPage", () => {
     expect(await screen.findByText("数量: 3")).toBeInTheDocument();
     expect(await screen.findByText(/#101\s*·\s*hydrate_metadata/)).toBeInTheDocument();
     expect(await screen.findByText("upstream 403 on illust 1")).toBeInTheDocument();
-    expect(await screen.findByText("模块端口（Phase 4）")).toBeInTheDocument();
+    expect(await screen.findByText("模块端口 / 边缘切流（Phase 4）")).toBeInTheDocument();
     expect(await screen.findByText(/catalog=sqlite/)).toBeInTheDocument();
     expect(await screen.findByText(/job_queue=sqlite/)).toBeInTheDocument();
     expect(await screen.findByText("redis→sqlite fallback")).toBeInTheDocument();
     expect(await screen.findByText("redis→memory fallback")).toBeInTheDocument();
-    expect(await screen.findByText(/请求ID:\s*req_modular/)).toBeInTheDocument();
+    expect(await screen.findByText(/image_edge=flag-on-not-ready/)).toBeInTheDocument();
+    expect(await screen.findByText(/engine=enabled-not-ready/)).toBeInTheDocument();
+    expect(await screen.findByText("engine index empty")).toBeInTheDocument();
+    expect(await screen.findByText(/请求ID:.*req_modular/)).toBeInTheDocument();
   });
 
   it("navigates to import", async () => {
