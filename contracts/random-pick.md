@@ -20,7 +20,8 @@ Implementation:
 | `count_candidates` | Same filter clauses as pick_* (dual-run compare-filters) |
 | Go engine | **Not** this port — dual-run sits in `RandomService` above |
 
-Filter semantics stay in `db/random_pick.py` (single source). Port does not reimplement SQL.
+Filter clause builders live in `db/pick_filters.py` (shared with `images_list`).
+Ring sample SQL stays in `db/random_pick.py`. Port does not reimplement SQL.
 
 ## Ops
 

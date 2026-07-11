@@ -410,9 +410,9 @@ export function MaintenancePage() {
 
       <Card title="模块端口（Phase 4）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          Catalog / TagStore / JobQueue / RecentDedup / RandomService 端口只读状态。Catalog/TagStore/JobQueue
-          默认本地；RecentDedup 支持 RECENT_DEDUP_BACKEND=redis + REDIS_URL（失败回落 memory）。RandomService
-          为默认 pick 计划工厂。不展示密钥或连接串。
+          Catalog / TagStore / JobQueue / RecentDedup / RandomService / RandomPick 端口只读状态。Catalog/TagStore/JobQueue/RandomPick
+          默认 sqlite；RecentDedup 支持 RECENT_DEDUP_BACKEND=redis + REDIS_URL（失败回落 memory）。RandomService
+          为默认 pick 计划工厂；RandomPick 为 Python SQL ring 回落。不展示密钥或连接串。
         </Typography.Paragraph>
 
         <QueryState query={modularPortsStatus}>

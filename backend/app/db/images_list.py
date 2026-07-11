@@ -6,11 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.images import Image
-from app.db.random_pick import (
-    _excluded_tags_where_clause,
-    _included_tags_where_clause,
-    _orientation_where_clause,
-    _r18_where_clause,
+from app.db.pick_filters import (
+    excluded_tags_where_clause,
+    included_tags_where_clause,
+    orientation_where_clause,
+    r18_where_clause,
 )
 
 
@@ -37,10 +37,10 @@ async def list_images(
     if limit_i < 1:
         raise ValueError("limit must be >= 1")
 
-    r18_clause = _r18_where_clause(r18=r18, r18_strict=r18_strict)
-    orientation_clause = _orientation_where_clause(orientation=orientation)
-    included_tags_clause = _included_tags_where_clause(tag_names=included_tags or [])
-    excluded_tags_clause = _excluded_tags_where_clause(tag_names=excluded_tags or [])
+    r18_clause = r18_where_clause(r18=r18, r18_strict=r18_strict)
+    orientation_clause = orientation_where_clause(orientation=orientation)
+    included_tags_clause = included_tags_where_clause(tag_names=included_tags or [])
+    excluded_tags_clause = excluded_tags_where_clause(tag_names=excluded_tags or [])
 
     min_width_i = int(min_width)
     min_height_i = int(min_height)
