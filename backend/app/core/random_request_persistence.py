@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.core.coerce import as_nonneg_int
+from app.core.coerce import as_nonneg_int, format_exc
 from app.core.logging import get_logger
 from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
@@ -64,7 +64,7 @@ async def persist_random_totals(
         )
     except Exception as exc:
         try:
-            log.warning("persist_random_totals_failed err=%s", f"{type(exc).__name__}: {exc}")
+            log.warning("persist_random_totals_failed err=%s", format_exc(exc))
         except Exception:
             pass
 

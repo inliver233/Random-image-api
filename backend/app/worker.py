@@ -16,6 +16,7 @@ from app.core.env_parse import (
     parse_optional_str_env,
     parse_str_env,
 )
+from app.core.coerce import format_exc
 from app.core.logging import configure_logging, get_logger
 from app.core.redact import redact_text
 from app.core.time import iso_utc_ms
@@ -64,7 +65,7 @@ def build_default_dispatcher(engine) -> JobDispatcher:
         try:
             dispatcher.register(job_type, builder())
         except Exception as exc:
-            msg = redact_text(f"{type(exc).__name__}: {exc}")
+            msg = redact_text(format_exc(exc))
             log.warning("jobs_handler_disabled type=%s reason=%s", job_type, msg)
             dispatcher.register(job_type, _disabled_handler(job_type, reason=msg))
 
@@ -115,7 +116,7 @@ class _JobScheduler:
         except asyncio.CancelledError:
             return
         except Exception as exc:
-            msg = redact_text(f"{type(exc).__name__}: {exc}")
+            msg = redact_text(format_exc(exc))
             log.warning("job_task_failed err=%s", msg)
 
     async def tick(self, *, desired_concurrency: int, max_claims: int) -> int:
@@ -136,7 +137,7 @@ class _JobScheduler:
                     lock_ttl_s=int(self._lock_ttl_s),
                 )
             except Exception as exc:
-                msg = redact_text(f"{type(exc).__name__}: {exc}")
+                msg = redact_text(format_exc(exc))
                 log.warning("jobs_claim_failed err=%s", msg)
                 break
             if job_row is None:
@@ -152,7 +153,7 @@ class _JobScheduler:
                         lock_ttl_s=int(self._lock_ttl_s),
                     )
                 except Exception as exc:
-                    msg = redact_text(f"{type(exc).__name__}: {exc}")
+                    msg = redact_text(format_exc(exc))
                     log.warning("job_execute_failed err=%s", msg)
 
             task = asyncio.create_task(_run(job_row))
@@ -190,7 +191,7 @@ async def poll_and_execute_jobs(
         try:
             job_row = await claim_next_job(engine, worker_id=worker_id, lock_ttl_s=int(lock_ttl_s))
         except Exception as exc:
-            msg = redact_text(f"{type(exc).__name__}: {exc}")
+            msg = redact_text(format_exc(exc))
             log.warning("jobs_claim_failed err=%s", msg)
             break
         if job_row is None:
@@ -205,7 +206,7 @@ async def poll_and_execute_jobs(
                 lock_ttl_s=int(lock_ttl_s),
             )
         except Exception as exc:
-            msg = redact_text(f"{type(exc).__name__}: {exc}")
+            msg = redact_text(format_exc(exc))
             log.warning("job_execute_failed err=%s", msg)
         ran += 1
     return ran

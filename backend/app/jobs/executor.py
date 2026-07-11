@@ -8,7 +8,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.core.coerce import as_int, as_str
+from app.core.coerce import as_int, as_str, format_exc
 from app.core.time import iso_utc_ms
 from app.core.metrics import JOBS_FAILED_TOTAL
 from app.db.session import is_sqlite_busy_error, with_sqlite_busy_retry
@@ -119,7 +119,7 @@ async def execute_claimed_job(
                     "job_lock_renew_failed job_id=%s worker_id=%s err=%s",
                     job.id,
                     worker_id,
-                    f"{type(exc).__name__}: {exc}",
+                    format_exc(exc),
                 )
 
     hb_task = asyncio.create_task(_heartbeat())
@@ -127,7 +127,7 @@ async def execute_claimed_job(
         try:
             await dispatcher.dispatch(job_row)
         except JobDeferError as exc:
-            transition = on_job_defer(job, run_after=exc.run_after, error=f"{type(exc).__name__}: {exc}", now=now_dt)
+            transition = on_job_defer(job, run_after=exc.run_after, error=format_exc(exc), now=now_dt)
         except JobPermanentError as exc:
             forced = Job(
                 id=job.id,
@@ -139,7 +139,7 @@ async def execute_claimed_job(
                 locked_by=job.locked_by,
                 locked_at=job.locked_at,
             )
-            transition = on_job_failure(forced, error=f"{type(exc).__name__}: {exc}", now=now_dt)
+            transition = on_job_failure(forced, error=format_exc(exc), now=now_dt)
         except ValueError as exc:
             msg = str(exc)
             if "Unknown job type" in msg:
@@ -153,16 +153,16 @@ async def execute_claimed_job(
                     locked_by=job.locked_by,
                     locked_at=job.locked_at,
                 )
-                transition = on_job_failure(forced, error=f"{type(exc).__name__}: {exc}", now=now_dt)
+                transition = on_job_failure(forced, error=format_exc(exc), now=now_dt)
             else:
-                transition = on_job_failure(job, error=f"{type(exc).__name__}: {exc}", now=now_dt)
+                transition = on_job_failure(job, error=format_exc(exc), now=now_dt)
         except Exception as exc:
             if is_sqlite_busy_error(exc):
                 delay_s = 2.0 + random.random() * 3.0
                 run_after = iso_utc_ms(now_dt + timedelta(seconds=delay_s))
-                transition = on_job_defer(job, run_after=run_after, error=f"{type(exc).__name__}: {exc}", now=now_dt)
+                transition = on_job_defer(job, run_after=run_after, error=format_exc(exc), now=now_dt)
             else:
-                transition = on_job_failure(job, error=f"{type(exc).__name__}: {exc}", now=now_dt)
+                transition = on_job_failure(job, error=format_exc(exc), now=now_dt)
         else:
             transition = on_job_success(job, now=now_dt)
     finally:

@@ -125,3 +125,8 @@ def truncate_text(text: str, *, max_len: int = 500) -> str:
     if max_len <= 3:
         return text[:max_len]
     return text[: max_len - 3] + "..."
+
+
+def format_exc(exc: BaseException) -> str:
+    """Stable `TypeName: message` for logs/job errors (pair with redact_text when user-facing)."""
+    return f"{type(exc).__name__}: {exc}"

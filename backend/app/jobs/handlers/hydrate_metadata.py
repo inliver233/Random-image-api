@@ -14,7 +14,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.random_query import normalize_iso_utc_optional
-from app.core.coerce import as_int, as_optional_int, as_str, clamp_int, derive_orientation, truncate_text
+from app.core.coerce import as_int, as_optional_int, as_str, clamp_int, derive_orientation, format_exc, truncate_text
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.env_parse import parse_int_env
@@ -249,7 +249,7 @@ def build_hydrate_metadata_handler(
             if int(proxy_blacklist_ttl_s) > 0
             else None
         )
-        msg_raw = f"{type(error).__name__}: {error}" if isinstance(error, BaseException) else str(error)
+        msg_raw = format_exc(error) if isinstance(error, BaseException) else str(error)
         msg = truncate_text(redact_text(msg_raw))
 
         async def _op() -> None:
@@ -1384,7 +1384,7 @@ LIMIT 1;
                         processed_inc=1,
                         success_inc=0,
                         failed_inc=1,
-                        last_error=f"{type(exc).__name__}: {exc}",
+                        last_error=format_exc(exc),
                     )
                     cursor_image_id = int(image_id)
                     processed += 1

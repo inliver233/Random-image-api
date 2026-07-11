@@ -10,7 +10,7 @@ import httpx
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.core.coerce import truncate_text
+from app.core.coerce import format_exc, truncate_text
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor
 from app.core.metrics import PROXY_PROBE_LATENCY_MS
@@ -69,7 +69,7 @@ async def _default_probe(target: ProbeTarget, cfg: ProbeConfig) -> ProbeResult:
         if not ok:
             err = f"status={resp.status_code}"
     except Exception as exc:
-        err = f"{type(exc).__name__}: {exc}"
+        err = format_exc(exc)
 
     latency_ms = (time.monotonic() - start) * 1000.0
     return ProbeResult(endpoint_id=int(target.endpoint_id), ok=bool(ok), latency_ms=float(latency_ms), error=err)
@@ -140,7 +140,7 @@ def build_proxy_probe_handler(
                 )
             except Exception as exc:
                 immediate_results.append(
-                    ProbeResult(endpoint_id=int(ep.id), ok=False, latency_ms=None, error=f"{type(exc).__name__}: {exc}")
+                    ProbeResult(endpoint_id=int(ep.id), ok=False, latency_ms=None, error=format_exc(exc))
                 )
                 continue
             targets.append(ProbeTarget(endpoint_id=int(ep.id), proxy_uri=proxy_uri))
