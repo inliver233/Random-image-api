@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from fastapi.responses import RedirectResponse
+
 from app.core.errors import ApiError, ErrorCode
 from app.core.pximg_reverse_proxy import normalize_pximg_mirror_host
 from app.core.random_query import (
@@ -271,3 +273,25 @@ def local_i_query_string(
         if pximg_mirror_host_override is not None:
             qp.append(("pximg_mirror_host", str(pximg_mirror_host_override)))
     return ("?" + "&".join([f"{k}={v}" for k, v in qp])) if qp else ""
+
+
+def build_local_i_redirect_response(
+    *,
+    image_id: int,
+    ext: str,
+    proxy_override: str | None = None,
+    pixiv_cat: int = 0,
+    pximg_mirror_host_override: str | None = None,
+    cache_control: str = "no-store",
+) -> RedirectResponse:
+    """302 to local /i/{id}.{ext} with optional proxy/mirror query flags."""
+    qs = local_i_query_string(
+        proxy_override=proxy_override,
+        pixiv_cat=int(pixiv_cat),
+        pximg_mirror_host_override=pximg_mirror_host_override,
+    )
+    return RedirectResponse(
+        url=f"/i/{int(image_id)}.{ext}{qs}",
+        status_code=302,
+        headers={"Cache-Control": cache_control},
+    )

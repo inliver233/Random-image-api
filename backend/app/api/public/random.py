@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
-from fastapi.responses import RedirectResponse
 
 from app.core.errors import ApiError
 from app.core.image_edge import resolve_image_edge_redirect_url, resolve_public_proxy_url
@@ -18,8 +17,8 @@ from app.core.random_delivery import (
 from app.core.random_pick_context import build_random_pick_context
 from app.core.random_query import build_no_match_error
 from app.core.random_request import (
+    build_local_i_redirect_response,
     force_local_from_query,
-    local_i_query_string,
     parse_random_filters,
     prefer_image_edge,
 )
@@ -229,15 +228,12 @@ async def random_image(
                 # Edge 302 does not prove bytes; skip mark_image_ok (fail_cooldown stays honest).
                 resp = build_edge_redirect_response(edge_url=edge_url, cache_control="no-store")
             else:
-                qs = local_i_query_string(
+                resp = build_local_i_redirect_response(
+                    image_id=int(image.id),
+                    ext=str(image.ext),
                     proxy_override=proxy_override,
                     pixiv_cat=int(pixiv_cat),
                     pximg_mirror_host_override=pximg_mirror_host_override,
-                )
-                resp = RedirectResponse(
-                    url=f"/i/{image.id}.{image.ext}{qs}",
-                    status_code=302,
-                    headers={"Cache-Control": "no-store"},
                 )
             return attach_background(resp, background_tasks)
 

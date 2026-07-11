@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.coerce import clamp_int
 from app.core.time import iso_utc_ms
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 
@@ -28,10 +29,6 @@ class RequestLogsCleanupPreview:
     has_more: bool
 
 
-def _clamp_int(value: int, *, min_v: int, max_v: int) -> int:
-    return max(min_v, min(int(value), max_v))
-
-
 def _cutoff_iso(*, keep_days: int, now: datetime | None = None) -> str:
     keep_days_i = int(keep_days)
     if keep_days_i < 0:
@@ -50,7 +47,7 @@ async def preview_request_logs_cleanup(
     now: datetime | None = None,
 ) -> RequestLogsCleanupPreview:
     cutoff = _cutoff_iso(keep_days=int(keep_days), now=now)
-    max_delete_rows_i = _clamp_int(int(max_delete_rows), min_v=1, max_v=10_000_000)
+    max_delete_rows_i = clamp_int(int(max_delete_rows), min_v=1, max_v=10_000_000)
 
     Session = create_sessionmaker(engine)
     sql = """
@@ -81,8 +78,8 @@ async def cleanup_request_logs(
     now: datetime | None = None,
 ) -> RequestLogsCleanupResult:
     cutoff = _cutoff_iso(keep_days=int(keep_days), now=now)
-    max_delete_rows_i = _clamp_int(int(max_delete_rows), min_v=1, max_v=10_000_000)
-    chunk_size_i = _clamp_int(int(chunk_size), min_v=1, max_v=100_000)
+    max_delete_rows_i = clamp_int(int(max_delete_rows), min_v=1, max_v=10_000_000)
+    chunk_size_i = clamp_int(int(chunk_size), min_v=1, max_v=100_000)
     chunk_size_i = min(int(chunk_size_i), int(max_delete_rows_i))
 
     Session = create_sessionmaker(engine)

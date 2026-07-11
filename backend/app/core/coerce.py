@@ -33,6 +33,11 @@ def as_int(value: Any, *, default: int = 0) -> int:
         return default
 
 
+def clamp_int(value: int, *, min_v: int, max_v: int) -> int:
+    """Inclusive clamp for already-parsed ints (not env/request parsers)."""
+    return max(int(min_v), min(int(value), int(max_v)))
+
+
 def derive_orientation(width: int | None, height: int | None) -> tuple[float | None, int | None]:
     """Return (aspect_ratio, orientation) where orientation is 1=portrait, 2=landscape, 3=square."""
     if width is None or height is None or width <= 0 or height <= 0:

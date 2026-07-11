@@ -14,7 +14,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.random_query import normalize_iso_utc_optional
-from app.core.coerce import as_int, as_optional_int, as_str, derive_orientation, truncate_text
+from app.core.coerce import as_int, as_optional_int, as_str, clamp_int, derive_orientation, truncate_text
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.env_parse import parse_int_env
@@ -366,7 +366,7 @@ def build_hydrate_metadata_handler(
             value = int(raw)
         except Exception:
             return int(default)
-        return max(int(min_v), min(int(value), int(max_v)))
+        return clamp_int(value, min_v=min_v, max_v=max_v)
 
     async def _get_pixiv_token_lock(token_id: int) -> asyncio.Lock:
         lock = pixiv_throttle_locks_by_token.get(int(token_id))
