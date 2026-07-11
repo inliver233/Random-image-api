@@ -3,9 +3,32 @@ import { Alert, Button, Card, Descriptions, Form, InputNumber, Skeleton, Space, 
 import React from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { messageFromError, requestIdFromError } from "../admin/errors";
 import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
+
+/** Map known random-engine English ops messages for admin UI. */
+const RANDOM_ENGINE_MESSAGE_ZH: Record<string, string> = {
+  "RANDOM_ENGINE_URL not configured": "未配置 RANDOM_ENGINE_URL（Go 选图服务地址）",
+  "HTTP client unavailable": "HTTP 客户端不可用",
+  "random-engine snapshot failed": "Random Engine 快照推送失败",
+  "random-engine filter-count failed": "Random Engine 过滤计数失败",
+  "engine unreachable while dual-run traffic enabled": "双跑已开启但 Engine 不可达",
+  "engine index empty — push snapshot before cutover": "Engine 索引为空 — 切流前请先推送快照",
+  "traffic_percent=0 (engine not receiving picks)": "traffic_percent=0（Engine 未接收选图流量）",
+};
+
+function localizeRandomEngineMessage(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const text = String(raw).trim();
+  if (!text) return null;
+  return RANDOM_ENGINE_MESSAGE_ZH[text] ?? text;
+}
+
+function applyRandomEngineError(alerts: ReturnType<typeof useActionAlerts>, err: unknown): void {
+  alerts.setErrorMessage(localizeRandomEngineMessage(messageFromError(err)) || "操作失败", requestIdFromError(err));
+}
 
 type CleanupFormValues = {
   keep_days: number;
@@ -207,7 +230,7 @@ export function MaintenancePage() {
       void queryClient.invalidateQueries({ queryKey: ["admin", "maintenance", "random-engine"] });
     },
     onError: (err) => {
-      engineAlerts.setError(err);
+      applyRandomEngineError(engineAlerts, err);
     },
   });
 
@@ -229,7 +252,7 @@ export function MaintenancePage() {
       engineAlerts.setSuccess(msg, data.request_id);
     },
     onError: (err) => {
-      engineAlerts.setError(err);
+      applyRandomEngineError(engineAlerts, err);
     },
   });
 
@@ -248,10 +271,9 @@ export function MaintenancePage() {
         ? null
         : indexSize <= 0;
   const readyForTraffic = Boolean(engine?.ready_for_traffic);
-  const cutoverWarning =
-    typeof engine?.cutover_warning === "string" && engine.cutover_warning.trim()
-      ? engine.cutover_warning.trim()
-      : null;
+  const cutoverWarning = localizeRandomEngineMessage(
+    typeof engine?.cutover_warning === "string" ? engine.cutover_warning : null,
+  );
   const revision =
     health && typeof (health as { snapshot_revision?: unknown }).snapshot_revision === "string"
       ? String((health as { snapshot_revision: string }).snapshot_revision)
