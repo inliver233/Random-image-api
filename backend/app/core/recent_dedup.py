@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, Protocol, runtime_checkable
@@ -14,6 +15,13 @@ log = logging.getLogger(__name__)
 _RECENT_LOCK = Lock()
 _RECENT_IMAGES: deque[tuple[float, int]] = deque()
 _RECENT_AUTHORS: deque[tuple[float, int]] = deque()
+
+# Shared pool for RedisRecentDedup so request threads never block on Redis RTT.
+_REDIS_IO_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="recent-dedup-redis")
+# Hard ceiling for any Redis call on the pick path (fail open past this).
+_REDIS_CALL_TIMEOUT_S = 0.15
+# Reuse last successful cross-instance window briefly to avoid sync Redis on every pick.
+_REDIS_LIST_CACHE_TTL_S = 0.5
 
 
 @runtime_checkable
@@ -171,6 +179,11 @@ class RedisRecentDedup:
     Call sites pass process ``time.monotonic()`` for memory; Redis always scores with
     wall-clock so multi-instance windows align. Fail-open to process-local memory when
     redis package/connect/command fails (public API stays up).
+
+    Request-path contract (latency):
+      - ``record`` always dual-writes process-local memory, then fire-and-forgets Redis.
+      - ``get_lists`` serves a short TTL cache or memory immediately; Redis refresh is
+        bounded by a thread-pool timeout so slow Redis never stalls /random plan build.
     """
 
     redis_url: str
@@ -179,6 +192,10 @@ class RedisRecentDedup:
     _client: Any = field(default=None, repr=False)
     _fallback: MemoryRecentDedup = field(default_factory=MemoryRecentDedup, repr=False)
     _connect_failed: bool = field(default=False, repr=False)
+    _cache_lock: Lock = field(default_factory=Lock, repr=False)
+    _list_cache: tuple[list[int], list[int]] | None = field(default=None, repr=False)
+    _list_cache_at: float = field(default=0.0, repr=False)
+    _refresh_inflight: bool = field(default=False, repr=False)
 
     def _images_key(self) -> str:
         return f"{self.key_prefix}images"
@@ -202,8 +219,8 @@ class RedisRecentDedup:
                 str(self.redis_url),
                 encoding="utf-8",
                 decode_responses=True,
-                socket_connect_timeout=0.4,
-                socket_timeout=0.4,
+                socket_connect_timeout=0.2,
+                socket_timeout=0.2,
             )
             client.ping()
             self._client = client
@@ -226,29 +243,12 @@ class RedisRecentDedup:
         except Exception as exc:
             log.warning("recent_dedup_redis_prune_failed err=%s", type(exc).__name__)
 
-    def prune(self, now: float, *, window_s: float, max_images: int, max_authors: int) -> None:
+    def _fetch_lists_sync(
+        self, *, window_s: float, max_images: int, max_authors: int
+    ) -> tuple[list[int], list[int]] | None:
         client = self._get_client()
         if client is None:
-            self._fallback.prune(
-                now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
-            )
-            return
-        now_s = time.time()
-        self._prune_key(
-            client, key=self._images_key(), now_s=now_s, window_s=float(window_s), max_n=int(max_images)
-        )
-        self._prune_key(
-            client, key=self._authors_key(), now_s=now_s, window_s=float(window_s), max_n=int(max_authors)
-        )
-
-    def get_lists(
-        self, now: float, *, window_s: float, max_images: int, max_authors: int
-    ) -> tuple[list[int], list[int]]:
-        client = self._get_client()
-        if client is None:
-            return self._fallback.get_lists(
-                now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
-            )
+            return None
         now_s = time.time()
         try:
             self._prune_key(
@@ -274,9 +274,127 @@ class RedisRecentDedup:
             return images, authors
         except Exception as exc:
             log.warning("recent_dedup_redis_get_failed err=%s", type(exc).__name__)
-            return self._fallback.get_lists(
-                now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+            return None
+
+    def _store_list_cache(self, images: list[int], authors: list[int]) -> None:
+        with self._cache_lock:
+            self._list_cache = (list(images), list(authors))
+            self._list_cache_at = time.monotonic()
+
+    def _read_list_cache(self) -> tuple[list[int], list[int]] | None:
+        with self._cache_lock:
+            if self._list_cache is None:
+                return None
+            if (time.monotonic() - float(self._list_cache_at)) > float(_REDIS_LIST_CACHE_TTL_S):
+                return None
+            images, authors = self._list_cache
+            return list(images), list(authors)
+
+    def _schedule_list_refresh(self, *, window_s: float, max_images: int, max_authors: int) -> None:
+        with self._cache_lock:
+            if self._refresh_inflight:
+                return
+            self._refresh_inflight = True
+
+        def _job() -> None:
+            try:
+                fetched = self._fetch_lists_sync(
+                    window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+                )
+                if fetched is not None:
+                    self._store_list_cache(fetched[0], fetched[1])
+            finally:
+                with self._cache_lock:
+                    self._refresh_inflight = False
+
+        try:
+            _REDIS_IO_EXECUTOR.submit(_job)
+        except Exception:
+            with self._cache_lock:
+                self._refresh_inflight = False
+
+    def _record_redis_sync(
+        self,
+        *,
+        image_id_i: int,
+        user_id_i: int | None,
+        window_s: float,
+        max_images: int,
+        max_authors: int,
+    ) -> None:
+        client = self._get_client()
+        if client is None:
+            return
+        now_s = time.time()
+        try:
+            pipe = client.pipeline(transaction=False)
+            pipe.zadd(self._images_key(), {str(image_id_i): float(now_s)})
+            if user_id_i is not None and user_id_i > 0:
+                pipe.zadd(self._authors_key(), {str(user_id_i): float(now_s)})
+            pipe.execute()
+            self._prune_key(
+                client, key=self._images_key(), now_s=now_s, window_s=float(window_s), max_n=int(max_images)
             )
+            self._prune_key(
+                client, key=self._authors_key(), now_s=now_s, window_s=float(window_s), max_n=int(max_authors)
+            )
+            # Keep local cache coherent for same-process follow-up picks.
+            with self._cache_lock:
+                images, authors = (
+                    (list(self._list_cache[0]), list(self._list_cache[1]))
+                    if self._list_cache is not None
+                    else ([], [])
+                )
+            if image_id_i not in images:
+                images.append(int(image_id_i))
+            if user_id_i is not None and user_id_i > 0 and user_id_i not in authors:
+                authors.append(int(user_id_i))
+            self._store_list_cache(images, authors)
+        except Exception as exc:
+            log.warning("recent_dedup_redis_record_failed err=%s", type(exc).__name__)
+
+    def prune(self, now: float, *, window_s: float, max_images: int, max_authors: int) -> None:
+        # Local always; Redis prune rides on record/get refresh workers.
+        self._fallback.prune(
+            now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+        )
+        self._schedule_list_refresh(
+            window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+        )
+
+    def get_lists(
+        self, now: float, *, window_s: float, max_images: int, max_authors: int
+    ) -> tuple[list[int], list[int]]:
+        cached = self._read_list_cache()
+        if cached is not None:
+            # Opportunistic background refresh when TTL still valid but aging.
+            self._schedule_list_refresh(
+                window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+            )
+            return cached
+
+        # Bounded wait for first fill / expired cache; never hang the pick path.
+        try:
+            fut = _REDIS_IO_EXECUTOR.submit(
+                self._fetch_lists_sync,
+                window_s=float(window_s),
+                max_images=int(max_images),
+                max_authors=int(max_authors),
+            )
+            fetched = fut.result(timeout=float(_REDIS_CALL_TIMEOUT_S))
+        except Exception:
+            fetched = None
+            self._schedule_list_refresh(
+                window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+            )
+
+        if fetched is not None:
+            self._store_list_cache(fetched[0], fetched[1])
+            return fetched[0], fetched[1]
+
+        return self._fallback.get_lists(
+            now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+        )
 
     def get_sets(
         self, now: float, *, window_s: float, max_images: int, max_authors: int
@@ -308,57 +426,52 @@ class RedisRecentDedup:
         except Exception:
             user_id_i = None
 
-        client = self._get_client()
-        if client is None:
-            self._fallback.record(
-                now=float(now),
-                image_id=int(image_id_i),
-                user_id=user_id_i,
+        # Always dual-write local so same-process anti-repeat stays correct even if Redis lags.
+        self._fallback.record(
+            now=float(now),
+            image_id=int(image_id_i),
+            user_id=user_id_i,
+            window_s=float(window_s),
+            max_images=int(max_images),
+            max_authors=int(max_authors),
+        )
+        with self._cache_lock:
+            images, authors = (
+                (list(self._list_cache[0]), list(self._list_cache[1]))
+                if self._list_cache is not None
+                else ([], [])
+            )
+            if image_id_i not in images:
+                images.append(int(image_id_i))
+            if user_id_i is not None and user_id_i > 0 and user_id_i not in authors:
+                authors.append(int(user_id_i))
+            self._list_cache = (images, authors)
+            self._list_cache_at = time.monotonic()
+
+        try:
+            _REDIS_IO_EXECUTOR.submit(
+                self._record_redis_sync,
+                image_id_i=int(image_id_i),
+                user_id_i=user_id_i,
                 window_s=float(window_s),
                 max_images=int(max_images),
                 max_authors=int(max_authors),
-            )
-            return
-
-        now_s = time.time()
-        try:
-            pipe = client.pipeline(transaction=False)
-            pipe.zadd(self._images_key(), {str(image_id_i): float(now_s)})
-            if user_id_i is not None and user_id_i > 0:
-                pipe.zadd(self._authors_key(), {str(user_id_i): float(now_s)})
-            pipe.execute()
-            self._prune_key(
-                client, key=self._images_key(), now_s=now_s, window_s=float(window_s), max_n=int(max_images)
-            )
-            self._prune_key(
-                client, key=self._authors_key(), now_s=now_s, window_s=float(window_s), max_n=int(max_authors)
             )
         except Exception as exc:
-            log.warning("recent_dedup_redis_record_failed err=%s", type(exc).__name__)
-            self._fallback.record(
-                now=float(now),
-                image_id=int(image_id_i),
-                user_id=user_id_i,
-                window_s=float(window_s),
-                max_images=int(max_images),
-                max_authors=int(max_authors),
-            )
+            log.warning("recent_dedup_redis_record_submit_failed err=%s", type(exc).__name__)
 
     def clear(self) -> None:
+        with self._cache_lock:
+            self._list_cache = None
+            self._list_cache_at = 0.0
+        self._fallback.clear()
         client = self._get_client()
         if client is None:
-            self._fallback.clear()
             return
         try:
             client.delete(self._images_key(), self._authors_key())
         except Exception as exc:
             log.warning("recent_dedup_redis_clear_failed err=%s", type(exc).__name__)
-            self._fallback.clear()
-        # Also clear process-local fallback so admin/tests stay coherent.
-        try:
-            self._fallback.clear()
-        except Exception:
-            pass
 
     def aclose(self) -> None:
         """Optional close for app shutdown (sync client)."""
