@@ -7,6 +7,7 @@ from typing import Mapping
 
 from app.core.b64url import b64url_encode
 from app.core.config import Settings
+from app.core.env_parse import parse_int_env
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,21 +123,25 @@ def load_imgproxy_config(env: Mapping[str, str]) -> ImgproxyConfig | None:
     key = _decode_hex(env.get("IMGPROXY_KEY") or "", name="IMGPROXY_KEY")
     salt = _decode_hex(env.get("IMGPROXY_SALT") or "", name="IMGPROXY_SALT")
 
-    try:
-        max_dim = int((env.get("IMGPROXY_MAX_DIM") or "2048").strip() or "2048")
-    except Exception:
-        max_dim = 2048
-    max_dim = max(16, min(int(max_dim), 20_000))
+    max_dim = parse_int_env(
+        "IMGPROXY_MAX_DIM",
+        default=2048,
+        min_v=16,
+        max_v=20_000,
+        env=env,
+    )
 
     default_options = (env.get("IMGPROXY_DEFAULT_OPTIONS") or "").strip().strip("/")
     if not default_options:
         default_options = f"rs:fit:{max_dim}:{max_dim}"
 
-    try:
-        url_chunk_size = int((env.get("IMGPROXY_URL_CHUNK_SIZE") or "16").strip() or "16")
-    except Exception:
-        url_chunk_size = 16
-    url_chunk_size = max(0, min(int(url_chunk_size), 128))
+    url_chunk_size = parse_int_env(
+        "IMGPROXY_URL_CHUNK_SIZE",
+        default=16,
+        min_v=0,
+        max_v=128,
+        env=env,
+    )
 
     return ImgproxyConfig(
         base_url=base_url.rstrip("/"),

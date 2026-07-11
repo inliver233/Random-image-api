@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from app.core.b64url import b64url_encode
 from app.core.config import Settings, parse_csv_urls
+from app.core.env_parse import parse_bool_env, parse_int_env
 
 # Keep aligned with edge/img-worker path allowlist (contract: contracts/image-edge.md).
 _ALLOWED_EDGE_PREFIXES = ("/img-original/", "/img-master/", "/img-/", "/c/")
@@ -62,18 +63,19 @@ def load_image_edge_config_from_settings(settings: Settings) -> ImageEdgeConfig 
 
 
 def load_image_edge_config(env: Mapping[str, str]) -> ImageEdgeConfig | None:
-    raw_enabled = (env.get("IMAGE_EDGE_ENABLED") or "").strip().lower()
-    enabled = raw_enabled in {"1", "true", "yes", "y", "on"}
+    enabled = parse_bool_env("IMAGE_EDGE_ENABLED", default=False, env=env)
     secret = (env.get("IMAGE_EDGE_SECRET") or "").strip()
     secret_previous = (env.get("IMAGE_EDGE_SECRET_PREVIOUS") or "").strip()
     if secret_previous and secret_previous == secret:
         secret_previous = ""
     base_urls = parse_csv_urls(env.get("IMAGE_EDGE_BASE_URLS") or env.get("IMAGE_EDGE_BASE_URL") or "")
-    try:
-        ttl = int((env.get("IMAGE_EDGE_SIGN_TTL_SECONDS") or "604800").strip() or "604800")
-    except Exception:
-        ttl = 604800
-    ttl = max(60, min(ttl, 31_536_000))
+    ttl = parse_int_env(
+        "IMAGE_EDGE_SIGN_TTL_SECONDS",
+        default=604800,
+        min_v=60,
+        max_v=31_536_000,
+        env=env,
+    )
     if not enabled or not secret or not base_urls:
         return None
     return ImageEdgeConfig(

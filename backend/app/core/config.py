@@ -8,6 +8,7 @@ from typing import Mapping
 from cryptography.fernet import Fernet
 
 from app.core.crypto import FieldEncryptor
+from app.core.env_parse import parse_int_env
 from app.core.logging import get_logger
 
 log = get_logger(__name__)
@@ -168,19 +169,23 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     imgproxy_base_url = _get(env, "IMGPROXY_BASE_URL", "")
     imgproxy_key = _get(env, "IMGPROXY_KEY", "")
     imgproxy_salt = _get(env, "IMGPROXY_SALT", "")
-    try:
-        imgproxy_max_dim = int(_get(env, "IMGPROXY_MAX_DIM", "2048") or "2048")
-    except Exception:
-        imgproxy_max_dim = 2048
-    imgproxy_max_dim = max(16, min(int(imgproxy_max_dim), 20_000))
+    imgproxy_max_dim = parse_int_env(
+        "IMGPROXY_MAX_DIM",
+        default=2048,
+        min_v=16,
+        max_v=20_000,
+        env=env,
+    )
 
     imgproxy_default_options = _get(env, "IMGPROXY_DEFAULT_OPTIONS", "")
 
-    try:
-        imgproxy_url_chunk_size = int(_get(env, "IMGPROXY_URL_CHUNK_SIZE", "16") or "16")
-    except Exception:
-        imgproxy_url_chunk_size = 16
-    imgproxy_url_chunk_size = max(0, min(int(imgproxy_url_chunk_size), 128))
+    imgproxy_url_chunk_size = parse_int_env(
+        "IMGPROXY_URL_CHUNK_SIZE",
+        default=16,
+        min_v=0,
+        max_v=128,
+        env=env,
+    )
 
     image_edge_enabled = _get_bool(env, "IMAGE_EDGE_ENABLED", False)
     image_edge_secret = _get(env, "IMAGE_EDGE_SECRET", "")
@@ -191,39 +196,47 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     image_edge_base_urls = parse_csv_urls(
         _get(env, "IMAGE_EDGE_BASE_URLS", "") or _get(env, "IMAGE_EDGE_BASE_URL", "")
     )
-    try:
-        image_edge_sign_ttl_seconds = int(_get(env, "IMAGE_EDGE_SIGN_TTL_SECONDS", "604800") or "604800")
-    except Exception:
-        image_edge_sign_ttl_seconds = 604800
-    image_edge_sign_ttl_seconds = max(60, min(int(image_edge_sign_ttl_seconds), 31_536_000))
+    image_edge_sign_ttl_seconds = parse_int_env(
+        "IMAGE_EDGE_SIGN_TTL_SECONDS",
+        default=604800,
+        min_v=60,
+        max_v=31_536_000,
+        env=env,
+    )
 
     public_api_key_required = _get_bool(env, "PUBLIC_API_KEY_REQUIRED", False)
-    try:
-        public_api_key_rpm = int(_get(env, "PUBLIC_API_KEY_RPM", "0") or "0")
-    except Exception:
-        public_api_key_rpm = 0
-    public_api_key_rpm = max(0, min(int(public_api_key_rpm), 10_000_000))
-    try:
-        public_api_key_burst = int(_get(env, "PUBLIC_API_KEY_BURST", "0") or "0")
-    except Exception:
-        public_api_key_burst = 0
-    public_api_key_burst = max(0, min(int(public_api_key_burst), 10_000_000))
+    public_api_key_rpm = parse_int_env(
+        "PUBLIC_API_KEY_RPM",
+        default=0,
+        min_v=0,
+        max_v=10_000_000,
+        env=env,
+    )
+    public_api_key_burst = parse_int_env(
+        "PUBLIC_API_KEY_BURST",
+        default=0,
+        min_v=0,
+        max_v=10_000_000,
+        env=env,
+    )
 
-    try:
-        random_totals_persist_interval_seconds = int(
-            _get(env, "RANDOM_TOTALS_PERSIST_INTERVAL_SECONDS", "15") or "15"
-        )
-    except Exception:
-        random_totals_persist_interval_seconds = 15
-    random_totals_persist_interval_seconds = max(2, min(int(random_totals_persist_interval_seconds), 300))
+    random_totals_persist_interval_seconds = parse_int_env(
+        "RANDOM_TOTALS_PERSIST_INTERVAL_SECONDS",
+        default=15,
+        min_v=2,
+        max_v=300,
+        env=env,
+    )
 
     random_engine_url = _get(env, "RANDOM_ENGINE_URL", "").rstrip("/")
     random_engine_enabled = _get_bool(env, "RANDOM_ENGINE_ENABLED", False) and bool(random_engine_url)
-    try:
-        random_engine_timeout_ms = int(_get(env, "RANDOM_ENGINE_TIMEOUT_MS", "800") or "800")
-    except Exception:
-        random_engine_timeout_ms = 800
-    random_engine_timeout_ms = max(50, min(int(random_engine_timeout_ms), 10_000))
+    random_engine_timeout_ms = parse_int_env(
+        "RANDOM_ENGINE_TIMEOUT_MS",
+        default=800,
+        min_v=50,
+        max_v=10_000,
+        env=env,
+    )
 
     settings = Settings(
         app_env=app_env,
