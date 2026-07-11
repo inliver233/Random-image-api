@@ -107,7 +107,7 @@ type ApiKeyRateLimitStatusResponse = {
 type ModularPortsStatusResponse = {
   ok: true;
   catalog: { backend: string };
-  tags?: { backend: string };
+  tags: { backend: string };
   job_queue: {
     backend: string;
     requested: string;
@@ -427,7 +427,7 @@ export function MaintenancePage() {
                 <Tag>{modularPortsStatus.data.catalog.backend}</Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Tag Store">
-                <Tag>{modularPortsStatus.data.tags?.backend ?? "sqlite"}</Tag>
+                <Tag>{modularPortsStatus.data.tags.backend}</Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Job Queue">
                 <Tag>{modularPortsStatus.data.job_queue.backend}</Tag>

@@ -14,7 +14,6 @@ from app.core.random_engine_client import (
     random_engine_base_url,
 )
 from app.db.catalog import CatalogStore
-from app.db.models.images import Image
 from app.db.session import create_sessionmaker
 from app.db.tag_store import TagStore, resolve_tag_store
 
@@ -25,8 +24,8 @@ _ENGINE_EVENT_CHUNK = 200
 _ENGINE_EVENTS_TIMEOUT_S = 8.0
 
 
-def image_row_to_engine_payload(im: Image, *, tag_names: list[str] | None = None) -> dict[str, Any]:
-    """Serialize one Image ORM row into Go engine IndexImage JSON."""
+def image_row_to_engine_payload(im: Any, *, tag_names: list[str] | None = None) -> dict[str, Any]:
+    """Serialize one catalog image row (ORM or duck-typed) into Go engine IndexImage JSON."""
     names = [str(n).strip() for n in (tag_names or []) if str(n or "").strip()]
     return {
         "id": int(im.id),

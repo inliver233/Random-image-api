@@ -46,6 +46,7 @@ def test_healthz_ok_includes_request_id() -> None:
     assert modules["job_queue"]["implemented"] is True
     assert modules["job_queue"]["using_sqlite_fallback"] is False
     assert modules["catalog"]["backend"] == "sqlite"
+    assert modules["tags"]["backend"] == "sqlite"
     assert modules["recent_dedup"]["backend"] == "memory"
     assert modules["recent_dedup"]["requested"] == "memory"
     assert modules["recent_dedup"]["using_memory_fallback"] is False

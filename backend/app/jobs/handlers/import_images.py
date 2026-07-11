@@ -74,7 +74,11 @@ def _parse_pbd_created_at(value: Any) -> str | None:
     return dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _resolve_payload_file(payload: dict[str, Any]) -> Path | None:
+def _resolve_payload_file(
+    payload: dict[str, Any],
+    *,
+    settings: Settings | None = None,
+) -> Path | None:
     if "file_ref" not in payload:
         return None
 
@@ -82,8 +86,8 @@ def _resolve_payload_file(payload: dict[str, Any]) -> Path | None:
     if not file_ref:
         raise JobPermanentError("payload.file_ref is required")
 
-    settings = load_settings()
-    base_dir = get_sqlite_db_dir(settings.database_url)
+    s = settings if settings is not None else load_settings()
+    base_dir = get_sqlite_db_dir(s.database_url)
     try:
         return resolve_file_ref(file_ref, base_dir=base_dir)
     except Exception as exc:
@@ -148,7 +152,7 @@ def build_import_images_handler(
             # PixivBatchDownloader export already contains most metadata;
             # keep this import token-free by default.
             hydrate_on_import = False
-        file_path = _resolve_payload_file(payload)
+        file_path = _resolve_payload_file(payload, settings=s)
         if input_format == "pixiv_batch_downloader_json" and file_path is None:
             raise JobPermanentError("payload.file_ref is required for pixiv_batch_downloader_json")
 
