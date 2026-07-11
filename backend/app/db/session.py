@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import random
 import sqlite3
+import weakref
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TypeVar
 
@@ -12,6 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from app.core.env_parse import parse_float_env, parse_int_env
 
 T = TypeVar("T")
+
+# One sessionmaker per AsyncEngine process-wide (public hot path).
+_SESSIONMAKER_BY_ENGINE: weakref.WeakKeyDictionary[AsyncEngine, async_sessionmaker[AsyncSession]] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def is_sqlite_busy_error(exc: BaseException) -> bool:
@@ -74,7 +80,17 @@ async def with_sqlite_busy_retry(
 
 
 def create_sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
-    return async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    """Return a process-cached async_sessionmaker for the given engine.
+
+    Call sites used to allocate a new sessionmaker per request; that is pure
+    overhead. WeakKeyDictionary keeps one factory per live AsyncEngine.
+    """
+    cached = _SESSIONMAKER_BY_ENGINE.get(engine)
+    if cached is not None:
+        return cached
+    sm = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
+    _SESSIONMAKER_BY_ENGINE[engine] = sm
+    return sm
 
 
 async def get_session(sessionmaker: async_sessionmaker[AsyncSession]) -> AsyncIterator[AsyncSession]:

@@ -22,7 +22,7 @@ async def list_tags(
     parsed = parse_public_search_query(q=q, limit=limit, cursor=cursor, cursor_kind="str")
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = getattr(request.app.state, "sessionmaker", None) or create_sessionmaker(engine)
     tags = resolve_tag_store(getattr(request.app.state, "tag_store", None))
     async with Session() as session:
         items, next_cursor = await tags.list_tags(

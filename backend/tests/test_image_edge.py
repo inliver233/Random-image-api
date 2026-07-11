@@ -157,6 +157,27 @@ def test_dual_secret_dedupes_identical_previous() -> None:
     assert s.image_edge_secret_previous == ""
 
 
+def test_load_image_edge_config_from_settings_is_cached() -> None:
+    """Hot path calls load repeatedly; same settings identity must reuse ImageEdgeConfig."""
+    s = load_settings(
+        {
+            "APP_ENV": "dev",
+            "IMAGE_EDGE_ENABLED": "true",
+            "IMAGE_EDGE_SECRET": "cache-secret",
+            "IMAGE_EDGE_BASE_URLS": "https://img.example.com",
+            "IMAGE_EDGE_SIGN_TTL_SECONDS": "600",
+        }
+    )
+    a = load_image_edge_config_from_settings(s)
+    b = load_image_edge_config_from_settings(s)
+    assert a is not None
+    assert a is b
+    # Disabled still caches None so we avoid rebuild on every miss.
+    off = load_settings({"APP_ENV": "dev", "IMAGE_EDGE_ENABLED": "false"})
+    assert load_image_edge_config_from_settings(off) is None
+    assert load_image_edge_config_from_settings(off) is None
+
+
 def test_resolve_public_proxy_url_falls_back_when_disabled() -> None:
     s = load_settings({"APP_ENV": "dev", "IMAGE_EDGE_ENABLED": "false"})
     assert (

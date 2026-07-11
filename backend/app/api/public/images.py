@@ -12,13 +12,24 @@ from app.core.image_delivery import (
     normalize_image_ext,
     should_mark_image_ok,
 )
+from app.core.image_edge import load_image_edge_config_from_settings
+from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.public_json import public_cursor_list_json, public_ok_json, serialize_public_image
 from app.core.public_list_filters import parse_public_list_filters
 from app.core.random_delivery import resolve_catalog_store
+from app.core.random_request import force_local_from_query, prefer_image_edge
+from app.core.random_strategy import needs_opportunistic_hydrate
+from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.db.session import create_sessionmaker
 from app.db.tag_store import resolve_tag_store
 
 router = APIRouter()
+
+
+def _resolve_sessionmaker(request: Request):
+    return getattr(request.app.state, "sessionmaker", None) or create_sessionmaker(
+        request.app.state.engine
+    )
 
 
 @router.get("/images")
@@ -58,9 +69,8 @@ async def list_images(
         created_to=created_to,
     )
 
-    engine = request.app.state.engine
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
-    Session = create_sessionmaker(engine)
+    Session = _resolve_sessionmaker(request)
     async with Session() as session:
         images, next_cursor = await catalog.list_images(
             session,
@@ -95,10 +105,9 @@ async def get_image(
 ) -> Any:
     image_id = require_positive_id(image_id, invalid_message="Unsupported image_id")
 
-    engine = request.app.state.engine
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     tag_store = resolve_tag_store(getattr(request.app.state, "tag_store", None))
-    Session = create_sessionmaker(engine)
+    Session = _resolve_sessionmaker(request)
 
     async with Session() as session:
         image = await catalog.get_image_by_id(session, image_id=image_id)
@@ -132,14 +141,41 @@ async def proxy_image(
 
     engine = request.app.state.engine
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
-    Session = create_sessionmaker(engine)
+    tag_store = resolve_tag_store(getattr(request.app.state, "tag_store", None))
+    Session = _resolve_sessionmaker(request)
 
     async with Session() as session:
         image = await catalog.get_image_by_id(session, image_id=image_id)
         if image is None or (image.ext or "").lower() != ext:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
         should_mark_ok = should_mark_image_ok(image)
-        needs_hydrate = await needs_image_proxy_hydrate(session, image)
+        # Skip tag SQL when edge is ready and client prefers edge — edge 302 only needs
+        # cheap opportunistic hydrate for metadata holes (tags checked only on local stream).
+        settings = getattr(request.app.state, "settings", None)
+        runtime = await resolve_runtime_for_request(request, engine)
+        resolved = resolve_proxy_mirror(
+            runtime=runtime,
+            headers=request.headers,
+            pixiv_cat=int(pixiv_cat),
+            pximg_mirror_host=pximg_mirror_host,
+            proxy=proxy,
+        )
+        force_local = force_local_from_query(request.query_params)
+        prefer_edge = prefer_image_edge(
+            proxy_override=resolved.proxy_override,
+            pixiv_cat=int(pixiv_cat),
+            pximg_mirror_host_override=resolved.pximg_mirror_host_override,
+            force_local=force_local,
+        ) and not resolved.use_pixiv_cat
+        edge_ready = (
+            settings is not None and load_image_edge_config_from_settings(settings) is not None
+        )
+        if prefer_edge and edge_ready:
+            needs_hydrate = needs_opportunistic_hydrate(image)
+        else:
+            needs_hydrate = await needs_image_proxy_hydrate(
+                session, image, tag_store=tag_store
+            )
 
     return await deliver_public_image_from_request(
         request=request,

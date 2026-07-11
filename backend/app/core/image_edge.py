@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import time
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Any, Mapping
 from urllib.parse import urlparse
 
 from app.core.b64url import b64url_encode
@@ -14,6 +14,10 @@ from app.core.env_parse import parse_bool_env, parse_int_env
 # Keep aligned with edge/img-worker path allowlist (contract: contracts/image-edge.md).
 _ALLOWED_EDGE_PREFIXES = ("/img-original/", "/img-master/", "/img-/", "/c/")
 _ALLOWED_EDGE_EXTS = frozenset({"jpg", "jpeg", "png", "gif", "webp"})
+
+# Settings are immutable per process boot; cache by config key for hot delivery path.
+_EDGE_CFG_FROM_SETTINGS: dict[tuple[Any, ...], ImageEdgeConfig | None] = {}
+_EDGE_CFG_CACHE_MAX = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,15 +55,23 @@ def load_image_edge_config_from_settings(settings: Settings) -> ImageEdgeConfig 
     base_urls = list(getattr(settings, "image_edge_base_urls", None) or [])
     ttl = int(getattr(settings, "image_edge_sign_ttl_seconds", 604800) or 604800)
     ttl = max(60, min(ttl, 31_536_000))
+    cache_key = (enabled, secret, secret_previous, tuple(base_urls), ttl)
+    if cache_key in _EDGE_CFG_FROM_SETTINGS:
+        return _EDGE_CFG_FROM_SETTINGS[cache_key]
     if not enabled or not secret or not base_urls:
-        return None
-    return ImageEdgeConfig(
-        enabled=True,
-        base_urls=base_urls,
-        secret=secret,
-        sign_ttl_seconds=ttl,
-        secret_previous=secret_previous,
-    )
+        cfg: ImageEdgeConfig | None = None
+    else:
+        cfg = ImageEdgeConfig(
+            enabled=True,
+            base_urls=base_urls,
+            secret=secret,
+            sign_ttl_seconds=ttl,
+            secret_previous=secret_previous,
+        )
+    if len(_EDGE_CFG_FROM_SETTINGS) >= _EDGE_CFG_CACHE_MAX:
+        _EDGE_CFG_FROM_SETTINGS.clear()
+    _EDGE_CFG_FROM_SETTINGS[cache_key] = cfg
+    return cfg
 
 
 def load_image_edge_config(env: Mapping[str, str]) -> ImageEdgeConfig | None:

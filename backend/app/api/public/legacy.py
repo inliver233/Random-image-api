@@ -26,7 +26,7 @@ async def legacy_multi(
     ext = normalize_image_ext(ext)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = getattr(request.app.state, "sessionmaker", None) or create_sessionmaker(engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async with Session() as session:
@@ -62,7 +62,7 @@ async def legacy_single(
     ext = normalize_image_ext(ext)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = getattr(request.app.state, "sessionmaker", None) or create_sessionmaker(engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async with Session() as session:

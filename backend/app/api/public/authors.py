@@ -22,7 +22,7 @@ async def list_authors(
     parsed = parse_public_search_query(q=q, limit=limit, cursor=cursor, cursor_kind="int")
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
+    Session = getattr(request.app.state, "sessionmaker", None) or create_sessionmaker(engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     async with Session() as session:
         items, next_cursor = await catalog.list_authors(

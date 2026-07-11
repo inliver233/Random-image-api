@@ -223,6 +223,8 @@ def create_app() -> FastAPI:
 
     engine = create_engine(settings.database_url)
     app.state.engine = engine
+    # Process-cached sessionmaker (create_sessionmaker also weakref-caches by engine).
+    app.state.sessionmaker = create_sessionmaker(engine)
     app.state.catalog_store = build_catalog_store(database_url=str(settings.database_url))
     app.state.tag_store = build_tag_store(database_url=str(settings.database_url))
     app.state.random_pick = build_random_pick(database_url=str(settings.database_url))
