@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from fastapi import Query
 from fastapi.responses import RedirectResponse
 
 from app.core.errors import ApiError, ErrorCode
@@ -47,6 +48,103 @@ class ParsedRandomFilters:
     illust_id: int | None
     created_from_norm: str | None
     created_to_norm: str | None
+
+
+class PublicRandomQuery:
+    """Shared FastAPI query dependency for /random and /feed filter fields.
+
+    Endpoint-specific knobs stay on the route (format/redirect/attempts vs limit).
+    """
+
+    def __init__(
+        self,
+        seed: str | None = None,
+        strategy: str | None = None,
+        quality_samples: int | None = None,
+        r18: int = 0,
+        r18_strict: int | None = None,
+        ai_type: str = "any",
+        illust_type: str = "any",
+        orientation: str = "any",
+        layout: str | None = None,
+        adaptive: int = 0,
+        pixiv_cat: int = 0,
+        pximg_mirror_host: str | None = None,
+        proxy: str | None = None,
+        min_width: int = 0,
+        min_height: int = 0,
+        min_pixels: int = 0,
+        min_bookmarks: int = 0,
+        min_views: int = 0,
+        min_comments: int = 0,
+        included_tags: list[str] | None = Query(default=None),
+        excluded_tags: list[str] | None = Query(default=None),
+        user_id: int | None = None,
+        illust_id: int | None = None,
+        created_from: str | None = None,
+        created_to: str | None = None,
+    ) -> None:
+        self.seed = seed
+        self.strategy = strategy
+        self.quality_samples = quality_samples
+        self.r18 = r18
+        self.r18_strict = r18_strict
+        self.ai_type = ai_type
+        self.illust_type = illust_type
+        self.orientation = orientation
+        self.layout = layout
+        self.adaptive = adaptive
+        self.pixiv_cat = pixiv_cat
+        self.pximg_mirror_host = pximg_mirror_host
+        self.proxy = proxy
+        self.min_width = min_width
+        self.min_height = min_height
+        self.min_pixels = min_pixels
+        self.min_bookmarks = min_bookmarks
+        self.min_views = min_views
+        self.min_comments = min_comments
+        self.included_tags = included_tags
+        self.excluded_tags = excluded_tags
+        self.user_id = user_id
+        self.illust_id = illust_id
+        self.created_from = created_from
+        self.created_to = created_to
+
+    def parse_filters(
+        self,
+        *,
+        format: str,
+        redirect: int,
+        query_params: Mapping[str, Any] | Any | None,
+        headers: Mapping[str, str] | Any | None,
+    ) -> ParsedRandomFilters:
+        return parse_random_filters(
+            format=format,
+            redirect=redirect,
+            seed=self.seed,
+            r18=self.r18,
+            ai_type=self.ai_type,
+            illust_type=self.illust_type,
+            orientation=self.orientation,
+            layout=self.layout,
+            adaptive=self.adaptive,
+            pixiv_cat=self.pixiv_cat,
+            pximg_mirror_host=self.pximg_mirror_host,
+            min_width=self.min_width,
+            min_height=self.min_height,
+            min_pixels=self.min_pixels,
+            min_bookmarks=self.min_bookmarks,
+            min_views=self.min_views,
+            min_comments=self.min_comments,
+            included_tags=self.included_tags,
+            excluded_tags=self.excluded_tags,
+            user_id=self.user_id,
+            illust_id=self.illust_id,
+            created_from=self.created_from,
+            created_to=self.created_to,
+            query_params=query_params,
+            headers=headers,
+        )
 
 
 def _detect_mobile(headers: Mapping[str, str] | Any) -> bool:

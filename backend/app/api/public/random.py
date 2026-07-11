@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 
 from app.core.errors import ApiError
 from app.core.image_edge import resolve_image_edge_redirect_url
@@ -17,10 +17,10 @@ from app.core.random_delivery import (
 from app.core.random_pick_context import build_random_pick_context
 from app.core.random_query import no_match_error_from_filters
 from app.core.random_request import (
+    PublicRandomQuery,
     build_local_i_redirect_response,
     force_local_from_query,
     parse_public_debug_flag,
-    parse_random_filters,
     prefer_image_edge,
 )
 from app.core.random_response import build_json_body, build_simple_json_body, resolve_public_item_urls
@@ -35,59 +35,14 @@ router = APIRouter()
 async def random_image(
     request: Request,
     background_tasks: BackgroundTasks,
+    q: PublicRandomQuery = Depends(),
     format: str = "image",
     redirect: int = 0,
     attempts: int | None = None,
-    seed: str | None = None,
-    strategy: str | None = None,
-    quality_samples: int | None = None,
-    r18: int = 0,
-    r18_strict: int | None = None,
-    ai_type: str = "any",
-    illust_type: str = "any",
-    orientation: str = "any",
-    layout: str | None = None,
-    adaptive: int = 0,
-    pixiv_cat: int = 0,
-    pximg_mirror_host: str | None = None,
-    proxy: str | None = None,
-    min_width: int = 0,
-    min_height: int = 0,
-    min_pixels: int = 0,
-    min_bookmarks: int = 0,
-    min_views: int = 0,
-    min_comments: int = 0,
-    included_tags: list[str] | None = Query(default=None),
-    excluded_tags: list[str] | None = Query(default=None),
-    user_id: int | None = None,
-    illust_id: int | None = None,
-    created_from: str | None = None,
-    created_to: str | None = None,
 ) -> Any:
-    filters = parse_random_filters(
+    filters = q.parse_filters(
         format=format,
         redirect=redirect,
-        seed=seed,
-        r18=r18,
-        ai_type=ai_type,
-        illust_type=illust_type,
-        orientation=orientation,
-        layout=layout,
-        adaptive=adaptive,
-        pixiv_cat=pixiv_cat,
-        pximg_mirror_host=pximg_mirror_host,
-        min_width=min_width,
-        min_height=min_height,
-        min_pixels=min_pixels,
-        min_bookmarks=min_bookmarks,
-        min_views=min_views,
-        min_comments=min_comments,
-        included_tags=included_tags,
-        excluded_tags=excluded_tags,
-        user_id=user_id,
-        illust_id=illust_id,
-        created_from=created_from,
-        created_to=created_to,
         query_params=request.query_params,
         headers=request.headers,
     )
@@ -105,7 +60,7 @@ async def random_image(
         headers=request.headers,
         pixiv_cat=int(pixiv_cat),
         pximg_mirror_host=pximg_mirror_host_override,
-        proxy=proxy,
+        proxy=q.proxy,
     )
     proxy_override = resolved_proxy.proxy_override
     # Prefer explicit query override; fall back to shared resolver (proxy= may imply mirror).
@@ -122,9 +77,9 @@ async def random_image(
         filters=filters,
         random_defaults=random_defaults,
         attempts=attempts,
-        r18_strict=r18_strict,
-        strategy=strategy,
-        quality_samples=quality_samples,
+        r18_strict=q.r18_strict,
+        strategy=q.strategy,
+        quality_samples=q.quality_samples,
         query_params=request.query_params,
     )
     # Keep no-match filter summary in sync with resolved default when query omits r18_strict.
