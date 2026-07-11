@@ -1301,6 +1301,9 @@ LIMIT 1;
                     image_ids=list(persisted_ids),
                     settings=settings,
                 )
+                from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
+
+                await maybe_enqueue_r2_prewarm(image_ids=list(persisted_ids), settings=settings)
             await _mark_token_ok(token_id, now_dt=now_dt)
             return
 

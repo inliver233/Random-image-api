@@ -127,13 +127,14 @@ class RandomPickContext:
     ) -> tuple[list[Any], dict[str, Any] | None]:
         """One-shot engine batch for /feed. Returns ([], None) when dual-run is off."""
         from app.core.metrics import observe_random_engine_pick
+        from app.core.random_engine_client import random_engine_base_url, should_route_pick_to_engine
         from app.core.random_engine_pick import try_pick_many_via_engine
 
-        engine_enabled = bool(getattr(settings, "random_engine_enabled", False)) if settings is not None else False
-        engine_url = (
-            str(getattr(settings, "random_engine_url", "") or "").strip().rstrip("/") if settings is not None else ""
-        )
-        if not (engine_enabled and engine_url and httpx_client is not None):
+        if settings is None or httpx_client is None:
+            return [], None
+        engine_url = random_engine_base_url(settings)
+        # Traffic roll is independent of pick seed (self.rng).
+        if not engine_url or not should_route_pick_to_engine(settings):
             return [], None
 
         exclude_set: set[int] = set(int(x) for x in (exclude_image_ids or []))

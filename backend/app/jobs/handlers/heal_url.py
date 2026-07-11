@@ -64,11 +64,15 @@ def build_heal_url_handler(engine: AsyncEngine, *, transport: httpx.BaseTranspor
         healed_ids = await with_sqlite_busy_retry(_op)
         # hydrate already published upserts; re-publish after status=3→1 so engine re-indexes.
         if healed_ids:
+            settings = load_settings()
             await maybe_publish_engine_upserts(
                 engine,
                 image_ids=list(healed_ids),
-                settings=load_settings(),
+                settings=settings,
             )
+            from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
+
+            await maybe_enqueue_r2_prewarm(image_ids=list(healed_ids), settings=settings)
 
     return _handler
 

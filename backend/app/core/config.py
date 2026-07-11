@@ -49,6 +49,11 @@ class Settings:
     random_engine_url: str
     random_engine_enabled: bool
     random_engine_timeout_ms: int
+    # Progressive cutover when engine enabled: 0=never call engine, 100=all eligible picks.
+    random_engine_traffic_percent: int
+    # Optional R2 prewarm webhook after catalog upserts (Phase 2; default off).
+    r2_prewarm_enabled: bool
+    r2_prewarm_url: str
 
     @property
     def is_prod(self) -> bool:
@@ -230,6 +235,16 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         max_v=10_000,
         env=env,
     )
+    # Default 100 when engine is on so enabling the flag alone is full dual-run.
+    random_engine_traffic_percent = parse_int_env(
+        "RANDOM_ENGINE_TRAFFIC_PERCENT",
+        default=100,
+        min_v=0,
+        max_v=100,
+        env=env,
+    )
+    r2_prewarm_url = _get(env, "R2_PREWARM_URL", "").rstrip("/")
+    r2_prewarm_enabled = parse_bool_env("R2_PREWARM_ENABLED", default=False, env=env) and bool(r2_prewarm_url)
 
     settings = Settings(
         app_env=app_env,
@@ -259,6 +274,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         random_engine_url=random_engine_url,
         random_engine_enabled=random_engine_enabled,
         random_engine_timeout_ms=random_engine_timeout_ms,
+        random_engine_traffic_percent=random_engine_traffic_percent,
+        r2_prewarm_enabled=r2_prewarm_enabled,
+        r2_prewarm_url=r2_prewarm_url,
     )
 
     if settings.is_prod:

@@ -6,8 +6,9 @@ from sqlalchemy.orm import load_only
 
 from app.db.models.images import Image
 
-# Shared with random_pick: public delivery + score + hydrate columns only.
-_PUBLIC_IMAGE_LOAD_ONLY = load_only(
+# Public pick/rehydrate path: delivery + score + hydrate signal columns only
+# (skip admin/error blobs). Shared by random_pick and engine id rehydrate.
+PUBLIC_IMAGE_LOAD_ONLY = load_only(
     Image.id,
     Image.illust_id,
     Image.page_index,
@@ -38,7 +39,7 @@ _PUBLIC_IMAGE_LOAD_ONLY = load_only(
 async def get_image_by_id(session: AsyncSession, *, image_id: int) -> Image | None:
     stmt = (
         select(Image)
-        .options(_PUBLIC_IMAGE_LOAD_ONLY)
+        .options(PUBLIC_IMAGE_LOAD_ONLY)
         .where(Image.id == int(image_id), Image.status == 1)
         .limit(1)
     )
@@ -63,7 +64,7 @@ async def get_images_by_ids(session: AsyncSession, *, image_ids: list[int]) -> l
     rows = list(
         (
             await session.execute(
-                select(Image).options(_PUBLIC_IMAGE_LOAD_ONLY).where(Image.id.in_(ids), Image.status == 1)
+                select(Image).options(PUBLIC_IMAGE_LOAD_ONLY).where(Image.id.in_(ids), Image.status == 1)
             )
         )
         .scalars()

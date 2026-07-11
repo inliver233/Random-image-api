@@ -305,10 +305,12 @@ async def pick_with_strategy(
     ``pick_ctx`` is the resolved RandomPickContext plan; ``filters`` is ParsedRandomFilters.
     Routes stay thin adapters over this service entrypoint.
     """
+    from app.core.random_engine_client import random_engine_base_url, should_route_pick_to_engine
+
     debug_base = dict(pick_ctx.debug_base)
-    engine_enabled = bool(getattr(settings, "random_engine_enabled", False))
-    engine_url = str(getattr(settings, "random_engine_url", "") or "").strip().rstrip("/")
-    if engine_enabled and engine_url and httpx_client is not None:
+    engine_url = random_engine_base_url(settings) if settings is not None else None
+    # Traffic roll uses process RNG only — never pick_ctx.rng (seed must stay deterministic).
+    if engine_url and httpx_client is not None and should_route_pick_to_engine(settings):
         base_exclude = list(exclude_image_ids or [])
         exclude_set: set[int] = set(int(x) for x in base_exclude)
         if bool(pick_ctx.anti_repeat_enabled) and pick_ctx.recent_exclude_image_ids:
@@ -346,6 +348,17 @@ async def pick_with_strategy(
             **{k: v for k, v in (eng_meta or {}).items() if k not in {"picked_by"}},
         }
         debug_base = {**debug_base, **engine_fallback_meta}
+    elif bool(getattr(settings, "random_engine_enabled", False)) and engine_url:
+        # Engine on but this request stayed on Python (traffic percent / no client).
+        try:
+            observe_random_engine_pick(status="skipped_traffic")
+        except Exception:
+            pass
+        debug_base = {
+            **debug_base,
+            "engine_status": "skipped_traffic",
+            "engine_traffic_percent": int(getattr(settings, "random_engine_traffic_percent", 100) or 0),
+        }
 
     if pick_ctx.strategy_norm == "random":
         return await pick_by_random_key(

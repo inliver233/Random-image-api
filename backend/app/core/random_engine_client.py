@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import random
 from typing import Any
 
 import httpx
@@ -10,9 +11,44 @@ from app.core.config import Settings
 logger = logging.getLogger(__name__)
 
 
-def random_engine_base_url(settings: Settings) -> str | None:
+def random_engine_base_url(settings: Settings | Any) -> str | None:
     url = str(getattr(settings, "random_engine_url", "") or "").strip().rstrip("/")
     return url or None
+
+
+def random_engine_traffic_percent(settings: Settings | Any) -> int:
+    """0–100 progressive cutover share when dual-run is enabled (default 100)."""
+    try:
+        pct = int(getattr(settings, "random_engine_traffic_percent", 100) or 0)
+    except Exception:
+        pct = 100
+    if pct < 0:
+        return 0
+    if pct > 100:
+        return 100
+    return pct
+
+
+def should_route_pick_to_engine(settings: Settings | Any, *, rng: Any | None = None) -> bool:
+    """Whether this pick should attempt the Go engine (flag + URL + traffic %).
+
+    Catalog event publish is independent (URL-only) so the index can warm first.
+    """
+    if not bool(getattr(settings, "random_engine_enabled", False)):
+        return False
+    if not random_engine_base_url(settings):
+        return False
+    pct = random_engine_traffic_percent(settings)
+    if pct <= 0:
+        return False
+    if pct >= 100:
+        return True
+    roller = rng if rng is not None else random
+    try:
+        roll = float(roller.random())  # type: ignore[attr-defined]
+    except Exception:
+        roll = float(random.random())
+    return (roll * 100.0) < float(pct)
 
 
 async def engine_health(client: httpx.AsyncClient, base_url: str, *, timeout_s: float = 0.5) -> dict[str, Any] | None:

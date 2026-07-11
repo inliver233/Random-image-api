@@ -329,8 +329,12 @@ def build_import_images_handler(engine: AsyncEngine):
 
             image_ids = await with_sqlite_busy_retry(_op)
             if image_ids:
-                # Best-effort: warm random-engine index after each import chunk.
-                await maybe_publish_engine_upserts(engine, image_ids=list(image_ids), settings=load_settings())
+                # Best-effort: warm random-engine index (+ optional R2 prewarm) after each import chunk.
+                settings = load_settings()
+                await maybe_publish_engine_upserts(engine, image_ids=list(image_ids), settings=settings)
+                from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
+
+                await maybe_enqueue_r2_prewarm(image_ids=list(image_ids), settings=settings)
             return list(image_ids or [])
 
         if input_format == "pixiv_batch_downloader_json":

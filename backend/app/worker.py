@@ -344,6 +344,17 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
             min_v=1,
             max_v=200,
         )
+        # Soft SQLite write budget: caps concurrent job tasks so write-heavy workers
+        # do not thrash the shared catalog DB used by public pick (Phase 4 readiness).
+        # 0 = no extra cap (legacy behavior). Default 0 keeps behavior unchanged.
+        write_budget = parse_int_env(
+            "WORKER_SQLITE_WRITE_BUDGET",
+            default=0,
+            min_v=0,
+            max_v=200,
+        )
+        if write_budget > 0:
+            max_concurrency = min(int(max_concurrency), int(write_budget))
         auto_concurrency = parse_bool_env("WORKER_AUTO_CONCURRENCY", default=True)
         auto_refresh_s = parse_int_env(
             "WORKER_AUTO_CONCURRENCY_REFRESH_SECONDS",

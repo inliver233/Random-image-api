@@ -160,6 +160,7 @@ def _init_labelsets() -> None:
         "bad_id",
         "db_miss",
         "fallback",
+        "skipped_traffic",
     ):
         RANDOM_ENGINE_PICK_TOTAL.labels(status=status).inc(0)
     for path in IMAGE_DELIVERY_PATHS:
