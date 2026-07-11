@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Descriptions, Form, InputNumber, Skeleton, Space, Switch, Tag, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Form, InputNumber, Skeleton, Space, Switch, Tag, Typography } from "antd";
 import React from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
@@ -32,6 +32,10 @@ type RandomEngineStatusResponse = {
   timeout_ms?: number;
   healthy: boolean;
   health: Record<string, unknown> | null;
+  index_size?: number | null;
+  index_empty?: boolean | null;
+  ready_for_traffic?: boolean;
+  cutover_warning?: string | null;
   request_id: string;
 };
 
@@ -227,8 +231,21 @@ export function MaintenancePage() {
   const engine = engineStatus.data;
   const health = engine?.health && typeof engine.health === "object" ? engine.health : null;
   const indexSize =
-    health && typeof (health as { index_size?: unknown }).index_size === "number"
-      ? Number((health as { index_size: number }).index_size)
+    typeof engine?.index_size === "number"
+      ? Number(engine.index_size)
+      : health && typeof (health as { index_size?: unknown }).index_size === "number"
+        ? Number((health as { index_size: number }).index_size)
+        : null;
+  const indexEmpty =
+    typeof engine?.index_empty === "boolean"
+      ? engine.index_empty
+      : indexSize === null
+        ? null
+        : indexSize <= 0;
+  const readyForTraffic = Boolean(engine?.ready_for_traffic);
+  const cutoverWarning =
+    typeof engine?.cutover_warning === "string" && engine.cutover_warning.trim()
+      ? engine.cutover_warning.trim()
       : null;
   const revision =
     health && typeof (health as { snapshot_revision?: unknown }).snapshot_revision === "string"
@@ -450,23 +467,44 @@ export function MaintenancePage() {
 
         <QueryState query={engineStatus}>
           {engine ? (
-            <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
-              <Descriptions.Item label="URL">{engine.url || "（未配置）"}</Descriptions.Item>
-              <Descriptions.Item label="双跑开关">
-                {engine.enabled ? <Tag color="green">ENABLED</Tag> : <Tag>OFF</Tag>}
-              </Descriptions.Item>
-              <Descriptions.Item label="切流 %">
-                {typeof engine.traffic_percent === "number" ? engine.traffic_percent : "—"}
-              </Descriptions.Item>
-              <Descriptions.Item label="超时 ms">
-                {typeof engine.timeout_ms === "number" ? engine.timeout_ms : "—"}
-              </Descriptions.Item>
-              <Descriptions.Item label="健康">
-                {engine.healthy ? <Tag color="green">healthy</Tag> : <Tag color="orange">unreachable</Tag>}
-              </Descriptions.Item>
-              <Descriptions.Item label="索引规模">{indexSize ?? "—"}</Descriptions.Item>
-              <Descriptions.Item label="快照 revision">{revision || "—"}</Descriptions.Item>
-            </Descriptions>
+            <>
+              {cutoverWarning ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ maxWidth: 640, marginBottom: 16 }}
+                  message="双跑切流风险"
+                  description={cutoverWarning}
+                />
+              ) : null}
+              <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
+                <Descriptions.Item label="URL">{engine.url || "（未配置）"}</Descriptions.Item>
+                <Descriptions.Item label="双跑开关">
+                  {engine.enabled ? <Tag color="green">ENABLED</Tag> : <Tag>OFF</Tag>}
+                </Descriptions.Item>
+                <Descriptions.Item label="切流 %">
+                  {typeof engine.traffic_percent === "number" ? engine.traffic_percent : "—"}
+                </Descriptions.Item>
+                <Descriptions.Item label="超时 ms">
+                  {typeof engine.timeout_ms === "number" ? engine.timeout_ms : "—"}
+                </Descriptions.Item>
+                <Descriptions.Item label="健康">
+                  {engine.healthy ? <Tag color="green">healthy</Tag> : <Tag color="orange">unreachable</Tag>}
+                </Descriptions.Item>
+                <Descriptions.Item label="索引规模">
+                  {indexSize ?? "—"}
+                  {indexEmpty === true ? (
+                    <Tag color="orange" style={{ marginLeft: 8 }}>
+                      empty
+                    </Tag>
+                  ) : null}
+                </Descriptions.Item>
+                <Descriptions.Item label="可切流">
+                  {readyForTraffic ? <Tag color="green">ready</Tag> : <Tag color="orange">not ready</Tag>}
+                </Descriptions.Item>
+                <Descriptions.Item label="快照 revision">{revision || "—"}</Descriptions.Item>
+              </Descriptions>
+            </>
           ) : null}
         </QueryState>
 

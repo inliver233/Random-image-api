@@ -489,9 +489,10 @@ func handlePick(w http.ResponseWriter, r *http.Request, st *engineState) {
 	defer st.mu.RUnlock()
 
 	if len(st.byKey) == 0 {
-		resp := pickResponse{OK: true, Code: "NO_MATCH", Items: []pickItem{}}
+		// Distinct from filter NO_MATCH so BFF dual-run can warm/snapshot before cutover.
+		resp := pickResponse{OK: true, Code: "INDEX_NOT_READY", Items: []pickItem{}}
 		if req.Debug {
-			resp.Debug = map[string]any{"reason": "empty_index", "revision": st.revision}
+			resp.Debug = map[string]any{"reason": "empty_index", "revision": st.revision, "index_size": 0}
 		}
 		writeJSON(w, http.StatusOK, resp)
 		return

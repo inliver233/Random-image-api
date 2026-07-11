@@ -51,7 +51,7 @@ Optional cutover — default **off** (Python SQLite pick remains primary):
 
 Admin:
 
-- `GET /admin/api/maintenance/random-engine` — health + traffic_percent / timeout_ms
+- `GET /admin/api/maintenance/random-engine` — health + traffic_percent / timeout_ms + `index_size` / `index_empty` / `ready_for_traffic` / `cutover_warning`
 - `POST /admin/api/maintenance/random-engine/snapshot` — push full enabled index from SQLite
 - `POST /admin/api/maintenance/random-engine/compare-filters` — SQLite vs engine filter cardinality (statistical dual-run; body optional public-style filters, default r18=0)
 
@@ -60,6 +60,16 @@ Engine-internal (ops / BFF):
 - `POST /v1/admin/filter-count` — `{ "filters": {…} }` → `{ filtered, index_size, revision }`
 
 After starting the engine, push a snapshot before enabling the flag, or picks will fall through to Python.
+
+### Empty index vs filter miss
+
+| Engine `code` | When | BFF `engine_status` metric label |
+| --- | --- | --- |
+| `INDEX_NOT_READY` | in-memory index size 0 (no snapshot yet) | `empty_index` |
+| `NO_MATCH` | filters excluded all candidates | `no_match` |
+| `OK` + items | successful pick | `ok` (then catalog rehydrate) |
+
+Prometheus: `new_pixiv_random_engine_pick_total{status=…}` — watch `empty_index` / `unavailable` before raising `RANDOM_ENGINE_TRAFFIC_PERCENT`.
 
 ### Catalog → engine events (best-effort)
 

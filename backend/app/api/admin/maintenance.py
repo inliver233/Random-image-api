@@ -358,15 +358,45 @@ async def random_engine_status(
         "timeout_ms": timeout_ms,
         "healthy": False,
         "health": None,
+        "index_size": None,
+        "index_empty": None,
+        "ready_for_traffic": False,
+        "cutover_warning": None,
     }
     if not base:
+        if enabled:
+            payload["cutover_warning"] = "RANDOM_ENGINE_URL not configured"
         return admin_ok(request, payload=payload, request_id=rid)
     client = getattr(request.app.state, "httpx_client", None)
     if client is None:
+        if enabled:
+            payload["cutover_warning"] = "HTTP client unavailable"
         return admin_ok(request, payload=payload, request_id=rid)
     health = await engine_health(client, base, timeout_s=1.0)
     payload["healthy"] = health is not None
     payload["health"] = health
+    index_size: int | None = None
+    if isinstance(health, dict) and health.get("index_size") is not None:
+        try:
+            index_size = int(health.get("index_size"))
+        except Exception:
+            index_size = None
+    payload["index_size"] = index_size
+    if index_size is None:
+        payload["index_empty"] = None if health is None else False
+    else:
+        payload["index_empty"] = index_size <= 0
+    # Safe progressive cutover: dual-run flag on, traffic > 0, healthy, non-empty index.
+    payload["ready_for_traffic"] = bool(
+        enabled and traffic_percent > 0 and health is not None and index_size is not None and index_size > 0
+    )
+    if enabled and traffic_percent > 0:
+        if health is None:
+            payload["cutover_warning"] = "engine unreachable while dual-run traffic enabled"
+        elif index_size is not None and index_size <= 0:
+            payload["cutover_warning"] = "engine index empty — push snapshot before cutover"
+    elif enabled and traffic_percent <= 0:
+        payload["cutover_warning"] = "traffic_percent=0 (engine not receiving picks)"
     return admin_ok(request, payload=payload, request_id=rid)
 
 

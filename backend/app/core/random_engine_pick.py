@@ -215,6 +215,31 @@ def compose_engine_pick_payload(
     )
 
 
+def classify_engine_pick_response(data: dict[str, Any] | None) -> str:
+    """Map engine /v1/pick JSON to a dual-run status label (before catalog rehydrate).
+
+    empty_index: INDEX_NOT_READY or empty_index debug reason (warm snapshot needed).
+    no_match: ok response with zero items (filters excluded everything).
+    not_ok / unavailable / bad_item handled by callers when rehydrating.
+    """
+    if data is None:
+        return "unavailable"
+    if not data.get("ok"):
+        return "not_ok"
+    code = str(data.get("code") or "").strip().upper()
+    if code in {"INDEX_NOT_READY", "EMPTY_INDEX"}:
+        return "empty_index"
+    debug = data.get("debug")
+    if isinstance(debug, dict):
+        reason = str(debug.get("reason") or "").strip().lower()
+        if reason in {"empty_index", "index_not_ready"}:
+            return "empty_index"
+    items = data.get("items")
+    if not isinstance(items, list) or not items:
+        return "no_match"
+    return "ok"
+
+
 async def try_pick_via_engine(
     *,
     client: Any,
@@ -237,14 +262,12 @@ async def try_pick_via_engine(
     meta["engine_code"] = data.get("code")
     if data.get("debug") is not None:
         meta["engine_debug"] = data.get("debug")
-    if not data.get("ok"):
-        meta["engine_status"] = "not_ok"
+    classified = classify_engine_pick_response(data)
+    if classified != "ok":
+        meta["engine_status"] = classified
         return None, meta
     items = data.get("items")
-    if not isinstance(items, list) or not items:
-        meta["engine_status"] = "no_match"
-        return None, meta
-    first = items[0]
+    first = items[0] if isinstance(items, list) and items else None
     if not isinstance(first, dict):
         meta["engine_status"] = "bad_item"
         return None, meta
@@ -283,8 +306,9 @@ async def try_pick_many_via_engine(
     meta["engine_code"] = data.get("code")
     if data.get("debug") is not None:
         meta["engine_debug"] = data.get("debug")
-    if not data.get("ok"):
-        meta["engine_status"] = "not_ok"
+    classified = classify_engine_pick_response(data)
+    if classified != "ok":
+        meta["engine_status"] = classified
         return [], meta
     raw_items = data.get("items")
     if not isinstance(raw_items, list) or not raw_items:

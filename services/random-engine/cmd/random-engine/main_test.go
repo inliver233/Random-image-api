@@ -64,8 +64,8 @@ func TestSnapshotAndRandomPick(t *testing.T) {
 	if err := json.Unmarshal(rr.Body.Bytes(), &empty); err != nil {
 		t.Fatal(err)
 	}
-	if empty.Code != "NO_MATCH" {
-		t.Fatalf("want NO_MATCH got %s", empty.Code)
+	if empty.Code != "INDEX_NOT_READY" {
+		t.Fatalf("want INDEX_NOT_READY got %s", empty.Code)
 	}
 
 	seedSnapshot(t, mux, st)
