@@ -118,6 +118,19 @@ def build_engine_pick_payload(
     return body
 
 
+def merge_engine_exclude_ids(
+    *,
+    pick_ctx: Any,
+    exclude_image_ids: list[int] | set[int] | None = None,
+) -> set[int]:
+    """Union caller excludes with anti-repeat recent ids (SQL cap list on the plan)."""
+    out: set[int] = set(int(x) for x in (exclude_image_ids or []))
+    if bool(getattr(pick_ctx, "anti_repeat_enabled", False)):
+        recent = getattr(pick_ctx, "recent_exclude_image_ids", None) or []
+        out.update(int(x) for x in recent)
+    return out
+
+
 def compose_engine_pick_payload(
     *,
     r18: int,
@@ -311,10 +324,7 @@ async def pick_with_strategy(
     engine_url = random_engine_base_url(settings) if settings is not None else None
     # Traffic roll uses process RNG only — never pick_ctx.rng (seed must stay deterministic).
     if engine_url and httpx_client is not None and should_route_pick_to_engine(settings):
-        base_exclude = list(exclude_image_ids or [])
-        exclude_set: set[int] = set(int(x) for x in base_exclude)
-        if bool(pick_ctx.anti_repeat_enabled) and pick_ctx.recent_exclude_image_ids:
-            exclude_set.update(int(x) for x in pick_ctx.recent_exclude_image_ids)
+        exclude_set = merge_engine_exclude_ids(pick_ctx=pick_ctx, exclude_image_ids=exclude_image_ids)
 
         payload = pick_ctx.build_engine_payload(
             filters=filters,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from app.core.random_defaults import (
     build_pick_kwargs,
@@ -22,6 +22,36 @@ from app.core.recent_dedup import get_recent_lists
 
 # Cap NOT IN size for SQLite plan quality; remaining recent ids still apply logit penalties.
 RECENT_EXCLUDE_SQL_CAP = 512
+
+
+@runtime_checkable
+class RandomService(Protocol):
+    """Thin RandomService port used by public /random and /feed adapters.
+
+    Implementations plan once (runtime defaults + dedup + quality), then pick via
+    Go engine dual-run and/or Python SQLite fallback without routes owning that logic.
+    """
+
+    async def pick(
+        self,
+        *,
+        session: Any,
+        settings: Any,
+        httpx_client: Any,
+        filters: ParsedRandomFilters,
+        exclude_image_ids: list[int] | None = None,
+    ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]: ...
+
+    async def try_engine_batch(
+        self,
+        *,
+        session: Any,
+        settings: Any,
+        httpx_client: Any,
+        filters: ParsedRandomFilters,
+        limit: int,
+        exclude_image_ids: list[int] | set[int] | None = None,
+    ) -> tuple[list[Any], dict[str, Any] | None]: ...
 
 
 @dataclass(slots=True)
@@ -128,7 +158,7 @@ class RandomPickContext:
         """One-shot engine batch for /feed. Returns ([], None) when dual-run is off."""
         from app.core.metrics import observe_random_engine_pick
         from app.core.random_engine_client import random_engine_base_url, should_route_pick_to_engine
-        from app.core.random_engine_pick import try_pick_many_via_engine
+        from app.core.random_engine_pick import merge_engine_exclude_ids, try_pick_many_via_engine
 
         if settings is None or httpx_client is None:
             return [], None
@@ -137,9 +167,7 @@ class RandomPickContext:
         if not engine_url or not should_route_pick_to_engine(settings):
             return [], None
 
-        exclude_set: set[int] = set(int(x) for x in (exclude_image_ids or []))
-        if self.anti_repeat_enabled and self.recent_exclude_image_ids:
-            exclude_set.update(int(x) for x in self.recent_exclude_image_ids)
+        exclude_set = merge_engine_exclude_ids(pick_ctx=self, exclude_image_ids=exclude_image_ids)
 
         payload = self.build_engine_payload(
             filters=filters,
@@ -157,7 +185,7 @@ class RandomPickContext:
         )
         engine_status = str((eng_meta or {}).get("engine_status") or "fallback")
         try:
-            observe_random_engine_pick(status=engine_status if images else engine_status)
+            observe_random_engine_pick(status=engine_status)
         except Exception:
             pass
         return list(images or []), eng_meta

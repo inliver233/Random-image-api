@@ -6,7 +6,11 @@ from app.core.random_engine_client import (
     random_engine_traffic_percent,
     should_route_pick_to_engine,
 )
-from app.core.random_engine_pick import build_engine_filters, build_engine_pick_payload
+from app.core.random_engine_pick import (
+    build_engine_filters,
+    build_engine_pick_payload,
+    merge_engine_exclude_ids,
+)
 from app.core.r2_prewarm import r2_prewarm_enabled
 
 
@@ -130,3 +134,19 @@ def test_build_engine_filters_safe_defaults() -> None:
     assert f["ai_type"] == "any"
     assert f["orientation"] == "any"
     assert f["exclude_image_ids"] == []
+
+
+class _PickCtx:
+    def __init__(self, *, anti_repeat: bool, recent: list[int]) -> None:
+        self.anti_repeat_enabled = anti_repeat
+        self.recent_exclude_image_ids = recent
+
+
+def test_merge_engine_exclude_ids_unions_recent_when_anti_repeat() -> None:
+    ctx = _PickCtx(anti_repeat=True, recent=[10, 20, 10])
+    out = merge_engine_exclude_ids(pick_ctx=ctx, exclude_image_ids=[20, 30])
+    assert out == {10, 20, 30}
+
+    ctx_off = _PickCtx(anti_repeat=False, recent=[10])
+    out_off = merge_engine_exclude_ids(pick_ctx=ctx_off, exclude_image_ids=[5])
+    assert out_off == {5}
