@@ -10,16 +10,19 @@ from app.db.catalog import (
     build_catalog_store,
     catalog_backend_from_database_url,
 )
+from app.db.dialect import backend_from_database_url
 from app.db.engine import create_engine
 from app.db.models.base import Base
 from app.db.session import create_sessionmaker
 
 
-def test_catalog_backend_from_database_url() -> None:
-    assert catalog_backend_from_database_url("sqlite+aiosqlite:///./data/app.db") == "sqlite"
-    assert catalog_backend_from_database_url("postgresql+asyncpg://u:p@localhost/db") == "postgres"
-    assert catalog_backend_from_database_url("postgres://u:p@localhost/db") == "postgres"
-    assert catalog_backend_from_database_url("") == "sqlite"
+def test_backend_from_database_url() -> None:
+    assert backend_from_database_url("sqlite+aiosqlite:///./data/app.db") == "sqlite"
+    assert backend_from_database_url("postgresql+asyncpg://u:p@localhost/db") == "postgres"
+    assert backend_from_database_url("postgres://u:p@localhost/db") == "postgres"
+    assert backend_from_database_url("") == "sqlite"
+    # Catalog re-export stays stable for existing callers.
+    assert catalog_backend_from_database_url("postgresql+asyncpg://u:p@h/db") == "postgres"
 
 
 def test_build_catalog_store_dialects() -> None:

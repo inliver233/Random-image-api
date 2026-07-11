@@ -5,7 +5,7 @@ from typing import Protocol, runtime_checkable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.catalog import catalog_backend_from_database_url
+from app.db.dialect import backend_from_database_url
 from app.db.tags_get import get_tag_names_for_image
 from app.db.tags_links import (
     clear_all_image_tags,
@@ -175,8 +175,8 @@ class PostgresTagStore(SqliteTagStore):
 
 
 def tag_backend_from_database_url(database_url: str) -> str:
-    """Map DATABASE_URL dialect → tag backend label (delegates to catalog helper)."""
-    return catalog_backend_from_database_url(database_url)
+    """Map DATABASE_URL dialect → tag backend label (shared dialect helper)."""
+    return backend_from_database_url(database_url)
 
 
 def build_tag_store(*, database_url: str = "") -> TagStore:

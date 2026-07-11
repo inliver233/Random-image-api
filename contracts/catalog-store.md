@@ -7,6 +7,7 @@ Implementation:
 - Protocol: `CatalogStore` in `backend/app/db/catalog.py`
 - Default: `SqliteCatalogStore` → existing `images_upsert` / `images_get` / `images_mark`
 - Postgres label: `PostgresCatalogStore` (same helpers today; dialect-aware divergences later)
+- Dialect map: `catalog_backend_from_database_url` → `db.dialect.backend_from_database_url` (shared with TagStore / RandomPickPort)
 - Wire-up: `app.state.catalog_store = build_catalog_store(database_url=...)` in `main.py`
 
 ## Scope (intentionally narrow)

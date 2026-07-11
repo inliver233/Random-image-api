@@ -3,10 +3,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
-from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.authors_list import AuthorListItem, list_authors as list_authors_helper
+from app.db.dialect import backend_from_database_url
 from app.db.images_admin_list import list_admin_images as list_admin_images_helper
 from app.db.images_delete import clear_all_images, delete_images_by_ids
 from app.db.images_get import (
@@ -482,24 +482,7 @@ class PostgresCatalogStore(SqliteCatalogStore):
 
 def catalog_backend_from_database_url(database_url: str) -> str:
     """Map DATABASE_URL dialect → catalog backend label (sqlite | postgres | other)."""
-    raw = (database_url or "").strip()
-    if not raw:
-        return "sqlite"
-    try:
-        url = make_url(raw)
-        name = (url.get_backend_name() or "").lower()
-    except Exception:
-        low = raw.lower()
-        if low.startswith("postgres") or "postgresql" in low:
-            return "postgres"
-        if low.startswith("sqlite"):
-            return "sqlite"
-        return "other"
-    if name.startswith("sqlite"):
-        return "sqlite"
-    if name.startswith("postgres"):
-        return "postgres"
-    return name or "other"
+    return backend_from_database_url(database_url)
 
 
 def build_catalog_store(*, database_url: str = "") -> CatalogStore:

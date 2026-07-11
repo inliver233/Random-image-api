@@ -7,7 +7,7 @@ Implementation:
 - Protocol: `TagStore` in `backend/app/db/tag_store.py`
 - Default: `SqliteTagStore` → `tags_get` / `tags_list` / `tags_links`
 - Postgres label: `PostgresTagStore` (same helpers today)
-- Dialect map: `tag_backend_from_database_url` delegates to `catalog_backend_from_database_url`
+- Dialect map: `tag_backend_from_database_url` → `db.dialect.backend_from_database_url`
 - Wire-up: `app.state.tag_store = build_tag_store(database_url=...)` in `main.py`
 - Worker: `build_default_dispatcher` injects one store into import/hydrate handlers
 
