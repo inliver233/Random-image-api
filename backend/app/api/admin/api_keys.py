@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object, parse_bool_optional, parse_optional_str
+from app.core.admin_request import load_json_object, parse_bool_optional, parse_optional_str, parse_required_str
 from app.core.api_keys import api_key_hint, hmac_sha256_hex
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -73,8 +73,22 @@ async def create_api_key(
     rid = get_or_create_request_id(request)
 
     body = await load_json_object(request)
-    name = str(body.get("name") or "").strip()
-    api_key = str(body.get("api_key") or "").strip()
+    name = parse_required_str(
+        body.get("name"),
+        field="name",
+        max_len=100,
+        missing_message="Invalid name",
+        invalid_message="Invalid name",
+    )
+    api_key = parse_required_str(
+        body.get("api_key"),
+        field="api_key",
+        max_len=500,
+        missing_message="Invalid api_key",
+        invalid_message="Invalid api_key",
+    )
+    if len(api_key) < 20:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid api_key", status_code=400)
     description = parse_optional_str(
         body.get("description"),
         max_len=1000,
@@ -83,11 +97,6 @@ async def create_api_key(
     )
     enabled_v = parse_bool_optional(body.get("enabled"))
     enabled = bool(enabled_v) if enabled_v is not None else True
-
-    if not name or len(name) > 100:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid name", status_code=400)
-    if not api_key or len(api_key) < 20 or len(api_key) > 500:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid api_key", status_code=400)
 
     settings = request.app.state.settings
     try:

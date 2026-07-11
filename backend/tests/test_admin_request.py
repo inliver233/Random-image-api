@@ -9,6 +9,7 @@ from app.core.admin_request import (
     parse_optional_str,
     parse_positive_int,
     parse_positive_int_list,
+    parse_required_str,
 )
 from app.core.errors import ApiError
 
@@ -39,6 +40,19 @@ def test_parse_optional_str() -> None:
     with pytest.raises(ApiError) as ei_custom:
         parse_optional_str("too-long", max_len=3, field="reason", invalid_message="Invalid reason")
     assert ei_custom.value.message == "Invalid reason"
+
+
+def test_parse_required_str() -> None:
+    assert parse_required_str("  name ", field="name", max_len=10) == "name"
+    with pytest.raises(ApiError) as ei_missing:
+        parse_required_str("  ", field="name")
+    assert ei_missing.value.message == "Missing name"
+    with pytest.raises(ApiError) as ei_long:
+        parse_required_str("toolong", field="name", max_len=3)
+    assert ei_long.value.message == "Unsupported name"
+    with pytest.raises(ApiError) as ei_custom:
+        parse_required_str("", field="name", missing_message="Invalid name")
+    assert ei_custom.value.message == "Invalid name"
 
 
 def test_parse_positive_int() -> None:

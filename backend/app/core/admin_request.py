@@ -74,6 +74,31 @@ def parse_optional_str(
     return text
 
 
+def parse_required_str(
+    value: Any,
+    *,
+    field: str,
+    max_len: int | None = None,
+    missing_message: str | None = None,
+    invalid_message: str | None = None,
+) -> str:
+    """Strip required string; empty → missing; over-length → invalid."""
+    text = str(value or "").strip()
+    if not text:
+        raise ApiError(
+            code=ErrorCode.BAD_REQUEST,
+            message=missing_message or f"Missing {field}",
+            status_code=400,
+        )
+    if max_len is not None and len(text) > max_len:
+        raise ApiError(
+            code=ErrorCode.BAD_REQUEST,
+            message=invalid_message or f"Unsupported {field}",
+            status_code=400,
+        )
+    return text
+
+
 def parse_positive_int(
     value: Any,
     *,

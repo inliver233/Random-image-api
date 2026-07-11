@@ -8,7 +8,13 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object, parse_bool, parse_bool_optional, parse_optional_str
+from app.core.admin_request import (
+    load_json_object,
+    parse_bool,
+    parse_bool_optional,
+    parse_optional_str,
+    parse_required_str,
+)
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.errors import ApiError, ErrorCode
 from app.core.proxy_routing import select_proxy_uri_for_url
@@ -29,12 +35,7 @@ router = APIRouter()
 async def _load_create_token_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
-    refresh_token = str(data.get("refresh_token") or "").strip()
-    if not refresh_token:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing refresh_token", status_code=400)
-    if len(refresh_token) > 2048:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported refresh_token", status_code=400)
-
+    refresh_token = parse_required_str(data.get("refresh_token"), field="refresh_token", max_len=2048)
     label = parse_optional_str(data.get("label"), max_len=200, field="label")
 
     enabled = parse_bool(data.get("enabled"), default=True)

@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object, parse_bool, parse_optional_str
+from app.core.admin_request import load_json_object, parse_bool, parse_optional_str, parse_required_str
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.db.models.proxy_endpoints import ProxyEndpoint
@@ -23,12 +23,7 @@ router = APIRouter()
 async def _load_create_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
-    name = str(data.get("name") or "").strip()
-    if not name:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing name", status_code=400)
-    if len(name) > 100:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported name", status_code=400)
-
+    name = parse_required_str(data.get("name"), field="name", max_len=100)
     description = parse_optional_str(data.get("description"))
 
     enabled = parse_bool(data.get("enabled"), default=True)
@@ -41,12 +36,13 @@ async def _load_update_json(request: Request) -> dict[str, Any]:
     out: dict[str, Any] = {}
 
     if "name" in data:
-        name = str(data.get("name") or "").strip()
-        if not name:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported name", status_code=400)
-        if len(name) > 100:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported name", status_code=400)
-        out["name"] = name
+        out["name"] = parse_required_str(
+            data.get("name"),
+            field="name",
+            max_len=100,
+            missing_message="Unsupported name",
+            invalid_message="Unsupported name",
+        )
 
     if "description" in data:
         out["description"] = parse_optional_str(data.get("description"))
