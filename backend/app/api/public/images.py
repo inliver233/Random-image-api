@@ -15,7 +15,6 @@ from app.core.image_delivery import (
 from app.core.public_json import public_cursor_list_json, public_ok_json, serialize_public_image
 from app.core.public_list_filters import parse_public_list_filters
 from app.core.random_delivery import resolve_catalog_store
-from app.db.images_list import list_images as db_list_images
 from app.db.session import create_sessionmaker
 from app.db.tags_get import get_tag_names_for_image
 
@@ -60,9 +59,10 @@ async def list_images(
     )
 
     engine = request.app.state.engine
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     Session = create_sessionmaker(engine)
     async with Session() as session:
-        images, next_cursor = await db_list_images(
+        images, next_cursor = await catalog.list_images(
             session,
             limit=filters.limit,
             cursor=filters.cursor_i,

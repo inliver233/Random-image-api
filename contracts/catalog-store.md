@@ -18,12 +18,14 @@ Implementation:
 | `bulk_upsert_import_rows` | Bulk import chunk: CASE-merge nullable metadata + fill empty `proxy_path`; returns ids (tags / Import counters stay in handler) |
 | `get_image_by_id` / `get_images_by_ids` | Public delivery + engine hydrate DTO |
 | `get_image_by_illust_page` | Legacy public routes by (illust_id, page_index), status=1 only |
+| `list_images` | Public cursor list with filters (status=1); returns `(rows, next_cursor)` |
 | `mark_image_ok` / `mark_image_failure` | Delivery quality feedback |
 | `heal_broken_images_for_illust` | After heal hydrate: status `3` → `1` for all pages of an illust; returns healed ids |
 | `delete_images_by_ids` | Admin hard-delete image rows by id; returns ids that existed (caller owns tags / commit / engine publish) |
 
 Public delivery/get paths adopt the port progressively:
 
+- `GET /images` → `catalog.list_images`
 - `GET /images/{id}` and `GET /i/{id}.{ext}` → `catalog.get_image_by_id`
 - legacy `/{illust}-{page}.{ext}` / `/{illust}.{ext}` → `catalog.get_image_by_illust_page`
 - `/i` + `/random` stream mark_ok / mark_failure → `catalog.mark_image_*`

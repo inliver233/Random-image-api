@@ -392,6 +392,79 @@ def test_sqlite_catalog_store_bulk_upsert_import(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_sqlite_catalog_store_list_images(tmp_path: Path) -> None:
+    engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_list.db").as_posix())
+
+    async def _run() -> None:
+        from app.db.models.images import Image
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        store = build_catalog_store(database_url=str(engine.url))
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            session.add_all(
+                [
+                    Image(
+                        illust_id=1,
+                        page_index=0,
+                        ext="jpg",
+                        original_url="https://example.test/1.jpg",
+                        proxy_path="/i/1.jpg",
+                        random_key=0.1,
+                        status=1,
+                        x_restrict=0,
+                    ),
+                    Image(
+                        illust_id=2,
+                        page_index=0,
+                        ext="jpg",
+                        original_url="https://example.test/2.jpg",
+                        proxy_path="/i/2.jpg",
+                        random_key=0.2,
+                        status=1,
+                        x_restrict=1,
+                    ),
+                    Image(
+                        illust_id=3,
+                        page_index=0,
+                        ext="jpg",
+                        original_url="https://example.test/3.jpg",
+                        proxy_path="/i/3.jpg",
+                        random_key=0.3,
+                        status=3,
+                        x_restrict=0,
+                    ),
+                ]
+            )
+            await session.commit()
+
+            rows, next_cursor = await store.list_images(session, limit=10, r18=0, r18_strict=True)
+            assert next_cursor is None
+            assert [int(r.illust_id) for r in rows] == [1]
+
+            page, next_c = await store.list_images(session, limit=1, r18=2, r18_strict=False)
+            assert len(page) == 1
+            assert next_c is not None
+            page2, next_c2 = await store.list_images(
+                session,
+                limit=1,
+                cursor=next_c,
+                r18=2,
+                r18_strict=False,
+            )
+            assert len(page2) == 1
+            assert next_c2 is None
+            assert {int(page[0].id), int(page2[0].id)} == {
+                int(page[0].id),
+                int(page2[0].id),
+            }
+            assert int(page[0].id) != int(page2[0].id)
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_sqlite_catalog_store_delete_images_by_ids(tmp_path: Path) -> None:
     engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_delete.db").as_posix())
 
