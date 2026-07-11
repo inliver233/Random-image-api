@@ -16,7 +16,10 @@ Implementation:
 | `upsert_image_by_illust_page` | Thin catalog write by (illust_id, page_index) — basic fields only |
 | `upsert_hydrated_image_page` | Hydrate metadata write + `proxy_path` from returned id (tags stay in handler) |
 | `bulk_upsert_import_rows` | Bulk import chunk: CASE-merge nullable metadata + fill empty `proxy_path`; returns ids (tags / Import counters stay in handler) |
-| `get_image_by_id` / `get_images_by_ids` | Public delivery + engine hydrate DTO |
+| `get_image_by_id` / `get_images_by_ids` | Public delivery + engine hydrate DTO (status=1) |
+| `get_images_by_ids_any_status` | Engine event publish by id (any status; full row) |
+| `get_images_by_illust_id` | Engine event publish by illust (any status; page_index order) |
+| `list_enabled_images` | Engine full snapshot rows (status=1, id order; optional limit) |
 | `get_image_by_illust_page` | Legacy public routes by (illust_id, page_index), status=1 only |
 | `list_images` | Public cursor list with filters (status=1); returns `(rows, next_cursor)` |
 | `mark_image_ok` / `mark_image_failure` | Delivery quality feedback |
@@ -30,6 +33,7 @@ Public delivery/get paths adopt the port progressively:
 - legacy `/{illust}-{page}.{ext}` / `/{illust}.{ext}` → `catalog.get_image_by_illust_page`
 - `/i` + `/random` stream mark_ok / mark_failure → `catalog.mark_image_*`
 - Go engine hydrate after pick → `catalog.get_image_by_id` / `get_images_by_ids`
+- Engine event/snapshot load → `catalog.get_images_by_ids_any_status` / `get_images_by_illust_id` / `list_enabled_images` (tags still joined in `random_engine_sync`)
 - `hydrate_metadata` page upsert → `catalog.upsert_hydrated_image_page`
 - `import_images` chunk image upsert → `catalog.bulk_upsert_import_rows` (tags + Import progress counters remain in handler)
 - `heal_url` status recovery → `catalog.heal_broken_images_for_illust`

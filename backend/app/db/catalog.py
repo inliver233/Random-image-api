@@ -7,7 +7,13 @@ from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.images_delete import delete_images_by_ids
-from app.db.images_get import get_image_by_id, get_images_by_ids
+from app.db.images_get import (
+    get_image_by_id,
+    get_images_by_ids,
+    get_images_by_ids_any_status,
+    get_images_by_illust_id,
+    list_enabled_images,
+)
 from app.db.images_get_by_illust import get_image_by_illust_page
 from app.db.images_list import list_images as list_images_helper
 from app.db.images_mark import heal_broken_images_for_illust, mark_image_failure, mark_image_ok
@@ -80,6 +86,27 @@ class CatalogStore(Protocol):
     async def get_image_by_id(self, session: AsyncSession, *, image_id: int) -> Image | None: ...
 
     async def get_images_by_ids(self, session: AsyncSession, *, image_ids: list[int]) -> list[Image]: ...
+
+    async def get_images_by_ids_any_status(
+        self,
+        session: AsyncSession,
+        *,
+        image_ids: list[int],
+    ) -> list[Image]: ...
+
+    async def get_images_by_illust_id(
+        self,
+        session: AsyncSession,
+        *,
+        illust_id: int,
+    ) -> list[Image]: ...
+
+    async def list_enabled_images(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int | None = None,
+    ) -> list[Image]: ...
 
     async def get_image_by_illust_page(
         self,
@@ -235,6 +262,30 @@ class SqliteCatalogStore:
 
     async def get_images_by_ids(self, session: AsyncSession, *, image_ids: list[int]) -> list[Image]:
         return await get_images_by_ids(session, image_ids=image_ids)
+
+    async def get_images_by_ids_any_status(
+        self,
+        session: AsyncSession,
+        *,
+        image_ids: list[int],
+    ) -> list[Image]:
+        return await get_images_by_ids_any_status(session, image_ids=image_ids)
+
+    async def get_images_by_illust_id(
+        self,
+        session: AsyncSession,
+        *,
+        illust_id: int,
+    ) -> list[Image]:
+        return await get_images_by_illust_id(session, illust_id=illust_id)
+
+    async def list_enabled_images(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int | None = None,
+    ) -> list[Image]:
+        return await list_enabled_images(session, limit=limit)
 
     async def get_image_by_illust_page(
         self,

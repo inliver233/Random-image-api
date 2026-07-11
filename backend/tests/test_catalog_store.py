@@ -392,6 +392,76 @@ def test_sqlite_catalog_store_bulk_upsert_import(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_sqlite_catalog_store_engine_loads(tmp_path: Path) -> None:
+    engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_engine.db").as_posix())
+
+    async def _run() -> None:
+        from app.db.models.images import Image
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        store = build_catalog_store(database_url=str(engine.url))
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            ok = Image(
+                illust_id=10,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/10.jpg",
+                proxy_path="/i/1.jpg",
+                random_key=0.1,
+                status=1,
+            )
+            broken = Image(
+                illust_id=10,
+                page_index=1,
+                ext="png",
+                original_url="https://example.test/10_p1.png",
+                proxy_path="/i/2.png",
+                random_key=0.2,
+                status=3,
+            )
+            other = Image(
+                illust_id=20,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/20.jpg",
+                proxy_path="/i/3.jpg",
+                random_key=0.3,
+                status=1,
+            )
+            session.add_all([ok, broken, other])
+            await session.commit()
+            await session.refresh(ok)
+            await session.refresh(broken)
+            await session.refresh(other)
+
+            # Public get skips status!=1; engine any-status includes broken.
+            public_only = await store.get_images_by_ids(
+                session,
+                image_ids=[int(ok.id), int(broken.id)],
+            )
+            assert [int(r.id) for r in public_only] == [int(ok.id)]
+
+            any_status = await store.get_images_by_ids_any_status(
+                session,
+                image_ids=[int(broken.id), int(ok.id), 999999],
+            )
+            assert [int(r.id) for r in any_status] == [int(broken.id), int(ok.id)]
+
+            by_illust = await store.get_images_by_illust_id(session, illust_id=10)
+            assert [int(r.page_index) for r in by_illust] == [0, 1]
+            assert {int(r.status) for r in by_illust} == {1, 3}
+
+            enabled = await store.list_enabled_images(session)
+            assert [int(r.id) for r in enabled] == [int(ok.id), int(other.id)]
+            limited = await store.list_enabled_images(session, limit=1)
+            assert [int(r.id) for r in limited] == [int(ok.id)]
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_sqlite_catalog_store_list_images(tmp_path: Path) -> None:
     engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_list.db").as_posix())
 

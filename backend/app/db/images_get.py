@@ -73,3 +73,55 @@ async def get_images_by_ids(session: AsyncSession, *, image_ids: list[int]) -> l
     by_id = {int(im.id): im for im in rows}
     return [by_id[i] for i in ids if i in by_id]
 
+
+def _normalize_positive_ids(image_ids: list[int]) -> list[int]:
+    ids: list[int] = []
+    seen: set[int] = set()
+    for raw in image_ids:
+        try:
+            i = int(raw)
+        except Exception:
+            continue
+        if i <= 0 or i in seen:
+            continue
+        seen.add(i)
+        ids.append(i)
+    return ids
+
+
+async def get_images_by_ids_any_status(session: AsyncSession, *, image_ids: list[int]) -> list[Image]:
+    """Load images of any status; return in the same order as ``image_ids`` (skip missing).
+
+    Used by Random Engine event publish (status changes must reach the index).
+    Full row load — engine payload needs fail/error columns not in PUBLIC_IMAGE_LOAD_ONLY.
+    """
+    ids = _normalize_positive_ids(image_ids)
+    if not ids:
+        return []
+    rows = list((await session.execute(select(Image).where(Image.id.in_(ids)))).scalars().all())
+    by_id = {int(im.id): im for im in rows}
+    return [by_id[i] for i in ids if i in by_id]
+
+
+async def get_images_by_illust_id(session: AsyncSession, *, illust_id: int) -> list[Image]:
+    """Load all pages for an illust (any status), ordered by page_index ascending."""
+    if int(illust_id) <= 0:
+        return []
+    return list(
+        (
+            await session.execute(
+                select(Image).where(Image.illust_id == int(illust_id)).order_by(Image.page_index.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def list_enabled_images(session: AsyncSession, *, limit: int | None = None) -> list[Image]:
+    """Load status=1 images ordered by id ascending (engine full snapshot)."""
+    stmt = select(Image).where(Image.status == 1).order_by(Image.id.asc())
+    if limit is not None and int(limit) > 0:
+        stmt = stmt.limit(int(limit))
+    return list((await session.execute(stmt)).scalars().all())
+

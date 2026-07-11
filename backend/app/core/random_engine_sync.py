@@ -8,11 +8,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.config import Settings, load_settings
+from app.core.random_delivery import resolve_catalog_store
 from app.core.random_engine_client import (
     engine_apply_events,
     engine_apply_snapshot,
     random_engine_base_url,
 )
+from app.db.catalog import CatalogStore
 from app.db.models.image_tags import ImageTag
 from app.db.models.images import Image
 from app.db.models.tags import Tag
@@ -74,45 +76,30 @@ async def _tag_names_by_image_ids(session: AsyncSession, image_ids: list[int]) -
     return out
 
 
-async def load_engine_images_by_ids(session: AsyncSession, *, image_ids: list[int]) -> list[dict[str, Any]]:
+async def load_engine_images_by_ids(
+    session: AsyncSession,
+    *,
+    image_ids: list[int],
+    catalog: CatalogStore | None = None,
+) -> list[dict[str, Any]]:
     """Load images (any status) by id and serialize for engine events/snapshot."""
-    ids: list[int] = []
-    seen: set[int] = set()
-    for raw in image_ids:
-        try:
-            i = int(raw)
-        except Exception:
-            continue
-        if i <= 0 or i in seen:
-            continue
-        seen.add(i)
-        ids.append(i)
-    if not ids:
+    store = resolve_catalog_store(catalog)
+    rows = await store.get_images_by_ids_any_status(session, image_ids=list(image_ids))
+    if not rows:
         return []
-    rows = list((await session.execute(select(Image).where(Image.id.in_(ids)))).scalars().all())
-    by_id = {int(im.id): im for im in rows}
-    tag_names = await _tag_names_by_image_ids(session, list(by_id.keys()))
-    out: list[dict[str, Any]] = []
-    for i in ids:
-        im = by_id.get(i)
-        if im is None:
-            continue
-        out.append(image_row_to_engine_payload(im, tag_names=tag_names.get(i, [])))
-    return out
+    ids = [int(im.id) for im in rows]
+    tag_names = await _tag_names_by_image_ids(session, ids)
+    return [image_row_to_engine_payload(im, tag_names=tag_names.get(int(im.id), [])) for im in rows]
 
 
-async def load_engine_images_by_illust(session: AsyncSession, *, illust_id: int) -> list[dict[str, Any]]:
-    if int(illust_id) <= 0:
-        return []
-    rows = list(
-        (
-            await session.execute(
-                select(Image).where(Image.illust_id == int(illust_id)).order_by(Image.page_index.asc())
-            )
-        )
-        .scalars()
-        .all()
-    )
+async def load_engine_images_by_illust(
+    session: AsyncSession,
+    *,
+    illust_id: int,
+    catalog: CatalogStore | None = None,
+) -> list[dict[str, Any]]:
+    store = resolve_catalog_store(catalog)
+    rows = await store.get_images_by_illust_id(session, illust_id=int(illust_id))
     if not rows:
         return []
     ids = [int(im.id) for im in rows]
@@ -139,12 +126,15 @@ def build_delete_events(image_ids: list[int]) -> list[dict[str, Any]]:
     return events
 
 
-async def build_engine_snapshot_payload(session: AsyncSession, *, limit: int | None = None) -> dict[str, Any]:
+async def build_engine_snapshot_payload(
+    session: AsyncSession,
+    *,
+    limit: int | None = None,
+    catalog: CatalogStore | None = None,
+) -> dict[str, Any]:
     """Build a full snapshot of enabled images + tag names for the Go engine."""
-    stmt = select(Image).where(Image.status == 1).order_by(Image.id.asc())
-    if limit is not None and int(limit) > 0:
-        stmt = stmt.limit(int(limit))
-    images = list((await session.execute(stmt)).scalars().all())
+    store = resolve_catalog_store(catalog)
+    images = await store.list_enabled_images(session, limit=limit)
     image_ids = [int(im.id) for im in images]
     tag_names_by_image = await _tag_names_by_image_ids(session, image_ids)
 
