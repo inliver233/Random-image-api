@@ -1,0 +1,295 @@
+openapi: 3.0.3
+info:
+  title: Random Engine (internal)
+  version: 0.1.0
+  description: |
+    Internal pick API for Random-image-api. Public GET /random stays on the BFF
+    and adapts query params to this contract. Engine is pure metadata selection
+    (no image bytes, no residential proxy).
+servers:
+  - url: http://127.0.0.1:8091
+    description: local Go engine default
+paths:
+  /healthz:
+    get:
+      operationId: healthz
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, service]
+                properties:
+                  ok: { type: boolean }
+                  service: { type: string }
+                  index_size: { type: integer }
+                  snapshot_revision: { type: string }
+  /v1/pick:
+    post:
+      operationId: pick
+      summary: Filter + random/quality pick
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PickRequest"
+      responses:
+        "200":
+          description: success (may return empty items)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickResponse"
+        "400":
+          description: bad request
+        "503":
+          description: index not ready / overloaded
+  /v1/feed:
+    post:
+      operationId: feed
+      summary: Batch pick for waterfall (limit > 1)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PickRequest"
+      responses:
+        "200":
+          description: success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickResponse"
+  /v1/admin/snapshot:
+    post:
+      operationId: applySnapshot
+      summary: Replace in-memory index (control plane)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SnapshotEnvelope"
+      responses:
+        "200":
+          description: applied
+  /v1/admin/events:
+    post:
+      operationId: applyEvents
+      summary: Incremental upserts/deletes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventBatch"
+      responses:
+        "200":
+          description: applied
+components:
+  schemas:
+    PickRequest:
+      type: object
+      required: [filters, strategy, limit]
+      properties:
+        filters:
+          $ref: "#/components/schemas/Filters"
+        strategy:
+          type: string
+          enum: [random, quality]
+        quality:
+          $ref: "#/components/schemas/QualityParams"
+        seed:
+          type: string
+          nullable: true
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 1
+        debug:
+          type: boolean
+          default: false
+        client_dedup_key:
+          type: string
+          nullable: true
+          description: optional key for short-term anti-repeat (engine or Redis)
+    Filters:
+      type: object
+      properties:
+        r18:
+          type: integer
+          enum: [0, 1, 2]
+          description: "0=safe, 1=include r18, 2=r18 only (align public API)"
+        r18_strict:
+          type: integer
+          enum: [0, 1]
+        ai_type:
+          type: string
+          description: "any | 0 | 1"
+          default: any
+        illust_type:
+          type: string
+          nullable: true
+        orientation:
+          type: string
+          enum: [any, portrait, landscape, square]
+          default: any
+        min_width: { type: integer, minimum: 0, default: 0 }
+        min_height: { type: integer, minimum: 0, default: 0 }
+        min_pixels: { type: integer, minimum: 0, default: 0 }
+        min_bookmarks: { type: integer, minimum: 0, default: 0 }
+        min_views: { type: integer, minimum: 0, default: 0 }
+        min_comments: { type: integer, minimum: 0, default: 0 }
+        included_tags:
+          type: array
+          items: { type: string }
+          description: "Each entry is a group; group terms split by | are OR; groups AND"
+        excluded_tags:
+          type: array
+          items: { type: string }
+        user_id: { type: integer, nullable: true }
+        illust_id: { type: integer, nullable: true }
+        created_from: { type: string, nullable: true }
+        created_to: { type: string, nullable: true }
+        exclude_image_ids:
+          type: array
+          items: { type: integer }
+        fail_cooldown_before:
+          type: string
+          nullable: true
+          description: ISO time; exclude images still in fail cooldown
+    QualityParams:
+      type: object
+      properties:
+        samples:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        pick_mode:
+          type: string
+        temperature:
+          type: number
+        weights:
+          type: object
+          additionalProperties: { type: number }
+        multipliers:
+          type: object
+          additionalProperties: { type: number }
+    PickItem:
+      type: object
+      required: [id, illust_id, page_index, ext, edge_path]
+      properties:
+        id: { type: integer }
+        illust_id: { type: integer }
+        page_index: { type: integer }
+        ext: { type: string }
+        width: { type: integer, nullable: true }
+        height: { type: integer, nullable: true }
+        x_restrict: { type: integer, nullable: true }
+        ai_type: { type: integer, nullable: true }
+        illust_type: { type: integer, nullable: true }
+        user_id: { type: integer, nullable: true }
+        user_name: { type: string, nullable: true }
+        title: { type: string, nullable: true }
+        created_at_pixiv: { type: string, nullable: true }
+        bookmark_count: { type: integer, nullable: true }
+        view_count: { type: integer, nullable: true }
+        comment_count: { type: integer, nullable: true }
+        original_url: { type: string, nullable: true }
+        edge_path:
+          type: string
+          description: local /i/{id}.{ext} or absolute signed edge URL
+        score_debug:
+          type: object
+          additionalProperties: true
+    PickResponse:
+      type: object
+      required: [ok, items]
+      properties:
+        ok: { type: boolean }
+        code:
+          type: string
+          description: OK | NO_MATCH | INDEX_NOT_READY
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PickItem"
+        debug:
+          type: object
+          additionalProperties: true
+    SnapshotEnvelope:
+      type: object
+      required: [revision, images]
+      properties:
+        revision: { type: string }
+        generated_at: { type: string }
+        images:
+          type: array
+          items:
+            $ref: "#/components/schemas/IndexImage"
+        tag_postings:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: integer }
+            description: map tag_name -> image ids
+    IndexImage:
+      type: object
+      required: [id, illust_id, page_index, ext, random_key, status]
+      properties:
+        id: { type: integer }
+        illust_id: { type: integer }
+        page_index: { type: integer }
+        ext: { type: string }
+        status: { type: string }
+        random_key: { type: number }
+        width: { type: integer, nullable: true }
+        height: { type: integer, nullable: true }
+        x_restrict: { type: integer, nullable: true }
+        ai_type: { type: integer, nullable: true }
+        illust_type: { type: integer, nullable: true }
+        user_id: { type: integer, nullable: true }
+        user_name: { type: string, nullable: true }
+        title: { type: string, nullable: true }
+        created_at_pixiv: { type: string, nullable: true }
+        bookmark_count: { type: integer, nullable: true }
+        view_count: { type: integer, nullable: true }
+        comment_count: { type: integer, nullable: true }
+        original_url: { type: string, nullable: true }
+        tag_ids:
+          type: array
+          items: { type: integer }
+        score_components:
+          type: object
+          additionalProperties: { type: number }
+    EventBatch:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/CatalogEvent"
+    CatalogEvent:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum:
+            - image_upserted
+            - image_status_changed
+            - image_deleted
+            - tags_replaced
+        image:
+          $ref: "#/components/schemas/IndexImage"
+        image_id: { type: integer }
+        status: { type: string }
+        tag_ids:
+          type: array
+          items: { type: integer }

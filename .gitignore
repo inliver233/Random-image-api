@@ -22,6 +22,10 @@ node_modules/
 dist/
 .vite/
 
+## Go / services
+*.exe
+services/**/bin/
+
 ## Runtime data / local state (never commit)
 data/
 backend/data/
