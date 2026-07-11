@@ -27,8 +27,8 @@ from app.core.random_request import (
 )
 from app.core.random_response import build_json_body, build_simple_json_body, resolve_public_item_urls
 from app.core.runtime_config_cache import resolve_runtime_for_request
-from app.db.tags_get import get_tag_names_for_image
 from app.db.session import create_sessionmaker
+from app.db.tag_store import resolve_tag_store
 
 router = APIRouter()
 
@@ -55,6 +55,7 @@ async def random_image(
 
     engine = request.app.state.engine
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
+    tag_store = resolve_tag_store(getattr(request.app.state, "tag_store", None))
     recent_dedup = resolve_recent_dedup(getattr(request.app.state, "recent_dedup", None))
     random_service = resolve_random_service_factory(getattr(request.app.state, "random_service", None))
     Session = create_sessionmaker(engine)
@@ -116,7 +117,7 @@ async def random_image(
             if image is None:
                 raise _no_match_error()
             if format == "json":
-                tags = await get_tag_names_for_image(session, image_id=image.id)
+                tags = await tag_store.get_tag_names_for_image(session, image_id=image.id)
 
         # JSON/redirect never prove bytes — never mark_image_ok here.
         schedule_pick_side_effects(

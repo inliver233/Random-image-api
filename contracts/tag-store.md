@@ -28,6 +28,7 @@ Implementation:
 Adoption:
 
 - Public `GET /tags` → `tag_store.list_tags`
+- Public `GET /images/{id}` + `/random?format=json` → `tag_store.get_tag_names_for_image`
 - Admin image delete / bulk-delete / clear → link/tag clears via TagStore
 - Import tag attach → `ensure_tags_by_names` + `link_image_tags`
 - Hydrate tag replace → `upsert_tags_with_translations` + `replace_image_tags`

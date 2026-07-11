@@ -16,7 +16,7 @@ from app.core.public_json import public_cursor_list_json, public_ok_json, serial
 from app.core.public_list_filters import parse_public_list_filters
 from app.core.random_delivery import resolve_catalog_store
 from app.db.session import create_sessionmaker
-from app.db.tags_get import get_tag_names_for_image
+from app.db.tag_store import resolve_tag_store
 
 router = APIRouter()
 
@@ -97,13 +97,14 @@ async def get_image(
 
     engine = request.app.state.engine
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
+    tag_store = resolve_tag_store(getattr(request.app.state, "tag_store", None))
     Session = create_sessionmaker(engine)
 
     async with Session() as session:
         image = await catalog.get_image_by_id(session, image_id=image_id)
         if image is None:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
-        tags = await get_tag_names_for_image(session, image_id=image.id)
+        tags = await tag_store.get_tag_names_for_image(session, image_id=image.id)
 
     return public_ok_json(
         request,
