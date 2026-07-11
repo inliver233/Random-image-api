@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object
+from app.core.admin_request import load_json_object, parse_required_str
 from app.core.request_id import get_or_create_request_id
 from app.core.security import create_jwt
 from fastapi import Depends
@@ -19,9 +19,14 @@ router = APIRouter()
 async def _load_login_json(request: Request) -> tuple[str, str]:
     data = await load_json_object(request)
 
-    username = str(data.get("username") or "").strip()
+    # Username is stripped; password must NOT be stripped (leading/trailing spaces are significant).
+    username = parse_required_str(
+        data.get("username"),
+        field="username",
+        missing_message="Missing credentials",
+    )
     password = str(data.get("password") or "")
-    if not username or not password:
+    if not password:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing credentials", status_code=400)
 
     return username, password

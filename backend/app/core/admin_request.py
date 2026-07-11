@@ -137,6 +137,27 @@ def parse_int_in_range(
     return i
 
 
+def parse_float_in_range(
+    value: Any,
+    *,
+    field: str,
+    min_value: float | None = None,
+    max_value: float | None = None,
+    invalid_message: str | None = None,
+) -> float:
+    """Parse a float and enforce optional inclusive bounds (message stable for field)."""
+    invalid = invalid_message or f"Unsupported {field}"
+    try:
+        f = float(value)
+    except Exception as exc:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400) from exc
+    if min_value is not None and f < min_value:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+    if max_value is not None and f > max_value:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+    return f
+
+
 def parse_positive_int_list(
     raw: Any,
     *,

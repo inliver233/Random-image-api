@@ -11,7 +11,14 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object, parse_bool_optional, parse_optional_str, parse_positive_int
+from app.core.admin_request import (
+    load_json_object,
+    parse_bool_optional,
+    parse_int_in_range,
+    parse_optional_str,
+    parse_positive_int,
+    parse_required_str,
+)
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.crypto import FieldEncryptor
 from app.core.errors import ApiError, ErrorCode
@@ -225,11 +232,8 @@ def _parse_easy_conflict_policy(value: Any) -> str:
 async def _load_import_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
-    text = str(data.get("text") or "")
-    if not text.strip():
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing text", status_code=400)
-
-    source = str(data.get("source") or "manual").strip() or "manual"
+    text = parse_required_str(data.get("text"), field="text")
+    source = parse_optional_str(data.get("source"), field="source") or "manual"
     conflict_policy = _parse_conflict_policy(data.get("conflict_policy"))
 
     return {"text": text, "source": source, "conflict_policy": conflict_policy}
@@ -250,10 +254,8 @@ async def _load_update_endpoint_json(request: Request) -> dict[str, Any]:
 async def _load_easy_import_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
-    base_url = str(data.get("base_url") or "").strip()
+    base_url = parse_required_str(data.get("base_url"), field="base_url")
     password = str(data.get("password") or "").strip()
-    if not base_url:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing base_url", status_code=400)
 
     host_override = parse_optional_str(
         data.get("host_override"),
@@ -272,12 +274,13 @@ async def _load_easy_import_json(request: Request) -> dict[str, Any]:
 
     attach_weight = 1
     if "attach_weight" in data:
-        try:
-            attach_weight = int(data.get("attach_weight"))
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid attach_weight", status_code=400) from exc
-        if attach_weight < 0 or attach_weight > 1000:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid attach_weight", status_code=400)
+        attach_weight = parse_int_in_range(
+            data.get("attach_weight"),
+            field="attach_weight",
+            min_value=0,
+            max_value=1000,
+            invalid_message="Invalid attach_weight",
+        )
 
     recompute_bindings = False
     if "recompute_bindings" in data:

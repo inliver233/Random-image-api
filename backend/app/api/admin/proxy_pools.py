@@ -8,7 +8,13 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object, parse_bool, parse_optional_str, parse_required_str
+from app.core.admin_request import (
+    load_json_object,
+    parse_bool,
+    parse_int_in_range,
+    parse_optional_str,
+    parse_required_str,
+)
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.db.models.proxy_endpoints import ProxyEndpoint
@@ -81,13 +87,13 @@ async def _load_set_endpoints_json(request: Request) -> list[dict[str, Any]]:
 
         enabled = parse_bool(raw.get("enabled"), default=True)
 
-        weight_raw = raw.get("weight", 1)
-        try:
-            weight = int(weight_raw)
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid weight", status_code=400) from exc
-        if weight < 0 or weight > 1000:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid weight", status_code=400)
+        weight = parse_int_in_range(
+            raw.get("weight", 1),
+            field="weight",
+            min_value=0,
+            max_value=1000,
+            invalid_message="Invalid weight",
+        )
 
         out.append({"endpoint_id": endpoint_id, "enabled": enabled, "weight": weight})
 

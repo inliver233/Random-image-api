@@ -2,7 +2,9 @@ import { Alert, Button, Card, Form, Input, Space, Typography } from "antd";
 import React, { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { ApiError, apiJson } from "../api/client";
+import { ActionAlerts } from "../admin/ActionAlerts";
+import { useActionAlerts } from "../admin/useActionAlerts";
+import { apiJson } from "../api/client";
 import { setAdminToken } from "../auth/tokenStorage";
 
 type LoginFormValues = {
@@ -20,8 +22,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [form] = Form.useForm<LoginFormValues>();
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [requestId, setRequestId] = useState<string | null>(null);
+  const alerts = useActionAlerts();
   const [loading, setLoading] = useState(false);
 
   const searchParams = new URLSearchParams(location.search);
@@ -39,8 +40,7 @@ export function LoginPage() {
 
   const onFinish = async (values: LoginFormValues) => {
     setLoading(true);
-    setErrorMessage(null);
-    setRequestId(null);
+    alerts.clear();
 
     try {
       const resp = await apiJson<LoginResponse>("/admin/api/login", {
@@ -49,20 +49,14 @@ export function LoginPage() {
       });
 
       setAdminToken(resp.token);
-      setRequestId(resp.request_id);
+      // No success banner — only flash request id before navigate (matches prior UX / tests).
+      alerts.setSuccess("", resp.request_id);
       form.resetFields(["password"]);
 
       const nextPath = next && next.startsWith("/admin") && !next.startsWith("/admin/login") ? next : "/admin";
       navigate(nextPath, { replace: true });
     } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        setErrorMessage(err.message);
-        setRequestId(err.body?.request_id ? String(err.body.request_id) : null);
-      } else if (err instanceof Error) {
-        setErrorMessage(err.message);
-      } else {
-        setErrorMessage("登录失败");
-      }
+      alerts.setError(err, "登录失败");
     } finally {
       setLoading(false);
     }
@@ -85,8 +79,12 @@ export function LoginPage() {
           </Typography.Title>
 
           {reasonMessage ? <Alert type="info" message={reasonMessage} showIcon /> : null}
-          {errorMessage ? <Alert type="error" message={errorMessage} showIcon /> : null}
-          {requestId ? <Typography.Text type="secondary">请求ID: {requestId}</Typography.Text> : null}
+          <ActionAlerts
+            message={alerts.message}
+            requestId={alerts.requestId}
+            errorMessage={alerts.errorMessage}
+            errorRequestId={alerts.errorRequestId}
+          />
 
           <Form<LoginFormValues> form={form} layout="vertical" onFinish={onFinish}>
             <Form.Item label="用户名" name="username" rules={[{ required: true, message: "请输入用户名" }]}>

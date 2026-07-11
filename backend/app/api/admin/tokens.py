@@ -12,6 +12,7 @@ from app.core.admin_request import (
     load_json_object,
     parse_bool,
     parse_bool_optional,
+    parse_float_in_range,
     parse_optional_str,
     parse_required_str,
 )
@@ -40,13 +41,12 @@ async def _load_create_token_json(request: Request) -> dict[str, Any]:
 
     enabled = parse_bool(data.get("enabled"), default=True)
 
-    weight_raw = data.get("weight", 1.0)
-    try:
-        weight = float(weight_raw)
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported weight", status_code=400) from exc
-    if weight < 0.0 or weight > 100.0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported weight", status_code=400)
+    weight = parse_float_in_range(
+        data.get("weight", 1.0),
+        field="weight",
+        min_value=0.0,
+        max_value=100.0,
+    )
 
     return {
         "label": label,
@@ -73,14 +73,12 @@ async def _load_update_token_json(request: Request) -> dict[str, Any]:
         out["enabled"] = bool(enabled)
 
     if "weight" in data:
-        weight_raw = data.get("weight")
-        try:
-            weight = float(weight_raw)
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported weight", status_code=400) from exc
-        if weight < 0.0 or weight > 100.0:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported weight", status_code=400)
-        out["weight"] = float(weight)
+        out["weight"] = parse_float_in_range(
+            data.get("weight"),
+            field="weight",
+            min_value=0.0,
+            max_value=100.0,
+        )
 
     if not out:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing fields", status_code=400)

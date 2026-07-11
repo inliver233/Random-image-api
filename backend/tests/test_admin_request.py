@@ -5,6 +5,7 @@ import pytest
 from app.core.admin_request import (
     parse_bool,
     parse_bool_optional,
+    parse_float_in_range,
     parse_int_in_range,
     parse_optional_str,
     parse_positive_int,
@@ -78,6 +79,20 @@ def test_parse_int_in_range() -> None:
     with pytest.raises(ApiError) as ei_high:
         parse_int_in_range(101, field="chunk_size", min_value=1, max_value=100)
     assert ei_high.value.message == "Unsupported chunk_size"
+
+
+def test_parse_float_in_range() -> None:
+    assert parse_float_in_range(1.0, field="weight", min_value=0.0, max_value=100.0) == 1.0
+    assert parse_float_in_range("2.5", field="weight", min_value=0.0, max_value=100.0) == 2.5
+    with pytest.raises(ApiError) as ei_low:
+        parse_float_in_range(-0.1, field="weight", min_value=0.0, max_value=100.0)
+    assert ei_low.value.message == "Unsupported weight"
+    with pytest.raises(ApiError) as ei_high:
+        parse_float_in_range(100.1, field="weight", min_value=0.0, max_value=100.0)
+    assert ei_high.value.message == "Unsupported weight"
+    with pytest.raises(ApiError) as ei_bad:
+        parse_float_in_range("x", field="weight", min_value=0.0, max_value=100.0)
+    assert ei_bad.value.message == "Unsupported weight"
 
 
 def test_parse_positive_int_list() -> None:
