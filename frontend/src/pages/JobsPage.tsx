@@ -101,7 +101,7 @@ function statusTag(status: string) {
 
 export function JobsPage() {
   const qc = useQueryClient();
-  const [status, setStatus] = useState<string>("failed");
+  const [status, setStatus] = useState<string>("all");
   const [type, setType] = useState<string>("all");
   const [detailJobId, setDetailJobId] = useState<string | null>(null);
   const [actionAlert, setActionAlert] = useState<{ type: "success" | "error"; message: string; requestId: string | null } | null>(null);
@@ -110,7 +110,7 @@ export function JobsPage() {
     queryKey: ["admin", "jobs", { status, type, limit: 50 }],
     queryFn: () => {
       const sp = new URLSearchParams({ limit: "50" });
-      if (status) sp.set("status", status);
+      if (status && status !== "all") sp.set("status", status);
       if (type !== "all") sp.set("type", type);
       return apiJson<JobsListResponse>(`/admin/api/jobs?${sp.toString()}`);
     },
@@ -218,10 +218,12 @@ export function JobsPage() {
           value={status}
           onChange={(value) => setStatus(value)}
           options={[
-            { value: "failed", label: "失败" },
+            { value: "all", label: "全部" },
             { value: "pending", label: "等待中" },
             { value: "running", label: "运行中" },
+            { value: "failed", label: "失败" },
             { value: "paused", label: "已暂停" },
+            { value: "canceled", label: "已取消" },
             { value: "completed", label: "已完成" },
             { value: "dlq", label: "死信" },
           ]}

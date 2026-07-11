@@ -147,13 +147,21 @@ export function BindingsPage() {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const initialPoolId = useMemo(() => {
+  const poolIdFromUrl = useMemo(() => {
     const raw = searchParams.get("pool_id");
-    const value = raw ? Number.parseInt(raw, 10) : 1;
-    return Number.isFinite(value) && value > 0 ? value : 1;
+    if (!raw) return null;
+    const value = Number.parseInt(raw, 10);
+    return Number.isFinite(value) && value > 0 ? value : null;
   }, [searchParams]);
 
-  const [poolId, setPoolId] = useState<number>(initialPoolId);
+  const [poolId, setPoolId] = useState<number>(() => poolIdFromUrl ?? 1);
+
+  // Keep local poolId in sync when navigating with ?pool_id= from other pages.
+  React.useEffect(() => {
+    if (poolIdFromUrl != null && poolIdFromUrl !== poolId) {
+      setPoolId(poolIdFromUrl);
+    }
+  }, [poolIdFromUrl]); // eslint-disable-line react-hooks/exhaustive-deps
   const [maxTokensPerProxy, setMaxTokensPerProxy] = useState<number>(2);
 
   const [actionMessage, setActionMessage] = useState<string | null>(null);

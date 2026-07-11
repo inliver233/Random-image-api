@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { Button, Layout, Menu, Popover, Space, Typography } from "antd";
-import React from "react";
+import React, { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { apiJson } from "../api/client";
+import { clearAdminToken } from "../auth/tokenStorage";
 
 type NavItem = { key: string; label: string; external?: boolean; href?: string };
 
@@ -14,6 +15,8 @@ const NAV_ITEMS: NavItem[] = [
   { key: "wtf", label: "瀑布流", external: true, href: "/wtf" },
   { key: "/admin/import", label: "导入链接" },
   { key: "/admin/images", label: "图片管理" },
+  { key: "/admin/tags", label: "标签检索" },
+  { key: "/admin/authors", label: "作者检索" },
   { key: "/admin/hydration", label: "补全管理" },
   { key: "/admin/jobs", label: "任务队列" },
   { key: "/admin/tokens", label: "令牌管理" },
@@ -49,6 +52,7 @@ export function AdminLayout() {
   const location = useLocation();
   const isRoot = location.pathname === "/admin" || location.pathname === "/admin/";
   const selectedKey = pickSelectedKey(location.pathname);
+  const [collapsed, setCollapsed] = useState(false);
 
   const version = useQuery({
     queryKey: ["public", "version"],
@@ -66,14 +70,32 @@ export function AdminLayout() {
     return commitShort ? `版本: ${ver} (${commitShort})` : `版本: ${ver}`;
   })();
 
+  const handleLogout = () => {
+    try {
+      clearAdminToken();
+    } catch {
+      // ignore
+    }
+    void apiJson("/admin/api/logout", { method: "POST" }).catch(() => null);
+    navigate("/admin/login?reason=logout", { replace: true });
+  };
+
   return (
     <Layout style={{ minHeight: "100vh" }}>
-      <Layout.Sider width={220} theme="light" style={{ borderRight: "1px solid #f0f0f0" }}>
+      <Layout.Sider
+        width={220}
+        theme="light"
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+        breakpoint="lg"
+        style={{ borderRight: "1px solid #f0f0f0" }}
+      >
         <div style={{ padding: "16px 16px 8px" }}>
           <Typography.Title level={5} style={{ margin: 0, cursor: "pointer" }} onClick={() => navigate("/admin")}>
-            随机图片管理后台
+            {collapsed ? "管理" : "随机图片管理后台"}
           </Typography.Title>
-          <Typography.Text type="secondary">一站式管理面板</Typography.Text>
+          {!collapsed ? <Typography.Text type="secondary">一站式管理面板</Typography.Text> : null}
         </div>
         <Menu
           mode="inline"
@@ -125,6 +147,9 @@ export function AdminLayout() {
               >
                 <Button size="small">升级提示</Button>
               </Popover>
+              <Button size="small" danger onClick={handleLogout}>
+                退出登录
+              </Button>
             </Space>
           </div>
         </Layout.Header>

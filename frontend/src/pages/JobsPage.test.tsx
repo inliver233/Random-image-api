@@ -15,7 +15,7 @@ describe("JobsPage", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith("/admin/api/jobs?limit=50&status=failed")) {
+        if (url.includes("/admin/api/jobs?") && url.includes("limit=50") && !url.includes("status=")) {
           return new Response(
             JSON.stringify({
               ok: true,
