@@ -576,8 +576,13 @@ async def pick_with_strategy(
             **{k: v for k, v in (eng_meta or {}).items() if k not in {"picked_by"}},
         }
         debug_base = {**debug_base, **engine_fallback_meta}
-    elif bool(getattr(settings, "random_engine_enabled", False)) and engine_url:
+    elif (
+        not skip_engine
+        and bool(getattr(settings, "random_engine_enabled", False))
+        and engine_url
+    ):
         # Engine on but this request stayed on Python (traffic percent / no client).
+        # Do not count sticky stream/feed top-up skips (skip_engine=True) as traffic skips.
         try:
             observe_random_engine_pick(status="skipped_traffic")
         except Exception:
@@ -586,6 +591,12 @@ async def pick_with_strategy(
             **debug_base,
             "engine_status": "skipped_traffic",
             "engine_traffic_percent": int(getattr(settings, "random_engine_traffic_percent", 100) or 0),
+        }
+    elif skip_engine:
+        # Sticky Python path after first dual-run attempt — no traffic metric pollution.
+        debug_base = {
+            **debug_base,
+            "engine_status": "skipped_sticky",
         }
 
     if pick_ctx.strategy_norm == "random":

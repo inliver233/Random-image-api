@@ -143,12 +143,17 @@ def test_pick_with_strategy_skip_engine_bypasses_engine(monkeypatch) -> None:
     from app.core.random_engine_pick import pick_with_strategy
 
     engine_calls: list[str] = []
+    observed: list[str] = []
 
     async def _boom_engine(*_a: Any, **_k: Any) -> tuple[Any, dict[str, Any]]:
         engine_calls.append("engine")
         raise AssertionError("engine must not run when skip_engine=True")
 
+    def _observe(*, status: str, **_k: Any) -> None:
+        observed.append(str(status))
+
     monkeypatch.setattr("app.core.random_engine_pick.try_pick_via_engine", _boom_engine)
+    monkeypatch.setattr("app.core.random_engine_pick.observe_random_engine_pick", _observe)
     monkeypatch.setattr(
         "app.core.random_engine_client.random_engine_base_url",
         lambda _s: "http://engine.test",
@@ -160,8 +165,9 @@ def test_pick_with_strategy_skip_engine_bypasses_engine(monkeypatch) -> None:
 
     python_img = SimpleNamespace(id=99, illust_id=1)
 
-    async def _fake_random(**_k: Any) -> tuple[Any, dict[str, Any]]:
-        return python_img, {"picked_by": "python"}
+    async def _fake_random(**kwargs: Any) -> tuple[Any, dict[str, Any]]:
+        base = dict(kwargs.get("debug_base") or {})
+        return python_img, {**base, "picked_by": "python"}
 
     monkeypatch.setattr("app.core.random_engine_pick.pick_by_random_key", _fake_random)
 
@@ -174,7 +180,11 @@ def test_pick_with_strategy_skip_engine_bypasses_engine(monkeypatch) -> None:
         recent_exclude_image_ids=[],
         dedup_strict=False,
     )
-    settings = SimpleNamespace(random_engine_enabled=True, random_engine_timeout_ms=100)
+    settings = SimpleNamespace(
+        random_engine_enabled=True,
+        random_engine_timeout_ms=100,
+        random_engine_traffic_percent=100,
+    )
 
     async def _run() -> None:
         image, meta = await pick_with_strategy(
@@ -187,7 +197,68 @@ def test_pick_with_strategy_skip_engine_bypasses_engine(monkeypatch) -> None:
         )
         assert image is python_img
         assert meta.get("picked_by") == "python"
+        assert meta.get("engine_status") == "skipped_sticky"
         assert engine_calls == []
+        assert "skipped_traffic" not in observed
+
+    asyncio.run(_run())
+
+
+def test_pick_with_strategy_records_skipped_traffic_when_not_routed(monkeypatch) -> None:
+    """Engine enabled but traffic roll / missing client → skipped_traffic metric only once."""
+    from types import SimpleNamespace
+
+    from app.core.random_engine_pick import pick_with_strategy
+
+    observed: list[str] = []
+
+    def _observe(*, status: str, **_k: Any) -> None:
+        observed.append(str(status))
+
+    monkeypatch.setattr("app.core.random_engine_pick.observe_random_engine_pick", _observe)
+    monkeypatch.setattr(
+        "app.core.random_engine_client.random_engine_base_url",
+        lambda _s: "http://engine.test",
+    )
+    monkeypatch.setattr(
+        "app.core.random_engine_client.should_route_pick_to_engine",
+        lambda _s: False,
+    )
+
+    python_img = SimpleNamespace(id=1, illust_id=1)
+
+    async def _fake_random(**kwargs: Any) -> tuple[Any, dict[str, Any]]:
+        base = dict(kwargs.get("debug_base") or {})
+        return python_img, {**base, "picked_by": "python"}
+
+    monkeypatch.setattr("app.core.random_engine_pick.pick_by_random_key", _fake_random)
+
+    pick_ctx = SimpleNamespace(
+        debug_base={},
+        strategy_norm="random",
+        rng=None,
+        pick_kwargs={},
+        anti_repeat_enabled=False,
+        recent_exclude_image_ids=[],
+        dedup_strict=False,
+    )
+    settings = SimpleNamespace(
+        random_engine_enabled=True,
+        random_engine_timeout_ms=100,
+        random_engine_traffic_percent=0,
+    )
+
+    async def _run() -> None:
+        _image, meta = await pick_with_strategy(
+            session=object(),
+            settings=settings,
+            httpx_client=object(),
+            pick_ctx=pick_ctx,
+            filters=object(),
+            skip_engine=False,
+        )
+        assert meta.get("engine_status") == "skipped_traffic"
+        assert observed == ["skipped_traffic"]
 
     asyncio.run(_run())
 

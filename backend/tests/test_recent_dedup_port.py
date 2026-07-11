@@ -190,16 +190,13 @@ def test_redis_recent_dedup_with_fake_client() -> None:
     assert authors2 == []
 
 
-def test_redis_recent_dedup_get_lists_budgeted_on_slow_client() -> None:
-    """Slow Redis fetch must not stall pick plan past the hard timeout."""
+def test_redis_recent_dedup_get_lists_never_blocks_on_slow_client() -> None:
+    """Cold/expired Redis path must not fut.result() — return local memory immediately."""
     import time as _time
-
-    from app.core import recent_dedup as rd
 
     class _SlowRedis(_FakeRedis):
         def zrange(self, key: str, start: int, end: int) -> list[str]:
-            # Exceed hard timeout (0.15s) without parking the shared pool for seconds.
-            _time.sleep(0.35)
+            _time.sleep(0.5)
             return super().zrange(key, start, end)
 
     clear_recent()
@@ -217,8 +214,7 @@ def test_redis_recent_dedup_get_lists_budgeted_on_slow_client() -> None:
     t0 = _time.monotonic()
     images, authors = store.get_lists(1000.0, window_s=60.0, max_images=100, max_authors=50)
     elapsed = _time.monotonic() - t0
-    assert elapsed < 0.8, f"get_lists hung too long: {elapsed:.3f}s"
-    assert elapsed >= float(rd._REDIS_CALL_TIMEOUT_S) * 0.4
+    assert elapsed < 0.1, f"get_lists blocked on Redis RTT: {elapsed:.3f}s"
     assert 77 in images
     assert 8 in authors
     clear_recent()

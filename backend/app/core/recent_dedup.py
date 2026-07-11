@@ -365,33 +365,21 @@ class RedisRecentDedup:
     def get_lists(
         self, now: float, *, window_s: float, max_images: int, max_authors: int
     ) -> tuple[list[int], list[int]]:
+        """Never block the event loop / request thread on Redis RTT.
+
+        Warm process cache → return immediately (background refresh).
+        Cold/expired cache → schedule Redis fetch and fail-open to local memory
+        window so public /random plan build stays non-blocking.
+        """
         cached = self._read_list_cache()
+        # Always schedule a background refresh (no-op if already in-flight).
+        self._schedule_list_refresh(
+            window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+        )
         if cached is not None:
-            # Opportunistic background refresh when TTL still valid but aging.
-            self._schedule_list_refresh(
-                window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
-            )
             return cached
 
-        # Bounded wait for first fill / expired cache; never hang the pick path.
-        try:
-            fut = _REDIS_IO_EXECUTOR.submit(
-                self._fetch_lists_sync,
-                window_s=float(window_s),
-                max_images=int(max_images),
-                max_authors=int(max_authors),
-            )
-            fetched = fut.result(timeout=float(_REDIS_CALL_TIMEOUT_S))
-        except Exception:
-            fetched = None
-            self._schedule_list_refresh(
-                window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
-            )
-
-        if fetched is not None:
-            self._store_list_cache(fetched[0], fetched[1])
-            return fetched[0], fetched[1]
-
+        # Cold path: do not fut.result() — that can stall asyncio up to timeout.
         return self._fallback.get_lists(
             now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
         )
