@@ -34,6 +34,10 @@ class Settings:
     imgproxy_max_dim: int
     imgproxy_default_options: str
     imgproxy_url_chunk_size: int
+    image_edge_enabled: bool
+    image_edge_base_urls: list[str]
+    image_edge_secret: str
+    image_edge_sign_ttl_seconds: int
     public_api_key_required: bool
     public_api_key_rpm: int
     public_api_key_burst: int
@@ -56,6 +60,20 @@ def _get_bool(env: Mapping[str, str], key: str, default: bool) -> bool:
     if raw in {"0", "false", "no", "n", "off"}:
         return False
     return default
+
+
+def _parse_csv_urls(raw: str) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for part in (raw or "").replace(";", ",").split(","):
+        base = part.strip().rstrip("/")
+        if not base or base in seen:
+            continue
+        if not (base.startswith("https://") or base.startswith("http://")):
+            continue
+        seen.add(base)
+        out.append(base)
+    return out
 
 
 def _read_key_file(path: Path) -> str | None:
@@ -157,6 +175,17 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         imgproxy_url_chunk_size = 16
     imgproxy_url_chunk_size = max(0, min(int(imgproxy_url_chunk_size), 128))
 
+    image_edge_enabled = _get_bool(env, "IMAGE_EDGE_ENABLED", False)
+    image_edge_secret = _get(env, "IMAGE_EDGE_SECRET", "")
+    image_edge_base_urls = _parse_csv_urls(
+        _get(env, "IMAGE_EDGE_BASE_URLS", "") or _get(env, "IMAGE_EDGE_BASE_URL", "")
+    )
+    try:
+        image_edge_sign_ttl_seconds = int(_get(env, "IMAGE_EDGE_SIGN_TTL_SECONDS", "604800") or "604800")
+    except Exception:
+        image_edge_sign_ttl_seconds = 604800
+    image_edge_sign_ttl_seconds = max(60, min(int(image_edge_sign_ttl_seconds), 31_536_000))
+
     public_api_key_required = _get_bool(env, "PUBLIC_API_KEY_REQUIRED", False)
     try:
         public_api_key_rpm = int(_get(env, "PUBLIC_API_KEY_RPM", "0") or "0")
@@ -193,6 +222,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         imgproxy_max_dim=imgproxy_max_dim,
         imgproxy_default_options=imgproxy_default_options,
         imgproxy_url_chunk_size=imgproxy_url_chunk_size,
+        image_edge_enabled=image_edge_enabled,
+        image_edge_base_urls=image_edge_base_urls,
+        image_edge_secret=image_edge_secret,
+        image_edge_sign_ttl_seconds=image_edge_sign_ttl_seconds,
         public_api_key_required=public_api_key_required,
         public_api_key_rpm=public_api_key_rpm,
         public_api_key_burst=public_api_key_burst,
@@ -209,6 +242,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             missing.append("ADMIN_PASSWORD")
         if settings.imgproxy_base_url and (not settings.imgproxy_key or not settings.imgproxy_salt):
             missing.append("IMGPROXY_KEY/IMGPROXY_SALT")
+        if settings.image_edge_enabled and (not settings.image_edge_secret or not settings.image_edge_base_urls):
+            missing.append("IMAGE_EDGE_SECRET/IMAGE_EDGE_BASE_URLS")
         if missing:
             raise ValueError(f"Missing required env vars for prod: {', '.join(missing)}")
 

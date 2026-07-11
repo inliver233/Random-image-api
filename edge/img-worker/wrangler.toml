@@ -1,0 +1,14 @@
+name = "random-image-edge"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Non-secret defaults. Put IMAGE_EDGE_SECRET via:
+#   wrangler secret put IMAGE_EDGE_SECRET
+[vars]
+ORIGIN_HOST = "i.pximg.net"
+FALLBACK_MIRROR_HOST = ""
+CACHE_TTL_SECONDS = "604800"
+ERROR_CACHE_TTL_SECONDS = "30"
+
+# Optional custom domain (configure in dashboard or routes):
+# routes = [{ pattern = "img.example.com/*", zone_name = "example.com" }]

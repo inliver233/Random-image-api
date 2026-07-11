@@ -1,0 +1,12 @@
+{
+  "description": "Cross-language HMAC vectors for image edge (Python image_edge.py + Worker index.js)",
+  "secret": "test-secret",
+  "vectors": [
+    {
+      "path": "/img-original/img/2020/01/01/00/00/00/12345_p0.jpg",
+      "exp": 1700003600,
+      "msg": "1700003600\n/img-original/img/2020/01/01/00/00/00/12345_p0.jpg",
+      "note": "sig = base64url(HMAC-SHA256(secret, msg)) without padding; verify with Python test_image_edge"
+    }
+  ]
+}

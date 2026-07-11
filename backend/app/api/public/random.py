@@ -15,6 +15,7 @@ from fastapi.responses import RedirectResponse
 
 from app.core.errors import ApiError, ErrorCode
 from app.core.http_stream import stream_url
+from app.core.image_edge import resolve_public_proxy_url
 from app.core.imgproxy import build_signed_processing_url, load_imgproxy_config_from_settings
 from app.core.pximg_reverse_proxy import (
     normalize_pximg_mirror_host,
@@ -23,7 +24,7 @@ from app.core.pximg_reverse_proxy import (
     rewrite_pximg_to_mirror,
 )
 from app.core.proxy_routing import select_proxy_uri_for_url
-from app.core.runtime_settings import load_runtime_config
+from app.core.runtime_config_cache import get_cached_runtime_config
 from app.core.time import iso_utc_ms
 from app.db.images_mark import mark_image_failure, mark_image_ok
 from app.db.tags_get import get_tag_names_for_image
@@ -551,7 +552,11 @@ async def random_image(
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
-    runtime = await load_runtime_config(engine)
+    cache = getattr(request.app.state, "runtime_config_cache", None)
+    if cache is not None:
+        runtime = await cache.get(engine)
+    else:
+        runtime = await get_cached_runtime_config(engine)
 
     proxy_override: str | None = None
     if proxy is not None:
@@ -1275,7 +1280,11 @@ async def random_image(
                         },
                     },
                     "urls": {
-                        "proxy": f"/i/{image.id}.{image.ext}",
+                        "proxy": resolve_public_proxy_url(
+                            settings=request.app.state.settings,
+                            original_url=str(image.original_url),
+                            local_proxy_path=f"/i/{image.id}.{image.ext}",
+                        ),
                         "origin": origin_url,
                         "imgproxy": imgproxy_url,
                     },
@@ -1312,7 +1321,11 @@ async def random_image(
                 },
                 "tags": tags,
                 "urls": {
-                    "proxy": f"/i/{image.id}.{image.ext}",
+                    "proxy": resolve_public_proxy_url(
+                        settings=request.app.state.settings,
+                        original_url=str(image.original_url),
+                        local_proxy_path=f"/i/{image.id}.{image.ext}",
+                    ),
                     "origin": origin_url,
                     "imgproxy": imgproxy_url,
                     "legacy_single": f"/{image.illust_id}.{image.ext}",
@@ -1343,6 +1356,7 @@ async def random_image(
             user_id_for_recent = int(image.user_id) if getattr(image, "user_id", None) is not None else None
 
         transport = getattr(request.app.state, "httpx_transport", None)
+        shared_client = getattr(request.app.state, "httpx_client", None)
         proxy_uri = None
         if not use_pixiv_cat:
             picked = await select_proxy_uri_for_url(
@@ -1357,6 +1371,7 @@ async def random_image(
             resp = await stream_url(
                 source_url,
                 transport=transport,
+                client=shared_client if not proxy_uri else None,
                 proxy=proxy_uri,
                 cache_control="no-store",
                 range_header=request.headers.get("Range"),
