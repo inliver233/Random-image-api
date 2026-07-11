@@ -19,6 +19,7 @@ from app.core.admin_request import load_json_object, parse_bool, require_positiv
 from app.core.data_files import get_sqlite_db_dir, make_file_ref
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
+from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
 from app.core.pixiv_urls import parse_pixiv_original_url
 from app.db.models.images import Image
@@ -527,14 +528,7 @@ async def get_import(
             .first()
         )
 
-    detail: dict[str, Any] = {}
-    if imp.detail_json:
-        try:
-            parsed = json.loads(imp.detail_json)
-            if isinstance(parsed, dict):
-                detail = parsed
-        except Exception:
-            detail = {}
+    detail = soft_json_object(imp.detail_json)
 
     return admin_ok(request, payload={"item": {
             "import": {

@@ -12,6 +12,7 @@ from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.admin_request import load_json_object, parse_choice, parse_positive_int, require_positive_id
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
+from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
 from app.db.models.hydration_runs import HydrationRun
 from app.db.models.images import Image
@@ -21,19 +22,6 @@ from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 router = APIRouter()
 
 _ALLOWED_RUN_STATUSES = {"pending", "running", "paused", "canceled", "completed", "failed"}
-
-
-def _parse_json_dict(value: str | None) -> dict[str, Any]:
-    raw = str(value or "").strip()
-    if not raw:
-        return {}
-    try:
-        loaded = json.loads(raw)
-    except Exception:
-        return {}
-    if isinstance(loaded, dict):
-        return loaded
-    return {}
 
 
 def _serialize_job(job: JobRow | None) -> dict[str, Any] | None:
@@ -57,8 +45,8 @@ def _serialize_run(run: HydrationRun, *, latest_job: JobRow | None = None) -> di
         "id": str(run.id),
         "type": run.type,
         "status": run.status,
-        "criteria": _parse_json_dict(run.criteria_json),
-        "cursor": _parse_json_dict(run.cursor_json),
+        "criteria": soft_json_object(run.criteria_json),
+        "cursor": soft_json_object(run.cursor_json),
         "total": int(run.total) if run.total is not None else None,
         "processed": int(run.processed),
         "success": int(run.success),

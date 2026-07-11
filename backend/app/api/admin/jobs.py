@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import sqlalchemy as sa
@@ -12,6 +11,7 @@ from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.admin_request import parse_choice, parse_optional_str, require_positive_id
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
+from app.core.soft_json import soft_json_value
 from app.core.time import iso_utc_ms
 from app.db.models.jobs import JobRow
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
@@ -108,13 +108,7 @@ async def get_job(
         if row is None:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Job not found", status_code=404)
 
-    payload_json = str(row.payload_json or "")
-    payload: Any = None
-    if payload_json.strip():
-        try:
-            payload = json.loads(payload_json)
-        except Exception:
-            payload = None
+    payload = soft_json_value(row.payload_json)
 
     return admin_ok(
         request,
@@ -128,7 +122,7 @@ async def get_job(
                 "attempt": int(row.attempt),
                 "max_attempts": int(row.max_attempts),
                 "payload": payload,
-                "payload_json": payload_json,
+                "payload_json": str(row.payload_json or ""),
                 "last_error": row.last_error,
                 "locked_by": row.locked_by,
                 "locked_at": row.locked_at,
