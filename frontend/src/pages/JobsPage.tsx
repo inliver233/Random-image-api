@@ -3,8 +3,10 @@ import { Alert, Button, Card, Descriptions, Drawer, Select, Skeleton, Space, Tab
 import type { ColumnsType } from "antd/es/table";
 import React, { useState } from "react";
 
+import { ActionAlerts } from "../admin/ActionAlerts";
+import { requestIdDescription } from "../admin/errors";
+import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
-import { requestIdDescription, requestIdFromError } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type JobItem = {
@@ -101,7 +103,7 @@ export function JobsPage() {
   const [status, setStatus] = useState<string>("all");
   const [type, setType] = useState<string>("all");
   const [detailJobId, setDetailJobId] = useState<string | null>(null);
-  const [actionAlert, setActionAlert] = useState<{ type: "success" | "error"; message: string; requestId: string | null } | null>(null);
+  const alerts = useActionAlerts();
 
   const {
     query,
@@ -123,13 +125,9 @@ export function JobsPage() {
 
   React.useEffect(() => {
     if (loadMore.isError) {
-      const err = loadMore.error;
-      setActionAlert({
-        type: "error",
-        message: err instanceof Error ? err.message : "加载更多失败",
-        requestId: requestIdFromError(err),
-      });
+      alerts.setError(loadMore.error, "加载更多失败");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run on loadMore error state
   }, [loadMore.isError, loadMore.error]);
 
   const jobDetail = useQuery({
@@ -142,15 +140,15 @@ export function JobsPage() {
     mutationFn: (vars: { jobId: string; action: "retry" | "cancel" | "move-to-dlq" }) =>
       apiJson<JobActionResponse>(`/admin/api/jobs/${encodeURIComponent(vars.jobId)}/${vars.action}`, { method: "POST" }),
     onMutate: () => {
-      setActionAlert(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
-      setActionAlert({ type: "success", message: `操作成功：任务 #${data.job_id} 状态已更新为 ${statusLabel(data.status)}`, requestId: data.request_id });
+      alerts.setSuccess(`操作成功：任务 #${data.job_id} 状态已更新为 ${statusLabel(data.status)}`, data.request_id);
       qc.invalidateQueries({ queryKey: ["admin", "jobs"] });
       qc.invalidateQueries({ queryKey: ["admin", "jobs", "detail", String(data.job_id)] });
     },
     onError: (err) => {
-      setActionAlert({ type: "error", message: err instanceof Error ? err.message : "操作失败", requestId: requestIdFromError(err) });
+      alerts.setError(err, "操作失败");
     },
   });
 
@@ -264,7 +262,13 @@ export function JobsPage() {
         </Button>
       </Space>
 
-      {actionAlert ? <Alert type={actionAlert.type} showIcon message={actionAlert.message} description={actionAlert.requestId ? `请求ID: ${actionAlert.requestId}` : ""} /> : null}
+      <ActionAlerts
+        message={alerts.message}
+        requestId={alerts.requestId}
+        errorMessage={alerts.errorMessage}
+        errorRequestId={alerts.errorRequestId}
+        requestIdPlacement="description"
+      />
 
       <Card>
         {query.isLoading ? (

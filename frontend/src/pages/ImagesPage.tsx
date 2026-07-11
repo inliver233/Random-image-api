@@ -4,8 +4,10 @@ import type { ColumnsType } from "antd/es/table";
 import React from "react";
 import { useMemo, useState } from "react";
 
+import { ActionAlerts } from "../admin/ActionAlerts";
+import { requestIdDescription } from "../admin/errors";
+import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
-import { messageFromError, requestIdDescription, requestIdFromError } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ImageItem = {
@@ -85,7 +87,7 @@ export function ImagesPage() {
   const qc = useQueryClient();
   const [missing, setMissing] = useState<string[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const [actionAlert, setActionAlert] = useState<{ type: "success" | "error"; message: string; requestId: string | null } | null>(null);
+  const alerts = useActionAlerts();
 
   const {
     query,
@@ -111,24 +113,24 @@ export function ImagesPage() {
 
   React.useEffect(() => {
     if (loadMore.isError) {
-      const err = loadMore.error;
-      setActionAlert({ type: "error", message: messageFromError(err), requestId: requestIdFromError(err) });
+      alerts.setError(loadMore.error);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run on loadMore error state
   }, [loadMore.isError, loadMore.error]);
 
   const deleteImage = useMutation({
     mutationFn: (imageId: string) =>
       apiJson<DeleteImageResponse>(`/admin/api/images/${encodeURIComponent(imageId)}`, { method: "DELETE" }),
-    onMutate: () => setActionAlert(null),
+    onMutate: () => alerts.clear(),
     onSuccess: (data) => {
-      setActionAlert({ type: "success", message: `图片已删除：#${data.image_id}`, requestId: data.request_id });
+      alerts.setSuccess(`图片已删除：#${data.image_id}`, data.request_id);
       setSelectedRowKeys((prev) => prev.filter((k) => String(k) !== String(data.image_id)));
       qc.invalidateQueries({ queryKey: ["admin", "images"] });
       qc.invalidateQueries({ queryKey: ["admin", "summary"] });
       qc.invalidateQueries({ queryKey: ["public", "tags"] });
     },
     onError: (err) => {
-      setActionAlert({ type: "error", message: messageFromError(err), requestId: requestIdFromError(err) });
+      alerts.setError(err);
     },
   });
 
@@ -138,20 +140,16 @@ export function ImagesPage() {
         method: "POST",
         body: JSON.stringify({ image_ids: imageIds.map((v) => Number(v)) }),
       }),
-    onMutate: () => setActionAlert(null),
+    onMutate: () => alerts.clear(),
     onSuccess: (data) => {
-      setActionAlert({
-        type: "success",
-        message: `批量删除完成：请求 ${data.requested}，成功删除 ${data.deleted}，未找到 ${data.missing}`,
-        requestId: data.request_id,
-      });
+      alerts.setSuccess(`批量删除完成：请求 ${data.requested}，成功删除 ${data.deleted}，未找到 ${data.missing}`, data.request_id,);
       setSelectedRowKeys([]);
       qc.invalidateQueries({ queryKey: ["admin", "images"] });
       qc.invalidateQueries({ queryKey: ["admin", "summary"] });
       qc.invalidateQueries({ queryKey: ["public", "tags"] });
     },
     onError: (err) => {
-      setActionAlert({ type: "error", message: messageFromError(err), requestId: requestIdFromError(err) });
+      alerts.setError(err);
     },
   });
 
@@ -161,20 +159,16 @@ export function ImagesPage() {
         method: "POST",
         body: JSON.stringify({ confirm: true, delete_tags: true }),
       }),
-    onMutate: () => setActionAlert(null),
+    onMutate: () => alerts.clear(),
     onSuccess: (data) => {
-      setActionAlert({
-        type: "success",
-        message: `图片数据已清空：图片 ${data.deleted_images}，关联 ${data.deleted_image_tags}，标签 ${data.deleted_tags}`,
-        requestId: data.request_id,
-      });
+      alerts.setSuccess(`图片数据已清空：图片 ${data.deleted_images}，关联 ${data.deleted_image_tags}，标签 ${data.deleted_tags}`, data.request_id,);
       setSelectedRowKeys([]);
       qc.invalidateQueries({ queryKey: ["admin", "images"] });
       qc.invalidateQueries({ queryKey: ["admin", "summary"] });
       qc.invalidateQueries({ queryKey: ["public", "tags"] });
     },
     onError: (err) => {
-      setActionAlert({ type: "error", message: messageFromError(err), requestId: requestIdFromError(err) });
+      alerts.setError(err);
     },
   });
 
@@ -184,18 +178,14 @@ export function ImagesPage() {
         method: "POST",
         body: JSON.stringify({ image_id: Number(imageId) }),
       }),
-    onMutate: () => setActionAlert(null),
+    onMutate: () => alerts.clear(),
     onSuccess: (data) => {
-      setActionAlert({
-        type: "success",
-        message: data.created ? `单图补全任务已创建：任务 #${data.job_id}（作品 ${data.illust_id}）` : `任务已存在：任务 #${data.job_id}（作品 ${data.illust_id}）`,
-        requestId: data.request_id,
-      });
+      alerts.setSuccess(data.created ? `单图补全任务已创建：任务 #${data.job_id}（作品 ${data.illust_id}）` : `任务已存在：任务 #${data.job_id}（作品 ${data.illust_id}）`, data.request_id,);
       qc.invalidateQueries({ queryKey: ["admin", "jobs"] });
       qc.invalidateQueries({ queryKey: ["admin", "hydration-runs"] });
     },
     onError: (err) => {
-      setActionAlert({ type: "error", message: err instanceof Error ? err.message : "创建补全任务失败", requestId: requestIdFromError(err) });
+      alerts.setError(err, "创建补全任务失败");
     },
   });
 
@@ -348,9 +338,13 @@ export function ImagesPage() {
         </Popconfirm>
       </Space>
 
-      {actionAlert ? (
-        <Alert type={actionAlert.type} showIcon message={actionAlert.message} description={actionAlert.requestId ? `请求ID: ${actionAlert.requestId}` : ""} />
-      ) : null}
+      <ActionAlerts
+        message={alerts.message}
+        requestId={alerts.requestId}
+        errorMessage={alerts.errorMessage}
+        errorRequestId={alerts.errorRequestId}
+        requestIdPlacement="description"
+      />
 
       {query.isLoading ? (
         <Skeleton active />

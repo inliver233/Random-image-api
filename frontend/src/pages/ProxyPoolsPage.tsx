@@ -4,8 +4,10 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { ActionAlerts } from "../admin/ActionAlerts";
+import { requestIdDescription } from "../admin/errors";
+import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
-import { messageFromError, requestIdDescription, requestIdFromError } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ProxyPoolItem = {
@@ -110,7 +112,7 @@ export function ProxyPoolsPage() {
   const [selectedEndpointIds, setSelectedEndpointIds] = useState<string[]>([]);
   const [memberConfig, setMemberConfig] = useState<Record<string, MemberConfig>>({});
 
-  const [actionAlert, setActionAlert] = useState<{ type: "success" | "error"; message: string; requestId: string | null } | null>(null);
+  const alerts = useActionAlerts();
 
   const createPool = useMutation({
     mutationFn: (values: CreatePoolFormValues) =>
@@ -122,15 +124,15 @@ export function ProxyPoolsPage() {
           enabled: Boolean(values.enabled),
         }),
       }),
-    onMutate: () => setActionAlert(null),
+    onMutate: () => alerts.clear(),
     onSuccess: (data) => {
       setCreateOpen(false);
       createForm.resetFields();
-      setActionAlert({ type: "success", message: `代理池创建成功：#${data.pool_id}`, requestId: data.request_id });
+      alerts.setSuccess(`代理池创建成功：#${data.pool_id}`, data.request_id);
       qc.invalidateQueries({ queryKey: ["admin", "proxy-pools"] });
     },
     onError: (err) => {
-      setActionAlert({ type: "error", message: messageFromError(err), requestId: requestIdFromError(err) });
+      alerts.setError(err);
     },
   });
 
@@ -144,16 +146,16 @@ export function ProxyPoolsPage() {
           enabled: Boolean(vars.values.enabled),
         }),
       }),
-    onMutate: () => setActionAlert(null),
+    onMutate: () => alerts.clear(),
     onSuccess: (data) => {
       setEditOpen(false);
       setEditingPool(null);
-      setActionAlert({ type: "success", message: `代理池已更新：#${data.pool_id}`, requestId: data.request_id });
+      alerts.setSuccess(`代理池已更新：#${data.pool_id}`, data.request_id);
       qc.invalidateQueries({ queryKey: ["admin", "proxy-pools"] });
       qc.invalidateQueries({ queryKey: ["admin", "proxies", "endpoints"] });
     },
     onError: (err) => {
-      setActionAlert({ type: "error", message: messageFromError(err), requestId: requestIdFromError(err) });
+      alerts.setError(err);
     },
   });
 
@@ -171,19 +173,15 @@ export function ProxyPoolsPage() {
         body: JSON.stringify({ items }),
       });
     },
-    onMutate: () => setActionAlert(null),
+    onMutate: () => alerts.clear(),
     onSuccess: (data) => {
-      setActionAlert({
-        type: "success",
-        message: `节点配置已保存：新增=${data.created} 更新=${data.updated} 移除=${data.removed}`,
-        requestId: data.request_id,
-      });
+      alerts.setSuccess(`节点配置已保存：新增=${data.created} 更新=${data.updated} 移除=${data.removed}`, data.request_id);
       qc.invalidateQueries({ queryKey: ["admin", "proxies", "endpoints"] });
       setConfigOpen(false);
       setConfigPool(null);
     },
     onError: (err) => {
-      setActionAlert({ type: "error", message: messageFromError(err), requestId: requestIdFromError(err) });
+      alerts.setError(err);
     },
   });
 
@@ -338,9 +336,13 @@ export function ProxyPoolsPage() {
         </Button>
       </Space>
 
-      {actionAlert ? (
-        <Alert type={actionAlert.type} showIcon message={actionAlert.message} description={actionAlert.requestId ? `请求ID: ${actionAlert.requestId}` : ""} />
-      ) : null}
+      <ActionAlerts
+        message={alerts.message}
+        requestId={alerts.requestId}
+        errorMessage={alerts.errorMessage}
+        errorRequestId={alerts.errorRequestId}
+        requestIdPlacement="description"
+      />
 
       <Card title="代理池列表">
         {pools.isLoading ? (

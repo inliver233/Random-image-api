@@ -3,8 +3,10 @@ import { Alert, Button, Card, Descriptions, Popconfirm, Progress, Skeleton, Spac
 import React from "react";
 import { useParams } from "react-router-dom";
 
+import { ActionAlerts } from "../admin/ActionAlerts";
+import { requestIdDescription } from "../admin/errors";
+import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
-import { messageFromError, requestIdDescription, requestIdFromError } from "../admin/errors";
 
 type ImportDetailResponse = {
   ok: true;
@@ -63,9 +65,7 @@ export function ImportDetailPage() {
   const qc = useQueryClient();
   const idRaw = String(params.id || "").trim();
   const id = idRaw && /^\d+$/.test(idRaw) ? idRaw : "";
-  const [actionAlert, setActionAlert] = React.useState<{ type: "success" | "error"; message: string; requestId: string | null } | null>(
-    null,
-  );
+  const alerts = useActionAlerts();
 
   const query = useQuery({
     queryKey: ["admin", "imports", id],
@@ -84,20 +84,16 @@ export function ImportDetailPage() {
         method: "POST",
         body: JSON.stringify({ mode }),
       }),
-    onMutate: () => setActionAlert(null),
+    onMutate: () => alerts.clear(),
     onSuccess: (data) => {
       const modeLabel = data.mode === "disable" ? "禁用" : "标记删除";
-      setActionAlert({
-        type: "success",
-        message: `回滚完成（${modeLabel}），影响 ${data.updated} 张图片`,
-        requestId: data.request_id,
-      });
+      alerts.setSuccess(`回滚完成（${modeLabel}），影响 ${data.updated} 张图片`, data.request_id);
       qc.invalidateQueries({ queryKey: ["admin", "imports", id] });
       qc.invalidateQueries({ queryKey: ["admin", "images"] });
       qc.invalidateQueries({ queryKey: ["admin", "summary"] });
     },
     onError: (err) => {
-      setActionAlert({ type: "error", message: messageFromError(err), requestId: requestIdFromError(err) });
+      alerts.setError(err);
     },
   });
 
@@ -114,9 +110,13 @@ export function ImportDetailPage() {
         导入任务 #{id}
       </Typography.Title>
 
-      {actionAlert ? (
-        <Alert type={actionAlert.type} showIcon message={actionAlert.message} description={actionAlert.requestId ? `请求ID: ${actionAlert.requestId}` : ""} />
-      ) : null}
+      <ActionAlerts
+        message={alerts.message}
+        requestId={alerts.requestId}
+        errorMessage={alerts.errorMessage}
+        errorRequestId={alerts.errorRequestId}
+        requestIdPlacement="description"
+      />
 
       {query.isLoading ? (
         <Skeleton active />

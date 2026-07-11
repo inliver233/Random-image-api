@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Form, InputNumber, Select, Skeleton, Space, Switch, Typography } from "antd";
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 
-import { ApiError, apiJson } from "../api/client";
-import { requestIdDescription, requestIdFromError } from "../admin/errors";
+import { ActionAlerts } from "../admin/ActionAlerts";
+import { requestIdDescription } from "../admin/errors";
+import { useActionAlerts } from "../admin/useActionAlerts";
+import { apiJson } from "../api/client";
 
 type ProxyPoolItem = {
   id: string;
@@ -107,9 +109,7 @@ export function SettingsPage() {
     queryFn: () => apiJson<ProxyPoolsListResponse>("/admin/api/proxy-pools"),
   });
 
-  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
-  const [saveRequestId, setSaveRequestId] = useState<string | null>(null);
-  const [saveUpdated, setSaveUpdated] = useState<number | null>(null);
+  const alerts = useActionAlerts();
 
   useEffect(() => {
     if (!query.data) return;
@@ -174,26 +174,14 @@ export function SettingsPage() {
         }),
       }),
     onMutate: () => {
-      setSaveErrorMessage(null);
-      setSaveRequestId(null);
-      setSaveUpdated(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
-      setSaveUpdated(data.updated);
-      setSaveRequestId(data.request_id);
+      alerts.setSuccess(`保存成功（更新条目数: ${data.updated}）`, data.request_id);
       queryClient.invalidateQueries({ queryKey: ["admin", "settings"] });
     },
     onError: (err) => {
-      if (err instanceof ApiError) {
-        setSaveErrorMessage(err.message);
-        setSaveRequestId(requestIdFromError(err));
-        return;
-      }
-      if (err instanceof Error) {
-        setSaveErrorMessage(err.message);
-        return;
-      }
-      setSaveErrorMessage("保存失败");
+      alerts.setError(err, "保存失败");
     },
   });
 
@@ -210,9 +198,12 @@ export function SettingsPage() {
       </Space>
 
       {save.isPending ? <Alert type="info" showIcon message="正在保存设置..." /> : null}
-      {saveErrorMessage ? <Alert type="error" showIcon message={saveErrorMessage} /> : null}
-      {saveUpdated !== null ? <Alert type="success" showIcon message="保存成功" description={`更新条目数: ${saveUpdated}`} /> : null}
-      {saveRequestId ? <Typography.Text type="secondary">请求ID: {saveRequestId}</Typography.Text> : null}
+      <ActionAlerts
+        message={alerts.message}
+        requestId={alerts.requestId}
+        errorMessage={alerts.errorMessage}
+        errorRequestId={alerts.errorRequestId}
+      />
 
       {query.isLoading ? (
         <Skeleton active />

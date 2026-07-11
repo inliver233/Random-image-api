@@ -2,8 +2,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Form, Input, InputNumber, Select, Skeleton, Space, Switch, Typography } from "antd";
 import React, { useEffect, useMemo, useState } from "react";
 
-import { ApiError, apiJson } from "../api/client";
+import { ActionAlerts } from "../admin/ActionAlerts";
 import { requestIdDescription, requestIdFromError } from "../admin/errors";
+import { useActionAlerts } from "../admin/useActionAlerts";
+import { ApiError, apiJson } from "../api/client";
 
 type SettingsResponse = {
   ok: true;
@@ -150,9 +152,7 @@ export function RecommendationPage() {
     queryFn: () => apiJson<SettingsResponse>("/admin/api/settings"),
   });
 
-  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
-  const [saveRequestId, setSaveRequestId] = useState<string | null>(null);
-  const [saveUpdated, setSaveUpdated] = useState<number | null>(null);
+  const saveAlerts = useActionAlerts();
 
   const [previewErrorMessage, setPreviewErrorMessage] = useState<string | null>(null);
   const [previewRequestId, setPreviewRequestId] = useState<string | null>(null);
@@ -264,26 +264,14 @@ export function RecommendationPage() {
         }),
       }),
     onMutate: () => {
-      setSaveErrorMessage(null);
-      setSaveRequestId(null);
-      setSaveUpdated(null);
+      saveAlerts.clear();
     },
     onSuccess: (data) => {
-      setSaveUpdated(data.updated);
-      setSaveRequestId(data.request_id);
+      saveAlerts.setSuccess(`保存成功（更新条目数: ${data.updated}）`, data.request_id);
       queryClient.invalidateQueries({ queryKey: ["admin", "settings"] });
     },
     onError: (err) => {
-      if (err instanceof ApiError) {
-        setSaveErrorMessage(err.message);
-        setSaveRequestId(requestIdFromError(err));
-        return;
-      }
-      if (err instanceof Error) {
-        setSaveErrorMessage(err.message);
-        return;
-      }
-      setSaveErrorMessage("保存失败");
+      saveAlerts.setError(err, "保存失败");
     },
   });
 
@@ -369,11 +357,12 @@ export function RecommendationPage() {
       </Space>
 
       {save.isPending ? <Alert type="info" showIcon message="正在保存推荐配置..." /> : null}
-      {saveErrorMessage ? <Alert type="error" showIcon message={saveErrorMessage} /> : null}
-      {saveUpdated !== null ? (
-        <Alert type="success" showIcon message="保存成功" description={`更新条目数: ${saveUpdated}`} />
-      ) : null}
-      {saveRequestId ? <Typography.Text type="secondary">请求ID: {saveRequestId}</Typography.Text> : null}
+      <ActionAlerts
+        message={saveAlerts.message}
+        requestId={saveAlerts.requestId}
+        errorMessage={saveAlerts.errorMessage}
+        errorRequestId={saveAlerts.errorRequestId}
+      />
 
       {query.isLoading ? (
         <Skeleton active />
