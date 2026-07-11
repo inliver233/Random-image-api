@@ -162,6 +162,53 @@ def test_sqlite_catalog_store_upsert_hydrated(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_sqlite_catalog_store_get_by_illust_page(tmp_path: Path) -> None:
+    engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_illust.db").as_posix())
+
+    async def _run() -> None:
+        from app.db.models.images import Image
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        store = build_catalog_store(database_url=str(engine.url))
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            session.add(
+                Image(
+                    illust_id=12,
+                    page_index=0,
+                    ext="jpg",
+                    original_url="https://example.test/12.jpg",
+                    proxy_path="/i/1.jpg",
+                    random_key=0.1,
+                    status=1,
+                )
+            )
+            session.add(
+                Image(
+                    illust_id=12,
+                    page_index=1,
+                    ext="png",
+                    original_url="https://example.test/12_p1.png",
+                    proxy_path="/i/2.png",
+                    random_key=0.2,
+                    status=3,  # broken — not returned by public illust lookup
+                )
+            )
+            await session.commit()
+            active = await store.get_image_by_illust_page(session, illust_id=12, page_index=0)
+            assert active is not None
+            assert int(active.illust_id) == 12
+            assert int(active.page_index) == 0
+            broken = await store.get_image_by_illust_page(session, illust_id=12, page_index=1)
+            assert broken is None
+            missing = await store.get_image_by_illust_page(session, illust_id=99, page_index=0)
+            assert missing is None
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_sqlite_catalog_store_heal_broken_images(tmp_path: Path) -> None:
     engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_heal.db").as_posix())
 

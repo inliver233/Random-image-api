@@ -21,6 +21,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.redact import redact_text
 from app.core.time import iso_utc_ms
 from app.core.runtime_settings import set_runtime_setting
+from app.db.catalog import build_catalog_store
 from app.db.engine import create_engine
 from app.jobs.claim import DEFAULT_LOCK_TTL_S
 from app.jobs.dispatch import JobDispatcher
@@ -59,8 +60,10 @@ def _disabled_handler(job_type: str, *, reason: str):
 
 
 def build_default_dispatcher(engine) -> JobDispatcher:
+    # One catalog store for all catalog-writing handlers (import / hydrate / heal).
+    catalog = build_catalog_store(database_url=str(getattr(engine, "url", "") or ""))
     dispatcher = JobDispatcher()
-    dispatcher.register("import_images", build_import_images_handler(engine))
+    dispatcher.register("import_images", build_import_images_handler(engine, catalog=catalog))
 
     def _safe_register(job_type: str, builder: Callable[[], Any]) -> None:
         try:
@@ -70,8 +73,8 @@ def build_default_dispatcher(engine) -> JobDispatcher:
             log.warning("jobs_handler_disabled type=%s reason=%s", job_type, msg)
             dispatcher.register(job_type, _disabled_handler(job_type, reason=msg))
 
-    _safe_register("hydrate_metadata", lambda: build_hydrate_metadata_handler(engine))
-    _safe_register("heal_url", lambda: build_heal_url_handler(engine))
+    _safe_register("hydrate_metadata", lambda: build_hydrate_metadata_handler(engine, catalog=catalog))
+    _safe_register("heal_url", lambda: build_heal_url_handler(engine, catalog=catalog))
     _safe_register("proxy_probe", lambda: build_proxy_probe_handler(engine))
     _safe_register("easy_proxies_import", lambda: build_easy_proxies_import_handler(engine))
     return dispatcher

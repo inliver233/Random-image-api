@@ -5,7 +5,7 @@ from fastapi import APIRouter, Request
 from app.core.admin_request import require_positive_id
 from app.core.errors import ApiError, ErrorCode
 from app.core.image_delivery import deliver_public_image_from_request, normalize_image_ext
-from app.db.images_get_by_illust import get_image_by_illust_page
+from app.core.random_delivery import resolve_catalog_store
 from app.db.session import create_sessionmaker
 
 router = APIRouter()
@@ -27,9 +27,12 @@ async def legacy_multi(
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async with Session() as session:
-        image = await get_image_by_illust_page(session, illust_id=illust_id, page_index=int(page) - 1)
+        image = await catalog.get_image_by_illust_page(
+            session, illust_id=illust_id, page_index=int(page) - 1
+        )
         if image is None or (image.ext or "").lower() != ext:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
 
@@ -60,9 +63,10 @@ async def legacy_single(
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async with Session() as session:
-        image = await get_image_by_illust_page(session, illust_id=illust_id, page_index=0)
+        image = await catalog.get_image_by_illust_page(session, illust_id=illust_id, page_index=0)
         if image is None or (image.ext or "").lower() != ext:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
 

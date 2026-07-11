@@ -6,6 +6,7 @@ from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.images_get import get_image_by_id, get_images_by_ids
+from app.db.images_get_by_illust import get_image_by_illust_page
 from app.db.images_mark import heal_broken_images_for_illust, mark_image_failure, mark_image_ok
 from app.db.images_upsert import (
     bulk_upsert_import_rows,
@@ -76,6 +77,14 @@ class CatalogStore(Protocol):
     async def get_image_by_id(self, session: AsyncSession, *, image_id: int) -> Image | None: ...
 
     async def get_images_by_ids(self, session: AsyncSession, *, image_ids: list[int]) -> list[Image]: ...
+
+    async def get_image_by_illust_page(
+        self,
+        session: AsyncSession,
+        *,
+        illust_id: int,
+        page_index: int,
+    ) -> Image | None: ...
 
     async def mark_image_ok(self, engine: AsyncEngine, *, image_id: int, now: str) -> None: ...
 
@@ -195,6 +204,15 @@ class SqliteCatalogStore:
 
     async def get_images_by_ids(self, session: AsyncSession, *, image_ids: list[int]) -> list[Image]:
         return await get_images_by_ids(session, image_ids=image_ids)
+
+    async def get_image_by_illust_page(
+        self,
+        session: AsyncSession,
+        *,
+        illust_id: int,
+        page_index: int,
+    ) -> Image | None:
+        return await get_image_by_illust_page(session, illust_id=illust_id, page_index=page_index)
 
     async def mark_image_ok(self, engine: AsyncEngine, *, image_id: int, now: str) -> None:
         await mark_image_ok(engine, image_id=image_id, now=now)
