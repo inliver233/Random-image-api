@@ -14,6 +14,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.random_query import normalize_iso_utc_optional
 from app.core.coerce import as_int, as_optional_int, as_str, derive_orientation, truncate_text
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor, mask_secret
@@ -69,19 +70,6 @@ def _parse_iso_utc_to_epoch(value: str, *, now_epoch: float) -> float:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return float(dt.astimezone(timezone.utc).timestamp())
-
-
-def _normalize_iso_utc_seconds(value: str | None) -> str | None:
-    raw = (value or "").strip()
-    if not raw:
-        return None
-    if raw.endswith("Z"):
-        raw = raw[:-1] + "+00:00"
-    dt = datetime.fromisoformat(raw)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    dt = dt.astimezone(timezone.utc).replace(microsecond=0)
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 
@@ -1302,7 +1290,7 @@ LIMIT 1;
             title = as_str(illust.get("title"))
             created_at_pixiv = None
             try:
-                created_at_pixiv = _normalize_iso_utc_seconds(as_str(illust.get("create_date")))
+                created_at_pixiv = normalize_iso_utc_optional(as_str(illust.get("create_date")))
             except Exception:
                 created_at_pixiv = None
 

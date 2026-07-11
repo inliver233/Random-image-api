@@ -61,6 +61,14 @@ def normalize_iso_utc(value: str) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def normalize_iso_utc_optional(value: str | None) -> str | None:
+    """Soft ISO UTC seconds normalizer; empty → None (invalid still raises)."""
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    return normalize_iso_utc(raw)
+
+
 def build_no_match_error(
     *,
     r18: int,
