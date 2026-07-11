@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import json
 from typing import Any
 
 import httpx
@@ -21,17 +20,8 @@ from app.db.models.proxy_pools import ProxyPool
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 from app.easy_proxies.client import EasyProxiesError, easy_proxies_auth, easy_proxies_export
 from app.easy_proxies.normalize import normalize_exported_proxy_host, resolve_export_host
+from app.jobs.payload import parse_job_payload_object
 from app.jobs.errors import JobPermanentError
-
-
-def _parse_payload(payload_json: str) -> dict[str, Any]:
-    try:
-        data = json.loads(payload_json)
-    except Exception as exc:
-        raise JobPermanentError("payload_json is not valid JSON") from exc
-    if not isinstance(data, dict):
-        raise JobPermanentError("payload_json must be an object")
-    return data
 
 
 def _parse_conflict_policy(value: Any) -> str:
@@ -72,7 +62,7 @@ def build_easy_proxies_import_handler(engine: AsyncEngine, *, transport: httpx.B
 
     async def _handler(job: dict[str, Any]) -> None:
         payload_json = str(job.get("payload_json") or "")
-        payload = _parse_payload(payload_json)
+        payload = parse_job_payload_object(payload_json)
 
         base_url = str(payload.get("base_url") or "").strip()
         if not base_url:

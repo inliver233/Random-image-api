@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -11,18 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.core.time import iso_utc_ms
 from app.db.models.images import Image
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.jobs.payload import parse_job_payload_object
 from app.jobs.errors import JobPermanentError
 from app.jobs.handlers.hydrate_metadata import build_hydrate_metadata_handler
-
-
-def _parse_payload(payload_json: str) -> dict[str, Any]:
-    try:
-        data = json.loads(payload_json)
-    except Exception as exc:
-        raise JobPermanentError("payload_json is not valid JSON") from exc
-    if not isinstance(data, dict):
-        raise JobPermanentError("payload_json must be an object")
-    return data
 
 
 def build_heal_url_handler(engine: AsyncEngine, *, transport: httpx.BaseTransport | None = None) -> Any:
@@ -31,7 +21,7 @@ def build_heal_url_handler(engine: AsyncEngine, *, transport: httpx.BaseTranspor
 
     async def _handler(job: dict[str, Any]) -> None:
         payload_json = str(job.get("payload_json") or "")
-        payload = _parse_payload(payload_json)
+        payload = parse_job_payload_object(payload_json)
 
         try:
             illust_id = int(payload.get("illust_id"))

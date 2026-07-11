@@ -32,6 +32,7 @@ from app.db.models.proxy_endpoints import ProxyEndpoint
 from app.db.models.tags import Tag
 from app.db.models.token_proxy_bindings import TokenProxyBinding
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.jobs.payload import parse_job_payload_object
 from app.jobs.errors import JobDeferError, JobPermanentError
 from app.pixiv.access_token_cache import AccessTokenCache
 from app.pixiv.oauth import OAUTH_TOKEN_PATH, PixivOauthConfig, PixivOauthError, refresh_access_token
@@ -53,16 +54,6 @@ class _IllustPage:
 
 class TokenDisabledError(RuntimeError):
     pass
-
-
-def _parse_payload(payload_json: str) -> dict[str, Any]:
-    try:
-        data = json.loads(payload_json)
-    except Exception as exc:
-        raise JobPermanentError("payload_json is not valid JSON") from exc
-    if not isinstance(data, dict):
-        raise JobPermanentError("payload_json must be an object")
-    return data
 
 
 def _parse_iso_utc_to_epoch(value: str, *, now_epoch: float) -> float:
@@ -1373,7 +1364,7 @@ LIMIT 1;
 
     async def _handler(job: dict[str, Any]) -> None:
         payload_json = str(job.get("payload_json") or "")
-        payload = _parse_payload(payload_json)
+        payload = parse_job_payload_object(payload_json)
 
         hydration_run_id = as_int(payload.get("hydration_run_id"), default=0)
         if hydration_run_id > 0:

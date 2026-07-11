@@ -23,6 +23,7 @@ from app.db.models.imports import Import
 from app.db.models.jobs import JobRow
 from app.db.models.tags import Tag
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.jobs.payload import parse_job_payload_object
 from app.jobs.errors import JobPermanentError
 
 _MAX_ERRORS = 200
@@ -115,22 +116,12 @@ def _iter_lines(payload: dict[str, Any], *, file_path: Path | None) -> Iterable[
     raise JobPermanentError("payload.text_lines or payload.text or payload.file_ref is required")
 
 
-def _parse_payload(payload_json: str) -> dict[str, Any]:
-    try:
-        data = json.loads(payload_json)
-    except Exception as exc:
-        raise JobPermanentError("payload_json is not valid JSON") from exc
-    if not isinstance(data, dict):
-        raise JobPermanentError("payload_json must be an object")
-    return data
-
-
 def build_import_images_handler(engine: AsyncEngine):
     Session = create_sessionmaker(engine)
 
     async def _handler(job: dict[str, Any]) -> None:
         payload_json = str(job.get("payload_json") or "")
-        payload = _parse_payload(payload_json)
+        payload = parse_job_payload_object(payload_json)
 
         try:
             import_id = int(payload.get("import_id"))

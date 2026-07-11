@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -19,6 +18,7 @@ from app.core.redact import redact_text
 from app.core.time import iso_utc_ms
 from app.db.models.proxy_endpoints import ProxyEndpoint
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.jobs.payload import parse_job_payload_object
 from app.jobs.errors import JobPermanentError
 
 DEFAULT_PROBE_URL = "https://www.pixiv.net/robots.txt"
@@ -50,16 +50,6 @@ class ProbeResult:
 
 
 ProbeFunc = Callable[[ProbeTarget, ProbeConfig], Awaitable[ProbeResult]]
-
-
-def _parse_payload(payload_json: str) -> dict[str, Any]:
-    try:
-        data = json.loads(payload_json)
-    except Exception as exc:
-        raise JobPermanentError("payload_json is not valid JSON") from exc
-    if not isinstance(data, dict):
-        raise JobPermanentError("payload_json must be an object")
-    return data
 
 
 def _truncate(text: str, *, max_len: int = 500) -> str:
@@ -134,7 +124,7 @@ def build_proxy_probe_handler(
 
     async def _handler(job: dict[str, Any]) -> None:
         payload_json = str(job.get("payload_json") or "")
-        payload = _parse_payload(payload_json)
+        payload = parse_job_payload_object(payload_json)
 
         probe_url = str(payload.get("probe_url") or DEFAULT_PROBE_URL).strip() or DEFAULT_PROBE_URL
         timeout_ms_raw = payload.get("timeout_ms", DEFAULT_TIMEOUT_MS)
