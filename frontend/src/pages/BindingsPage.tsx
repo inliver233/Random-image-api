@@ -5,6 +5,7 @@ import React, { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { dash } from "../admin/format";
 import { QueryState } from "../admin/QueryState";
 import { messageFromError, requestIdFromError } from "../admin/errors";
 import { useActionAlerts } from "../admin/useActionAlerts";
@@ -138,10 +139,10 @@ const columns = (actions: {
   },
   { title: "生效模式", dataIndex: "effective_mode", key: "effective_mode", render: (value) => modeLabel(value) },
   { title: "固定性", key: "stability", render: (_, row) => stabilityLabel(row) },
-  { title: "绑定更新时间", dataIndex: "updated_at", key: "updated_at", render: (value) => value || "-" },
+  { title: "绑定更新时间", dataIndex: "updated_at", key: "updated_at", render: (value) => dash(value) },
   { title: "主代理", key: "primary_proxy", render: (_, row) => formatProxy(row.primary_proxy) },
-  { title: "覆盖代理", key: "override_proxy", render: (_, row) => formatProxy(row.override_proxy) || "-" },
-  { title: "覆盖过期时间", dataIndex: "override_expires_at", key: "override_expires_at", render: (value) => value || "-" },
+  { title: "覆盖代理", key: "override_proxy", render: (_, row) => dash(formatProxy(row.override_proxy)) },
+  { title: "覆盖过期时间", dataIndex: "override_expires_at", key: "override_expires_at", render: (value) => dash(value) },
   {
     title: "操作",
     key: "actions",

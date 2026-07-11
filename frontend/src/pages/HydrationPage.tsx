@@ -18,6 +18,7 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { dash } from "../admin/format";
 import { QueryState } from "../admin/QueryState";
 import { requestIdWithMessageDescription } from "../admin/errors";
 import { jobStatusColor, jobStatusLabel } from "../admin/jobStatus";
@@ -298,13 +299,13 @@ export function HydrationPage() {
         dataIndex: "updated_at",
         key: "updated_at",
         width: 180,
-        render: (value: string | null) => value || "-",
+        render: (value: string | null) => dash(value),
       },
       {
         title: "错误信息",
         key: "last_error",
         width: 280,
-        render: (_, row) => row.last_error || row.latest_job?.last_error || "-",
+        render: (_, row) => dash(row.last_error || row.latest_job?.last_error),
       },
       {
         title: "操作",

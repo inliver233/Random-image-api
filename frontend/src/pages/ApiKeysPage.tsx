@@ -5,7 +5,7 @@ import React from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
 import { CursorTableCard } from "../admin/CursorTableCard";
-import { yesNo } from "../admin/format";
+import { dash, yesNo } from "../admin/format";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
@@ -125,7 +125,7 @@ export function ApiKeysPage() {
   const columns: ColumnsType<ApiKeyItem> = [
     { title: "ID", dataIndex: "id", key: "id", width: 90 },
     { title: "名称", dataIndex: "name", key: "name", width: 160 },
-    { title: "描述", dataIndex: "description", key: "description", render: (v) => v || "-" },
+    { title: "描述", dataIndex: "description", key: "description", render: (v) => dash(v) },
     { title: "Hint", dataIndex: "hint", key: "hint", width: 140 },
     {
       title: "启用",
@@ -134,7 +134,7 @@ export function ApiKeysPage() {
       width: 90,
       render: (value) => yesNo(value),
     },
-    { title: "最近使用", dataIndex: "last_used_at", key: "last_used_at", width: 180, render: (v) => v || "-" },
+    { title: "最近使用", dataIndex: "last_used_at", key: "last_used_at", width: 180, render: (v) => dash(v) },
     { title: "创建时间", dataIndex: "created_at", key: "created_at", width: 180 },
     {
       title: "操作",

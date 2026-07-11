@@ -4,7 +4,7 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useEffect, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
-import { yesNo } from "../admin/format";
+import { dash, yesNo } from "../admin/format";
 import { PendingAlert } from "../admin/PendingAlert";
 import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
@@ -205,8 +205,8 @@ const columns = (actions: {
       row.bindings ? `主绑定=${row.bindings.primary_count}，覆盖绑定=${row.bindings.override_count}` : "-",
   },
   { title: "成功/失败", key: "ok_fail", render: (_, row) => `${row.success_count}/${row.failure_count}` },
-  { title: "最近成功", dataIndex: "last_ok_at", key: "last_ok_at", render: (value) => value || "-" },
-  { title: "最近失败", dataIndex: "last_fail_at", key: "last_fail_at", render: (value) => value || "-" },
+  { title: "最近成功", dataIndex: "last_ok_at", key: "last_ok_at", render: (value) => dash(value) },
+  { title: "最近失败", dataIndex: "last_fail_at", key: "last_fail_at", render: (value) => dash(value) },
   { title: "延迟(ms)", dataIndex: "latency_ms", key: "latency_ms" },
   { title: "黑名单至", dataIndex: "blacklisted_until", key: "blacklisted_until" },
   { title: "最后错误", dataIndex: "last_error", key: "last_error" },

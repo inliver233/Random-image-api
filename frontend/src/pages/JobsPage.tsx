@@ -5,6 +5,7 @@ import React, { useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
 import { CursorTableCard } from "../admin/CursorTableCard";
+import { dash } from "../admin/format";
 import { QueryState } from "../admin/QueryState";
 import { jobStatusLabel, jobStatusTag, jobTypeLabel } from "../admin/jobStatus";
 import { useActionAlerts } from "../admin/useActionAlerts";
@@ -118,9 +119,9 @@ export function JobsPage() {
       render: (_, row) => `${row.attempt} / ${row.max_attempts}`,
     },
     { title: "优先级", dataIndex: "priority", key: "priority", width: 90 },
-    { title: "下次执行", dataIndex: "run_after", key: "run_after", width: 180, render: (value) => value || "-" },
-    { title: "锁定者", dataIndex: "locked_by", key: "locked_by", width: 140, render: (value) => value || "-" },
-    { title: "锁定时间", dataIndex: "locked_at", key: "locked_at", width: 180, render: (value) => value || "-" },
+    { title: "下次执行", dataIndex: "run_after", key: "run_after", width: 180, render: (value) => dash(value) },
+    { title: "锁定者", dataIndex: "locked_by", key: "locked_by", width: 140, render: (value) => dash(value) },
+    { title: "锁定时间", dataIndex: "locked_at", key: "locked_at", width: 180, render: (value) => dash(value) },
     {
       title: "引用",
       key: "ref",
@@ -132,7 +133,7 @@ export function JobsPage() {
       dataIndex: "last_error",
       key: "last_error",
       width: 240,
-      render: (value) => (value ? String(value) : "-"),
+      render: (value) => dash(value),
     },
     { title: "更新时间", dataIndex: "updated_at", key: "updated_at", width: 180 },
     {

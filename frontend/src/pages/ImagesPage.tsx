@@ -5,6 +5,7 @@ import React from "react";
 import { useMemo, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { dash } from "../admin/format";
 import { QueryState } from "../admin/QueryState";
 import { missingLabel } from "../admin/missingFields";
 import { useActionAlerts } from "../admin/useActionAlerts";
@@ -234,8 +235,8 @@ export function ImagesPage() {
           ),
       },
       { title: "作者", key: "user", width: 140, render: (_, row) => (row.user?.name ? row.user.name : "-") },
-      { title: "标题", dataIndex: "title", key: "title", width: 220, render: (v) => v || "-" },
-      { title: "Pixiv 发布时间", dataIndex: "created_at_pixiv", key: "created_at_pixiv", width: 180, render: (v) => v || "-" },
+      { title: "标题", dataIndex: "title", key: "title", width: 220, render: (v) => dash(v) },
+      { title: "Pixiv 发布时间", dataIndex: "created_at_pixiv", key: "created_at_pixiv", width: 180, render: (v) => dash(v) },
       {
         title: "操作",
         key: "actions",

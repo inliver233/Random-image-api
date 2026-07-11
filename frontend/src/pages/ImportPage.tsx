@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 import { ActionAlerts } from "../admin/ActionAlerts";
 import { CursorTableCard } from "../admin/CursorTableCard";
 import { jobStatusTag } from "../admin/jobStatus";
+import { dash } from "../admin/format";
 import { PendingAlert } from "../admin/PendingAlert";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
@@ -125,9 +126,9 @@ export function ImportPage() {
         </Button>
       ),
     },
-    { title: "来源", dataIndex: "source", key: "source", width: 100, render: (v) => v || "-" },
-    { title: "创建人", dataIndex: "created_by", key: "created_by", width: 120, render: (v) => v || "-" },
-    { title: "创建时间", dataIndex: "created_at", key: "created_at", width: 190, render: (v) => v || "-" },
+    { title: "来源", dataIndex: "source", key: "source", width: 100, render: (v) => dash(v) },
+    { title: "创建人", dataIndex: "created_by", key: "created_by", width: 120, render: (v) => dash(v) },
+    { title: "创建时间", dataIndex: "created_at", key: "created_at", width: 190, render: (v) => dash(v) },
     { title: "总数", dataIndex: "total", key: "total", width: 80 },
     { title: "接收", dataIndex: "accepted", key: "accepted", width: 80 },
     { title: "成功", dataIndex: "success", key: "success", width: 80 },

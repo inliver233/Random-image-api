@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
-import { yesNo } from "../admin/format";
+import { dash, yesNo } from "../admin/format";
 import { QueryState } from "../admin/QueryState";
 import { requestIdDescription } from "../admin/errors";
 import { useActionAlerts } from "../admin/useActionAlerts";
@@ -257,7 +257,7 @@ export function ProxyPoolsPage() {
     { title: "ID", dataIndex: "id", key: "id", width: 90, render: (value) => `#${value}` },
     { title: "名称", dataIndex: "name", key: "name", width: 220 },
     { title: "启用", dataIndex: "enabled", key: "enabled", width: 90, render: (value) => yesNo(value) },
-    { title: "描述", dataIndex: "description", key: "description", render: (value) => value || "-" },
+    { title: "描述", dataIndex: "description", key: "description", render: (value) => dash(value) },
     {
       title: "操作",
       key: "actions",

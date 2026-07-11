@@ -21,6 +21,29 @@ router = APIRouter()
 _ALLOWED_JOB_STATUSES = {"pending", "running", "paused", "canceled", "completed", "failed", "dlq"}
 
 
+def _serialize_job_row(row: JobRow, *, include_payload: bool = False) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "id": str(row.id),
+        "type": row.type,
+        "status": row.status,
+        "priority": int(row.priority),
+        "run_after": row.run_after,
+        "attempt": int(row.attempt),
+        "max_attempts": int(row.max_attempts),
+        "last_error": row.last_error,
+        "locked_by": row.locked_by,
+        "locked_at": row.locked_at,
+        "ref_type": row.ref_type,
+        "ref_id": row.ref_id,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    }
+    if include_payload:
+        item["payload"] = soft_json_value(row.payload_json)
+        item["payload_json"] = str(row.payload_json or "")
+    return item
+
+
 @router.get("/jobs")
 async def list_jobs(
     request: Request,
@@ -62,26 +85,7 @@ async def list_jobs(
         rows = ((await session.execute(stmt)).scalars().all())
 
     items_rows, next_cursor = slice_id_cursor_page(list(rows), limit)
-
-    items = [
-        {
-            "id": str(row.id),
-            "type": row.type,
-            "status": row.status,
-            "priority": int(row.priority),
-            "run_after": row.run_after,
-            "attempt": int(row.attempt),
-            "max_attempts": int(row.max_attempts),
-            "last_error": row.last_error,
-            "locked_by": row.locked_by,
-            "locked_at": row.locked_at,
-            "ref_type": row.ref_type,
-            "ref_id": row.ref_id,
-            "created_at": row.created_at,
-            "updated_at": row.updated_at,
-        }
-        for row in items_rows
-    ]
+    items = [_serialize_job_row(row) for row in items_rows]
 
     return admin_cursor_list(request, items=items, next_cursor=next_cursor, request_id=rid)
 
@@ -105,30 +109,9 @@ async def get_job(
         if row is None:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Job not found", status_code=404)
 
-    payload = soft_json_value(row.payload_json)
-
     return admin_ok(
         request,
-        payload={
-            "item": {
-                "id": str(row.id),
-                "type": row.type,
-                "status": row.status,
-                "priority": int(row.priority),
-                "run_after": row.run_after,
-                "attempt": int(row.attempt),
-                "max_attempts": int(row.max_attempts),
-                "payload": payload,
-                "payload_json": str(row.payload_json or ""),
-                "last_error": row.last_error,
-                "locked_by": row.locked_by,
-                "locked_at": row.locked_at,
-                "ref_type": row.ref_type,
-                "ref_id": row.ref_id,
-                "created_at": row.created_at,
-                "updated_at": row.updated_at,
-            }
-        },
+        payload={"item": _serialize_job_row(row, include_payload=True)},
         request_id=rid,
     )
 
