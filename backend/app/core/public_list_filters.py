@@ -5,10 +5,9 @@ from dataclasses import dataclass
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.errors import ApiError, ErrorCode
 from app.core.random_query import (
-    MAX_TAG_FILTERS,
-    normalize_iso_utc,
-    parse_tag_filters,
-    validate_tag_filters,
+    parse_created_range,
+    parse_included_excluded_tags,
+    require_optional_positive_ids,
 )
 
 ORIENTATION_MAP: dict[str, int | None] = {
@@ -105,31 +104,9 @@ def parse_public_list_filters(
     if min_width < 0 or min_height < 0 or min_pixels < 0:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported min_*", status_code=400)
 
-    included = parse_tag_filters(included_tags)
-    excluded = parse_tag_filters(excluded_tags)
-    if len(included) > MAX_TAG_FILTERS or len(excluded) > MAX_TAG_FILTERS:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag filters", status_code=400)
-    validate_tag_filters(included)
-    validate_tag_filters(excluded)
-
-    if user_id is not None and int(user_id) <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported user_id", status_code=400)
-    if illust_id is not None and int(illust_id) <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported illust_id", status_code=400)
-
-    created_from_norm: str | None = None
-    created_to_norm: str | None = None
-    try:
-        if created_from is not None:
-            created_from_norm = normalize_iso_utc(created_from)
-        if created_to is not None:
-            created_to_norm = normalize_iso_utc(created_to)
-    except Exception:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported created_*", status_code=400)
-
-    if created_from_norm is not None and created_to_norm is not None:
-        if created_from_norm > created_to_norm:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="created_from > created_to", status_code=400)
+    included, excluded = parse_included_excluded_tags(included_tags, excluded_tags)
+    user_id_i, illust_id_i = require_optional_positive_ids(user_id=user_id, illust_id=illust_id)
+    created_from_norm, created_to_norm = parse_created_range(created_from, created_to)
 
     return ParsedPublicListFilters(
         r18=int(r18),
@@ -141,8 +118,8 @@ def parse_public_list_filters(
         min_pixels_i=int(min_pixels),
         included=included,
         excluded=excluded,
-        user_id=int(user_id) if user_id is not None else None,
-        illust_id=int(illust_id) if illust_id is not None else None,
+        user_id=user_id_i,
+        illust_id=illust_id_i,
         created_from_norm=created_from_norm,
         created_to_norm=created_to_norm,
         cursor_i=cursor_i,

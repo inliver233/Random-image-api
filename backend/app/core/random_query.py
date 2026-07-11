@@ -69,6 +69,53 @@ def normalize_iso_utc_optional(value: str | None) -> str | None:
     return normalize_iso_utc(raw)
 
 
+def parse_included_excluded_tags(
+    included_tags: list[str] | None,
+    excluded_tags: list[str] | None,
+) -> tuple[list[str], list[str]]:
+    """Parse + validate public included/excluded tag groups (shared list/random contract)."""
+    included = parse_tag_filters(included_tags)
+    excluded = parse_tag_filters(excluded_tags)
+    if len(included) > MAX_TAG_FILTERS or len(excluded) > MAX_TAG_FILTERS:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag filters", status_code=400)
+    validate_tag_filters(included)
+    validate_tag_filters(excluded)
+    return included, excluded
+
+
+def parse_created_range(
+    created_from: str | None,
+    created_to: str | None,
+) -> tuple[str | None, str | None]:
+    """Normalize optional created_from/created_to ISO range; invalid → BAD_REQUEST."""
+    created_from_norm: str | None = None
+    created_to_norm: str | None = None
+    try:
+        if created_from is not None:
+            created_from_norm = normalize_iso_utc(created_from)
+        if created_to is not None:
+            created_to_norm = normalize_iso_utc(created_to)
+    except Exception:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported created_*", status_code=400)
+    if created_from_norm is not None and created_to_norm is not None:
+        if created_from_norm > created_to_norm:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="created_from > created_to", status_code=400)
+    return created_from_norm, created_to_norm
+
+
+def require_optional_positive_ids(
+    *,
+    user_id: int | None,
+    illust_id: int | None,
+) -> tuple[int | None, int | None]:
+    """Optional positive user_id/illust_id with stable Unsupported messages."""
+    if user_id is not None and int(user_id) <= 0:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported user_id", status_code=400)
+    if illust_id is not None and int(illust_id) <= 0:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported illust_id", status_code=400)
+    return (int(user_id) if user_id is not None else None, int(illust_id) if illust_id is not None else None)
+
+
 def build_no_match_error(
     *,
     r18: int,
