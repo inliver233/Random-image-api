@@ -177,6 +177,10 @@ def test_redis_recent_dedup_with_fake_client() -> None:
         max_images=10,
         max_authors=10,
     )
+    # Fire-and-forget Redis write — give the pool a beat to flush.
+    import time as _time
+
+    _time.sleep(0.05)
     images, authors = store.get_lists(1.0, window_s=3600.0, max_images=10, max_authors=10)
     assert images == [11]
     assert authors == [22]
@@ -184,3 +188,96 @@ def test_redis_recent_dedup_with_fake_client() -> None:
     images2, authors2 = store.get_lists(1.0, window_s=3600.0, max_images=10, max_authors=10)
     assert images2 == []
     assert authors2 == []
+
+
+def test_redis_recent_dedup_get_lists_budgeted_on_slow_client() -> None:
+    """Slow Redis fetch must not stall pick plan past the hard timeout."""
+    import time as _time
+
+    from app.core import recent_dedup as rd
+
+    class _SlowRedis(_FakeRedis):
+        def zrange(self, key: str, start: int, end: int) -> list[str]:
+            # Exceed hard timeout (0.15s) without parking the shared pool for seconds.
+            _time.sleep(0.35)
+            return super().zrange(key, start, end)
+
+    clear_recent()
+    store = RedisRecentDedup(redis_url="redis://fake")
+    store._client = _SlowRedis()
+    # Seed local memory so fail-open has data.
+    store._fallback.record(
+        now=1000.0,
+        image_id=77,
+        user_id=8,
+        window_s=60.0,
+        max_images=100,
+        max_authors=50,
+    )
+    t0 = _time.monotonic()
+    images, authors = store.get_lists(1000.0, window_s=60.0, max_images=100, max_authors=50)
+    elapsed = _time.monotonic() - t0
+    assert elapsed < 0.8, f"get_lists hung too long: {elapsed:.3f}s"
+    assert elapsed >= float(rd._REDIS_CALL_TIMEOUT_S) * 0.4
+    assert 77 in images
+    assert 8 in authors
+    clear_recent()
+
+
+def test_redis_recent_dedup_list_cache_avoids_second_redis_rtt() -> None:
+    """Warm list cache must be served without waiting on Redis again."""
+    import time as _time
+
+    class _CountingRedis(_FakeRedis):
+        def __init__(self) -> None:
+            super().__init__()
+            self.zrange_calls = 0
+
+        def zrange(self, key: str, start: int, end: int) -> list[str]:
+            self.zrange_calls += 1
+            return super().zrange(key, start, end)
+
+    store = RedisRecentDedup(redis_url="redis://fake")
+    fake = _CountingRedis()
+    store._client = fake
+    store._store_list_cache([5], [6])
+    t0 = _time.monotonic()
+    images, authors = store.get_lists(1.0, window_s=60.0, max_images=10, max_authors=10)
+    elapsed = _time.monotonic() - t0
+    assert images == [5]
+    assert authors == [6]
+    assert elapsed < 0.05
+    # Cache hit path does not call zrange synchronously.
+    assert fake.zrange_calls == 0
+
+
+def test_redis_recent_dedup_record_returns_immediately() -> None:
+    """record dual-writes memory and returns without waiting on slow Redis."""
+    import time as _time
+
+    class _SlowWriteRedis(_FakeRedis):
+        def pipeline(self, transaction: bool = False) -> "_SlowPipe":  # type: ignore[name-defined]
+            return _SlowPipe(self)
+
+    class _SlowPipe(_FakePipe):
+        def execute(self) -> list[object]:
+            _time.sleep(0.5)
+            return super().execute()
+
+    clear_recent()
+    store = RedisRecentDedup(redis_url="redis://fake")
+    store._client = _SlowWriteRedis()
+    t0 = _time.monotonic()
+    store.record(
+        now=2000.0,
+        image_id=99,
+        user_id=1,
+        window_s=60.0,
+        max_images=100,
+        max_authors=50,
+    )
+    elapsed = _time.monotonic() - t0
+    assert elapsed < 0.15, f"record blocked on Redis: {elapsed:.3f}s"
+    images, _authors = store._fallback.get_lists(2000.0, window_s=60.0, max_images=100, max_authors=50)
+    assert 99 in images
+    clear_recent()

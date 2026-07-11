@@ -520,7 +520,8 @@ async def pick_with_strategy(
     ``pick_ctx`` is the resolved RandomPickContext plan; ``filters`` is ParsedRandomFilters.
     Routes stay thin adapters over this service entrypoint.
     ``pick`` is optional RandomPickPort for the Python SQL ring path.
-    ``skip_engine`` forces the Python path (used by /feed top-up after one engine batch).
+    ``skip_engine`` forces the Python path (used by /feed top-up after one engine
+    batch and by /random stream retries after the first dual-run attempt).
     """
     from app.core.random_engine_client import random_engine_base_url, should_route_pick_to_engine
     from app.db.random_pick_port import resolve_random_pick

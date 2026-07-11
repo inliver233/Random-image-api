@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import time
@@ -16,6 +17,9 @@ from app.db.models.api_keys import ApiKey
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 
 log = get_logger(__name__)
+
+# Hard ceiling for Redis EVAL on the public auth hot path (fail open past this).
+_REDIS_RL_CALL_TIMEOUT_S = 0.15
 
 # Redis token-bucket Lua: KEYS[1]=bucket, ARGV=capacity, refill_per_s, now_s, cost
 # Returns 1 if allowed, 0 if limited. Best-effort multi-instance rate limit.
@@ -245,11 +249,11 @@ class RedisApiKeyRateLimiter:
                 str(self.redis_url),
                 encoding="utf-8",
                 decode_responses=True,
-                socket_connect_timeout=0.4,
-                socket_timeout=0.4,
+                socket_connect_timeout=0.2,
+                socket_timeout=0.2,
             )
-            # Lazy connect; ping once to surface bad URLs early.
-            await client.ping()
+            # Lazy connect; ping once to surface bad URLs early (budgeted).
+            await asyncio.wait_for(client.ping(), timeout=_REDIS_RL_CALL_TIMEOUT_S)
             self._client = client
             return client
         except Exception as exc:
@@ -265,7 +269,11 @@ class RedisApiKeyRateLimiter:
         if capacity <= 0.0 or refill_per_s <= 0.0:
             return True
 
-        client = await self._get_client()
+        try:
+            client = await asyncio.wait_for(self._get_client(), timeout=_REDIS_RL_CALL_TIMEOUT_S)
+        except Exception as exc:
+            log.warning("api_key_rate_limit_redis_client_timeout err=%s", type(exc).__name__)
+            return await self._fallback.allow(api_key_id_i)
         if client is None:
             # Fail open to process-local bucket so Redis outage does not 500 public API.
             return await self._fallback.allow(api_key_id_i)
@@ -273,14 +281,17 @@ class RedisApiKeyRateLimiter:
         key = f"{self.key_prefix}{api_key_id_i}"
         now_s = time.time()
         try:
-            allowed = await client.eval(
-                _REDIS_TOKEN_BUCKET_LUA,
-                1,
-                key,
-                float(capacity),
-                float(refill_per_s),
-                float(now_s),
-                1.0,
+            allowed = await asyncio.wait_for(
+                client.eval(
+                    _REDIS_TOKEN_BUCKET_LUA,
+                    1,
+                    key,
+                    float(capacity),
+                    float(refill_per_s),
+                    float(now_s),
+                    1.0,
+                ),
+                timeout=_REDIS_RL_CALL_TIMEOUT_S,
             )
             return int(allowed or 0) == 1
         except Exception as exc:

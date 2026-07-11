@@ -70,3 +70,38 @@ def test_redis_limiter_falls_back_when_client_unavailable() -> None:
         await limiter.aclose()
 
     asyncio.run(_run())
+
+
+def test_redis_limiter_budgeted_when_eval_hangs() -> None:
+    """Hung Redis EVAL must not stall the public auth path past the hard timeout."""
+    import time as _time
+
+    from app.core import api_keys as api_keys_mod
+
+    class _HungClient:
+        async def eval(self, *_a, **_k):  # type: ignore[no-untyped-def]
+            await asyncio.sleep(5.0)
+            return 1
+
+        async def aclose(self) -> None:
+            return None
+
+    async def _run() -> None:
+        limiter = RedisApiKeyRateLimiter(
+            rpm=60,
+            burst=1,
+            redis_url="redis://127.0.0.1:6379/0",
+        )
+        # Inject a connected-looking client that never answers EVAL.
+        limiter._client = _HungClient()
+        t0 = _time.monotonic()
+        assert await limiter.allow(7) is True  # fail-open to memory (first token)
+        elapsed = _time.monotonic() - t0
+        # Hard budget is ~0.15s; leave headroom for scheduling.
+        assert elapsed < 1.0, f"allow hung too long: {elapsed:.3f}s"
+        assert elapsed >= float(api_keys_mod._REDIS_RL_CALL_TIMEOUT_S) * 0.5
+        # Second call uses memory fallback bucket (burst=1) → limited.
+        assert await limiter.allow(7) is False
+        await limiter.aclose()
+
+    asyncio.run(_run())

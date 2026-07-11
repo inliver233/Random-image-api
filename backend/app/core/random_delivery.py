@@ -232,16 +232,29 @@ async def deliver_random_image_stream(
     recent_dedup: RecentDedupPort | None = None,
     job_queue: Any | None = None,
 ) -> Any:
-    """Pick + edge-redirect-or-stream retry loop for /random?format=image."""
+    """Pick + edge-redirect-or-stream retry loop for /random?format=image.
+
+    After the first pick attempt, subsequent retries pass ``skip_engine=True`` so
+    dual-run does not pay another engine RTT when only the origin stream failed
+    (mirrors /feed top-up sticky skip).
+    """
     store = resolve_catalog_store(catalog)
     dedup = resolve_recent_dedup(recent_dedup)
     tried_ids: set[int] = set()
     last_error: ApiError | None = None
     attempts_i = max(1, int(attempts))
+    # First attempt may dual-run; retries stay on Python pick path.
+    skip_engine = False
 
     for _ in range(attempts_i):
         async with Session() as session:
-            image, _debug = await pick(session=session, exclude_image_ids=list(tried_ids))
+            image, _debug = await pick(
+                session=session,
+                exclude_image_ids=list(tried_ids),
+                skip_engine=skip_engine,
+            )
+            # Sticky: later attempts never re-enter engine dual-run.
+            skip_engine = True
             if image is None:
                 break
             image_id = int(image.id)

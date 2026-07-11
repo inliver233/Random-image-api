@@ -101,6 +101,7 @@ async def random_image(
         *,
         session: Any,
         exclude_image_ids: list[int] | None = None,
+        skip_engine: bool = False,
     ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
         return await pick_ctx.pick(
             session=session,
@@ -110,6 +111,7 @@ async def random_image(
             catalog=catalog,
             pick=random_pick,
             exclude_image_ids=exclude_image_ids,
+            skip_engine=bool(skip_engine),
         )
 
     if format in {"json", "simple_json"} or (format == "image" and redirect == 1):
@@ -208,8 +210,18 @@ async def random_image(
         force_local=force_local,
     )
 
-    async def _pick_for_delivery(*, session: Any, exclude_image_ids: list[int] | None = None):
-        return await _pick_with_strategy(session=session, exclude_image_ids=exclude_image_ids)
+    async def _pick_for_delivery(
+        *,
+        session: Any,
+        exclude_image_ids: list[int] | None = None,
+        skip_engine: bool = False,
+    ):
+        # deliver_random_image_stream sticks skip_engine=True after the first attempt.
+        return await _pick_with_strategy(
+            session=session,
+            exclude_image_ids=exclude_image_ids,
+            skip_engine=bool(skip_engine),
+        )
 
     return await deliver_random_image_stream(
         pick=_pick_for_delivery,

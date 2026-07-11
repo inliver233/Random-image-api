@@ -108,7 +108,7 @@ def test_deliver_random_image_stream_edge_redirect(monkeypatch: pytest.MonkeyPat
     def Session():  # noqa: N802
         return _SessionCtx()
 
-    async def pick(*, session, exclude_image_ids=None):  # type: ignore[no-untyped-def]
+    async def pick(*, session, exclude_image_ids=None, skip_engine=False):  # type: ignore[no-untyped-def]
         return image, {"picked_by": "test"}
 
     monkeypatch.setattr(
@@ -189,7 +189,7 @@ def test_deliver_random_image_stream_edge_unavailable_falls_to_local(monkeypatch
     def Session():  # noqa: N802
         return _SessionCtx()
 
-    async def pick(*, session, exclude_image_ids=None):  # type: ignore[no-untyped-def]
+    async def pick(*, session, exclude_image_ids=None, skip_engine=False):  # type: ignore[no-untyped-def]
         return image, {"picked_by": "test"}
 
     monkeypatch.setattr(
@@ -286,7 +286,7 @@ def test_deliver_random_image_stream_engine_dto_marks_ok_on_local(
     def Session():  # noqa: N802
         return _SessionCtx()
 
-    async def pick(*, session, exclude_image_ids=None):  # type: ignore[no-untyped-def]
+    async def pick(*, session, exclude_image_ids=None, skip_engine=False):  # type: ignore[no-untyped-def]
         return image, {"picked_by": "engine"}
 
     monkeypatch.setattr(
@@ -376,7 +376,7 @@ def test_deliver_random_image_stream_engine_dto_skips_mark_ok_on_edge(
     def Session():  # noqa: N802
         return _SessionCtx()
 
-    async def pick(*, session, exclude_image_ids=None):  # type: ignore[no-untyped-def]
+    async def pick(*, session, exclude_image_ids=None, skip_engine=False):  # type: ignore[no-untyped-def]
         return image, {"picked_by": "engine"}
 
     monkeypatch.setattr(
@@ -415,3 +415,134 @@ def test_deliver_random_image_stream_engine_dto_skips_mark_ok_on_edge(
     resp = asyncio.run(_run())
     assert isinstance(resp, RedirectResponse)
     assert len(bg.tasks) == 0
+
+
+def test_deliver_random_image_stream_sticky_skip_engine_on_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """After first pick, retries must pass skip_engine=True (no N× dual-run)."""
+    img1 = SimpleNamespace(
+        id=11,
+        illust_id=110,
+        original_url="https://i.pximg.net/img-original/img/2021/02/03/04/05/06/11_p0.jpg",
+        user_id=5,
+        last_ok_at=None,
+        last_error_code=None,
+        width=100,
+        height=100,
+        x_restrict=0,
+        ai_type=0,
+        user_name="u",
+        title="t",
+        created_at_pixiv="2021-01-01T00:00:00Z",
+        bookmark_count=1,
+        view_count=1,
+        comment_count=0,
+    )
+    img2 = SimpleNamespace(
+        id=12,
+        illust_id=120,
+        original_url="https://i.pximg.net/img-original/img/2021/02/03/04/05/06/12_p0.jpg",
+        user_id=5,
+        last_ok_at=None,
+        last_error_code=None,
+        width=100,
+        height=100,
+        x_restrict=0,
+        ai_type=0,
+        user_name="u",
+        title="t",
+        created_at_pixiv="2021-01-01T00:00:00Z",
+        bookmark_count=1,
+        view_count=1,
+        comment_count=0,
+    )
+
+    class _SessionCtx:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *args):
+            return False
+
+    def Session():  # noqa: N802
+        return _SessionCtx()
+
+    pick_flags: list[bool] = []
+    n = {"i": 0}
+
+    async def pick(*, session, exclude_image_ids=None, skip_engine=False):  # type: ignore[no-untyped-def]
+        pick_flags.append(bool(skip_engine))
+        n["i"] += 1
+        return (img1 if n["i"] == 1 else img2), {"picked_by": "test", "skip_engine": skip_engine}
+
+    monkeypatch.setattr("app.core.random_delivery.needs_opportunistic_hydrate", lambda _img: False)
+    monkeypatch.setattr(
+        "app.core.random_delivery.resolve_image_edge_redirect_url",
+        lambda **kwargs: None,
+    )
+
+    async def _prepare(**kwargs):  # type: ignore[no-untyped-def]
+        return ("https://origin.example/img.jpg", None)
+
+    monkeypatch.setattr("app.core.random_delivery.prepare_origin_stream", _prepare)
+
+    class _FakeResp:
+        status_code = 200
+
+    stream_n = {"i": 0}
+
+    async def _stream_url(*args, **kwargs):  # type: ignore[no-untyped-def]
+        stream_n["i"] += 1
+        if stream_n["i"] == 1:
+            raise ApiError(
+                code=ErrorCode.UPSTREAM_403,
+                message="blocked",
+                status_code=403,
+            )
+        return _FakeResp()
+
+    monkeypatch.setattr("app.core.random_delivery.stream_url", _stream_url)
+
+    async def _mark_fail(*_a, **_k):  # type: ignore[no-untyped-def]
+        return None
+
+    async def _mark_ok(*_a, **_k):  # type: ignore[no-untyped-def]
+        return None
+
+    class _Cat:
+        mark_image_failure = staticmethod(_mark_fail)
+        mark_image_ok = staticmethod(_mark_ok)
+
+    monkeypatch.setattr("app.core.random_delivery.resolve_catalog_store", lambda _c=None: _Cat())
+
+    bg = BackgroundTasks()
+
+    def no_match() -> ApiError:
+        return ApiError(code=ErrorCode.NOT_FOUND, message="none", status_code=404)
+
+    async def _run():
+        return await deliver_random_image_stream(
+            pick=pick,
+            Session=Session,
+            engine=object(),
+            settings=object(),
+            runtime=object(),
+            httpx_transport=None,
+            httpx_client=None,
+            range_header=None,
+            attempts=3,
+            prefer_edge_redirect=False,
+            use_pixiv_cat=False,
+            mirror_host="i.pixiv.cat",
+            anti_repeat_enabled=False,
+            dedup_window_s=60.0,
+            dedup_max_images=10,
+            dedup_max_authors=10,
+            background_tasks=bg,
+            no_match_error=no_match,
+        )
+
+    resp = asyncio.run(_run())
+    assert isinstance(resp, _FakeResp)
+    assert pick_flags == [False, True], f"expected sticky skip_engine, got {pick_flags}"
