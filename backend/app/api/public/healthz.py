@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.core.data_files import ensure_sqlite_parent_dir
 from app.core.env_parse import parse_int_env
 from app.core.errors import ErrorCode, error_body
+from app.core.image_edge import load_image_edge_config_from_settings
+from app.core.random_engine_client import random_engine_base_url
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.runtime_settings import worker_last_seen_from_value_json
 from app.core.time import parse_iso_dt
@@ -119,6 +121,25 @@ async def healthz(request: Request) -> Any:
         queue_counts, queue_reason = await _query_queue_status_counts(engine)  # type: ignore[arg-type]
         queue_ok = queue_counts is not None
 
+        # Optional dual-stack readiness (config only — no outbound probes on /healthz).
+        settings = getattr(request.app.state, "settings", None)
+        edge_cfg = load_image_edge_config_from_settings(settings) if settings is not None else None
+        engine_url = random_engine_base_url(settings) if settings is not None else None
+        modules = {
+            "image_edge": {
+                "enabled_flag": bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False,
+                "ready": edge_cfg is not None,
+                "base_url_count": len(edge_cfg.base_urls) if edge_cfg is not None else 0,
+            },
+            "random_engine": {
+                "url_configured": bool(engine_url),
+                "enabled": bool(getattr(settings, "random_engine_enabled", False)) if settings is not None else False,
+                "traffic_percent": int(getattr(settings, "random_engine_traffic_percent", 100) or 0)
+                if settings is not None
+                else 0,
+            },
+        }
+
         resp = JSONResponse(
             status_code=200,
             content={
@@ -135,6 +156,7 @@ async def healthz(request: Request) -> Any:
                     "counts": queue_counts or {},
                     "reason": queue_reason,
                 },
+                "modules": modules,
                 "request_id": rid,
             },
         )

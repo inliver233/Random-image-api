@@ -27,6 +27,11 @@ def test_healthz_ok_includes_request_id() -> None:
     assert body["db_ok"] is True
     assert body["request_id"].startswith("req_")
     assert resp.headers["X-Request-Id"] == body["request_id"]
+    modules = body.get("modules") or {}
+    assert modules["image_edge"]["ready"] is False
+    assert modules["image_edge"]["enabled_flag"] is False
+    assert modules["random_engine"]["enabled"] is False
+    assert modules["random_engine"]["url_configured"] is False
 
 
 def test_healthz_uses_request_id_header_if_provided() -> None:
@@ -94,3 +99,5 @@ def test_healthz_reports_worker_and_queue_status_when_available(tmp_path: Path) 
     assert body["queue_ok"] is True
     assert body["worker"]["last_seen_at"]
     assert body["queue"]["counts"]["pending"] == 1
+    assert "modules" in body
+    assert body["modules"]["image_edge"]["ready"] is False
