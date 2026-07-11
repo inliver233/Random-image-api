@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 import random
 import os
 import math
 import time
 from datetime import datetime, timedelta, timezone
-from threading import Lock
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
@@ -24,6 +22,17 @@ from app.core.pximg_reverse_proxy import (
     rewrite_pximg_to_mirror,
 )
 from app.core.proxy_routing import select_proxy_uri_for_url
+from app.core.recent_dedup import get_recent_lists, get_recent_sets, record_recent
+from app.core.recommendation import (
+    DEFAULT_RECOMMENDATION,
+    DEFAULT_SCORE_WEIGHTS,
+    as_bool,
+    as_float,
+    multiplier_for_image,
+    parse_recommendation_overrides_from_query,
+    quality_score,
+    score_image_with_time_boosts,
+)
 from app.core.runtime_config_cache import get_cached_runtime_config
 from app.core.time import iso_utc_ms
 from app.db.images_mark import mark_image_failure, mark_image_ok
@@ -37,250 +46,18 @@ router = APIRouter()
 _MAX_TAG_FILTERS = 50
 _MAX_TAG_OR_TERMS = 20
 _MAX_TAG_TOTAL_TERMS = 200
+# Cap NOT IN size for SQLite plan quality; remaining recent ids still apply logit penalties.
+_RECENT_EXCLUDE_SQL_CAP = 512
 
-# Best-effort global de-dup (process-local): reduce short-term duplicates without extra DB writes.
-_RECENT_LOCK = Lock()
-_RECENT_IMAGES: deque[tuple[float, int]] = deque()
-_RECENT_AUTHORS: deque[tuple[float, int]] = deque()
-
-
-def _prune_recent(now: float, *, window_s: float, max_images: int, max_authors: int) -> None:
-    cutoff = float(now) - float(window_s)
-    while _RECENT_IMAGES and float(_RECENT_IMAGES[0][0]) < cutoff:
-        _RECENT_IMAGES.popleft()
-    while _RECENT_AUTHORS and float(_RECENT_AUTHORS[0][0]) < cutoff:
-        _RECENT_AUTHORS.popleft()
-
-    while len(_RECENT_IMAGES) > int(max_images):
-        _RECENT_IMAGES.popleft()
-    while len(_RECENT_AUTHORS) > int(max_authors):
-        _RECENT_AUTHORS.popleft()
-
-
-def _get_recent_sets(now: float, *, window_s: float, max_images: int, max_authors: int) -> tuple[set[int], set[int]]:
-    with _RECENT_LOCK:
-        _prune_recent(now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors))
-        recent_images = {int(image_id) for _t, image_id in _RECENT_IMAGES}
-        recent_authors = {int(user_id) for _t, user_id in _RECENT_AUTHORS}
-    return recent_images, recent_authors
-
-
-def _record_recent(
-    *,
-    now: float,
-    image_id: int,
-    user_id: int | None,
-    window_s: float,
-    max_images: int,
-    max_authors: int,
-) -> None:
-    try:
-        image_id_i = int(image_id)
-    except Exception:
-        return
-    if image_id_i <= 0:
-        return
-    user_id_i: int | None
-    try:
-        user_id_i = int(user_id) if user_id is not None else None
-    except Exception:
-        user_id_i = None
-
-    with _RECENT_LOCK:
-        _prune_recent(now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors))
-        _RECENT_IMAGES.append((float(now), int(image_id_i)))
-        if user_id_i is not None and user_id_i > 0:
-            _RECENT_AUTHORS.append((float(now), int(user_id_i)))
-
-
-def _as_bool(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"true", "1", "yes", "y", "on"}:
-            return True
-        if v in {"false", "0", "no", "n", "off"}:
-            return False
-    return None
-
-
-def _as_nonneg_int(value: Any) -> int:
-    if value is None:
-        return 0
-    if isinstance(value, bool):
-        return 0
-    try:
-        i = int(value)
-    except Exception:
-        return 0
-    return i if i > 0 else 0
-
-
-_DEFAULT_SCORE_WEIGHTS: dict[str, float] = {
-    "bookmark": 4.0,
-    "view": 0.5,
-    "comment": 2.0,
-    "pixels": 1.0,
-    "bookmark_rate": 3.0,
-    # 适度提升“新鲜感”和“成长速度”，避免老热门长期统治。
-    # - freshness: 越新越加分（指数衰减，默认半衰期在代码里固定为 21 天）
-    # - bookmark_velocity: 收藏增长率（收藏数 / 存在天数）的对数项
-    "freshness": 1.0,
-    "bookmark_velocity": 1.2,
-}
-
-_DEFAULT_RECOMMENDATION: dict[str, Any] = {
-    "pick_mode": "weighted",
-    "temperature": 1.0,
-    "score_weights": dict(_DEFAULT_SCORE_WEIGHTS),
-    # Newness/trending knobs:
-    # - freshness_half_life_days: used by the freshness decay term (see scoring).
-    # - velocity_smooth_days: smoothing for bookmark velocity denominator (age_days + smooth).
-    "freshness_half_life_days": 21.0,
-    "velocity_smooth_days": 2.0,
-    "multipliers": {
-        "ai": 1.0,
-        "non_ai": 1.0,
-        "unknown_ai": 1.0,
-        "illust": 1.0,
-        "manga": 1.0,
-        "ugoira": 1.0,
-        "unknown_illust_type": 1.0,
-    },
-}
-
-
-def _as_float(value: Any, *, default: float) -> float:
-    if value is None:
-        return float(default)
-    if isinstance(value, bool):
-        return float(default)
-    try:
-        return float(value)
-    except Exception:
-        return float(default)
-
-
-def _parse_recommendation_overrides_from_query(query_params: Any) -> tuple[dict[str, Any], list[str]]:
-    qp = query_params or {}
-    used: list[str] = []
-    overrides: dict[str, Any] = {}
-
-    def _get_str(name: str) -> str | None:
-        try:
-            raw = qp.get(name)
-        except Exception:
-            raw = None
-        if raw is None:
-            return None
-        s = str(raw).strip()
-        if not s:
-            return None
-        used.append(name)
-        return s
-
-    def _get_float(name: str) -> float | None:
-        try:
-            raw = qp.get(name)
-        except Exception:
-            raw = None
-        if raw is None:
-            return None
-        v = _as_float(raw, default=float("nan"))
-        if not math.isfinite(float(v)):
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Unsupported {name}", status_code=400)
-        used.append(name)
-        return float(v)
-
-    # Be strict for rec_* prefixes to avoid silent typos.
-    try:
-        keys = list(qp.keys())
-    except Exception:
-        keys = []
-    for k in keys:
-        if not isinstance(k, str):
-            continue
-        if k.startswith("rec_w_"):
-            weight_key = k.removeprefix("rec_w_")
-            if weight_key not in _DEFAULT_SCORE_WEIGHTS:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Unsupported {k}", status_code=400)
-        if k.startswith("rec_m_"):
-            mult_key = k.removeprefix("rec_m_")
-            if mult_key not in _DEFAULT_RECOMMENDATION["multipliers"]:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Unsupported {k}", status_code=400)
-
-    pick_mode_s = _get_str("rec_pick_mode")
-    if pick_mode_s is not None:
-        candidate = pick_mode_s.strip().lower()
-        if candidate not in {"best", "weighted"}:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported rec_pick_mode", status_code=400)
-        overrides["pick_mode"] = candidate
-
-    temperature_v = _get_float("rec_temperature")
-    if temperature_v is not None:
-        overrides["temperature"] = float(max(0.05, min(float(temperature_v), 100.0)))
-
-    freshness_half_life_v = _get_float("rec_fresh_half_life_days")
-    if freshness_half_life_v is not None:
-        overrides["freshness_half_life_days"] = float(max(0.1, min(float(freshness_half_life_v), 3650.0)))
-
-    velocity_smooth_v = _get_float("rec_velocity_smooth_days")
-    if velocity_smooth_v is not None:
-        overrides["velocity_smooth_days"] = float(max(0.0, min(float(velocity_smooth_v), 3650.0)))
-
-    score_overrides: dict[str, float] = {}
-    for key in _DEFAULT_SCORE_WEIGHTS.keys():
-        v = _get_float(f"rec_w_{key}")
-        if v is None:
-            continue
-        score_overrides[key] = float(max(-100.0, min(float(v), 100.0)))
-    if score_overrides:
-        overrides["score_weights"] = score_overrides
-
-    mult_overrides: dict[str, float] = {}
-    for key in _DEFAULT_RECOMMENDATION["multipliers"].keys():
-        v = _get_float(f"rec_m_{key}")
-        if v is None:
-            continue
-        mult_overrides[key] = float(max(0.0, min(float(v), 100.0)))
-    if mult_overrides:
-        overrides["multipliers"] = mult_overrides
-
-    return overrides, used
-
-
-def _quality_score(image: Any, *, weights: dict[str, float] | None = None) -> float:
-    w = weights or _DEFAULT_SCORE_WEIGHTS
-    w_bookmark = float(w.get("bookmark", _DEFAULT_SCORE_WEIGHTS["bookmark"]))
-    w_view = float(w.get("view", _DEFAULT_SCORE_WEIGHTS["view"]))
-    w_comment = float(w.get("comment", _DEFAULT_SCORE_WEIGHTS["comment"]))
-    w_pixels = float(w.get("pixels", _DEFAULT_SCORE_WEIGHTS["pixels"]))
-    w_bookmark_rate = float(w.get("bookmark_rate", _DEFAULT_SCORE_WEIGHTS["bookmark_rate"]))
-
-    bookmark_count = _as_nonneg_int(getattr(image, "bookmark_count", None))
-    view_count = _as_nonneg_int(getattr(image, "view_count", None))
-    comment_count = _as_nonneg_int(getattr(image, "comment_count", None))
-
-    width = _as_nonneg_int(getattr(image, "width", None))
-    height = _as_nonneg_int(getattr(image, "height", None))
-    pixels = width * height if width > 0 and height > 0 else 0
-
-    rate_term = 0.0
-    if view_count > 0:
-        bookmark_rate_per_mille = (float(bookmark_count) / float(view_count)) * 1000.0
-        rate_term = math.log1p(max(0.0, bookmark_rate_per_mille))
-
-    score = (
-        float(w_bookmark) * math.log1p(bookmark_count)
-        + float(w_view) * math.log1p(view_count)
-        + float(w_comment) * math.log1p(comment_count)
-        + float(w_pixels) * math.log1p(float(pixels) / 1_000_000.0)
-        + float(w_bookmark_rate) * rate_term
-    )
-    return float(score)
+# Compatibility aliases for existing tests / internal callers.
+_DEFAULT_SCORE_WEIGHTS = DEFAULT_SCORE_WEIGHTS
+_DEFAULT_RECOMMENDATION = DEFAULT_RECOMMENDATION
+_as_bool = as_bool
+_as_float = as_float
+_quality_score = quality_score
+_parse_recommendation_overrides_from_query = parse_recommendation_overrides_from_query
+_get_recent_sets = get_recent_sets
+_record_recent = record_recent
 
 
 @router.get("/random")
@@ -661,31 +438,6 @@ async def random_image(
         else None
     )
 
-    def _parse_iso_dt(value: str | None) -> datetime | None:
-        raw = str(value or "").strip()
-        if not raw:
-            return None
-        try:
-            if raw.endswith("Z"):
-                raw = raw[:-1] + "+00:00"
-            dt = datetime.fromisoformat(raw)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc)
-        except Exception:
-            return None
-
-    def _age_days(dt: datetime | None) -> float | None:
-        if dt is None:
-            return None
-        try:
-            secs = float((request_now - dt).total_seconds())
-        except Exception:
-            return None
-        if not math.isfinite(secs):
-            return None
-        return max(0.0, secs / 86400.0)
-
     pick_kwargs: dict[str, Any] = {
         "r18": r18,
         "r18_strict": bool(r18_strict),
@@ -768,13 +520,19 @@ async def random_image(
     anti_repeat_enabled = bool(dedup_enabled_setting) and bool(time_boost_enabled) and user_id is None and illust_id is None
     recent_image_ids: set[int] = set()
     recent_author_ids: set[int] = set()
+    recent_exclude_image_ids: list[int] = []
     if anti_repeat_enabled:
-        recent_image_ids, recent_author_ids = _get_recent_sets(
+        recent_image_list, recent_author_list = get_recent_lists(
             time.monotonic(),
             window_s=float(dedup_window_s),
             max_images=int(dedup_max_images),
             max_authors=int(dedup_max_authors),
         )
+        recent_image_ids = set(int(x) for x in recent_image_list)
+        recent_author_ids = set(int(x) for x in recent_author_list)
+        if recent_image_list:
+            # Prefer newest ids for hard SQL exclusion.
+            recent_exclude_image_ids = list(dict.fromkeys(int(x) for x in recent_image_list[-_RECENT_EXCLUDE_SQL_CAP:]))
 
     strategy_raw = (strategy or "").strip().lower()
     strategy_source = "query"
@@ -962,45 +720,20 @@ async def random_image(
         if strategy_norm == "random":
             base_exclude = list(exclude_image_ids or [])
             exclude_set: set[int] = set(int(x) for x in base_exclude)
-            if bool(anti_repeat_enabled) and recent_image_ids:
-                exclude_set.update(int(x) for x in recent_image_ids)
+            if bool(anti_repeat_enabled) and recent_exclude_image_ids:
+                exclude_set.update(int(x) for x in recent_exclude_image_ids)
 
             image = await pick_random_image(session, r=rng.random(), exclude_image_ids=list(exclude_set), **pick_kwargs)
-            if image is None and bool(anti_repeat_enabled) and bool(recent_image_ids) and not bool(dedup_strict):
+            if image is None and bool(anti_repeat_enabled) and bool(recent_exclude_image_ids) and not bool(dedup_strict):
                 image = await pick_random_image(session, r=rng.random(), exclude_image_ids=base_exclude, **pick_kwargs)
             if image is None:
                 return None, {**debug_base, "attempts_used": 1, "picked_by": "random_key"}
             return image, {**debug_base, "attempts_used": 1, "picked_by": "random_key"}
 
-        def _multiplier_for_image(image: Any) -> float:
-            m = 1.0
-
-            ai = getattr(image, "ai_type", None)
-            if ai == 1:
-                m *= float(multipliers.get("ai", 1.0))
-            elif ai == 0:
-                m *= float(multipliers.get("non_ai", 1.0))
-            else:
-                m *= float(multipliers.get("unknown_ai", 1.0))
-
-            it = getattr(image, "illust_type", None)
-            if it == 0:
-                m *= float(multipliers.get("illust", 1.0))
-            elif it == 1:
-                m *= float(multipliers.get("manga", 1.0))
-            elif it == 2:
-                m *= float(multipliers.get("ugoira", 1.0))
-            else:
-                m *= float(multipliers.get("unknown_illust_type", 1.0))
-
-            if not math.isfinite(float(m)) or float(m) <= 0.0:
-                return 0.0
-            return float(m)
-
         base_exclude_set: set[int] = set(int(x) for x in exclude_image_ids or [])
         exclude_set: set[int] = set(base_exclude_set)
-        if bool(anti_repeat_enabled) and recent_image_ids:
-            exclude_set.update(int(x) for x in recent_image_ids)
+        if bool(anti_repeat_enabled) and recent_exclude_image_ids:
+            exclude_set.update(int(x) for x in recent_exclude_image_ids)
         # candidates: (image, score_total, multiplier, logit, score_base, freshness_contrib, velocity_contrib)
         candidates: list[tuple[Any, float, float, float, float, float, float]] = []
 
@@ -1044,7 +777,7 @@ async def random_image(
             illust_type_allowed=illust_allowed,
             **pick_kwargs,
         )
-        if not images and bool(anti_repeat_enabled) and bool(recent_image_ids) and not bool(dedup_strict):
+        if not images and bool(anti_repeat_enabled) and bool(recent_exclude_image_ids) and not bool(dedup_strict):
             images = await pick_random_images(
                 session,
                 r=rng.random(),
@@ -1058,45 +791,14 @@ async def random_image(
         drawn = int(len(images))
         accepted = 0
         for image in images:
-            score_base = _quality_score(image, weights=score_weights)
-
-            # 时间因素：
-            # - freshness: 对“老图”做衰减（loss），避免老热门长期统治（可通过权重/半衰期调节强度）。
-            # - bookmark_velocity: 提升“成长速度快”的作品，避免只看总收藏数。
-            #
-            # 默认使用 created_at_pixiv；若缺失则 freshness 退化到 added_at，以便新导入/新补全的图片也能有时间信号。
-            freshness_w = float(score_weights.get("freshness", 0.0)) if bool(time_boost_enabled) else 0.0
-            velocity_w = float(score_weights.get("bookmark_velocity", 0.0)) if bool(time_boost_enabled) else 0.0
-            freshness_contrib = 0.0
-            velocity_contrib = 0.0
-
-            if freshness_w != 0.0:
-                dt_created = _parse_iso_dt(getattr(image, "created_at_pixiv", None))
-                if dt_created is None:
-                    dt_created = _parse_iso_dt(getattr(image, "added_at", None))
-                age_days = _age_days(dt_created)
-                if age_days is not None:
-                    try:
-                        # log(decay) = - age/half_life, i.e. a true time-decay loss factor.
-                        freshness_contrib = (-1.0) * float(freshness_w) * (float(age_days) / float(freshness_half_life_days))
-                    except Exception:
-                        freshness_contrib = 0.0
-
-            if velocity_w != 0.0:
-                dt_created = _parse_iso_dt(getattr(image, "created_at_pixiv", None))
-                age_days = _age_days(dt_created)
-                bookmark_count = _as_nonneg_int(getattr(image, "bookmark_count", None))
-                if age_days is not None and bookmark_count > 0:
-                    try:
-                        # 平滑，避免“刚发布/刚补全”的极端值。
-                        denom = float(age_days) + float(velocity_smooth_days)
-                        velocity_term = math.log1p(float(bookmark_count) / max(1.0, denom))
-                        velocity_contrib = float(velocity_w) * float(velocity_term)
-                    except Exception:
-                        velocity_contrib = 0.0
-
-            score = float(score_base) + float(freshness_contrib) + float(velocity_contrib)
-            multiplier = _multiplier_for_image(image)
+            score, score_base, freshness_contrib, velocity_contrib = score_image_with_time_boosts(
+                image,
+                score_weights=score_weights,
+                freshness_half_life_days=float(freshness_half_life_days),
+                velocity_smooth_days=float(velocity_smooth_days),
+                time_boost_enabled=bool(time_boost_enabled),
+            )
+            multiplier = multiplier_for_image(image, multipliers=multipliers)
             if multiplier <= 0.0:
                 continue
 

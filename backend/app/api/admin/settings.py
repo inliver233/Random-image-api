@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
+from app.core.recommendation import DEFAULT_RECOMMENDATION, DEFAULT_SCORE_WEIGHTS, as_bool
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_config_cache import invalidate_runtime_config_cache
 from app.core.runtime_settings import (
@@ -22,32 +23,8 @@ from app.core.pximg_reverse_proxy import (
 
 router = APIRouter()
 
-_DEFAULT_SCORE_WEIGHTS: dict[str, float] = {
-    "bookmark": 4.0,
-    "view": 0.5,
-    "comment": 2.0,
-    "pixels": 1.0,
-    "bookmark_rate": 3.0,
-    "freshness": 1.0,
-    "bookmark_velocity": 1.2,
-}
-
-_DEFAULT_RECOMMENDATION: dict[str, Any] = {
-    "pick_mode": "weighted",
-    "temperature": 1.0,
-    "score_weights": dict(_DEFAULT_SCORE_WEIGHTS),
-    "freshness_half_life_days": 21.0,
-    "velocity_smooth_days": 2.0,
-    "multipliers": {
-        "ai": 1.0,
-        "non_ai": 1.0,
-        "unknown_ai": 1.0,
-        "illust": 1.0,
-        "manga": 1.0,
-        "ugoira": 1.0,
-        "unknown_illust_type": 1.0,
-    },
-}
+_DEFAULT_SCORE_WEIGHTS = DEFAULT_SCORE_WEIGHTS
+_DEFAULT_RECOMMENDATION = DEFAULT_RECOMMENDATION
 
 _DEFAULT_SETTINGS = {
     "random": {
@@ -88,17 +65,7 @@ def _as_str_list(value: Any) -> list[str]:
 
 
 def _as_bool(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"true", "1", "yes", "y", "on"}:
-            return True
-        if v in {"false", "0", "no", "n", "off"}:
-            return False
-    return None
+    return as_bool(value)
 
 
 def _as_float(value: Any) -> float | None:
