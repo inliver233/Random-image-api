@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object
+from app.core.admin_request import load_json_object, parse_choice, parse_positive_int
 from app.core.recommendation import DEFAULT_RECOMMENDATION, DEFAULT_SCORE_WEIGHTS, as_bool
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_config_cache import invalidate_runtime_config_cache
@@ -167,11 +167,25 @@ def _normalize_recommendation(value: Any, *, strict: bool) -> dict[str, Any]:
     pick_mode = pick_mode_default
     if pick_mode_raw is not None:
         candidate = str(pick_mode_raw or "").strip().lower()
-        if candidate not in {"best", "weighted"}:
+        if not candidate:
             if strict:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.recommendation.pick_mode", status_code=400)
+                raise ApiError(
+                    code=ErrorCode.BAD_REQUEST,
+                    message="Invalid random.recommendation.pick_mode",
+                    status_code=400,
+                )
         else:
-            pick_mode = candidate
+            try:
+                pick_mode = parse_choice(
+                    candidate,
+                    field="pick_mode",
+                    choices=frozenset({"best", "weighted"}),
+                    invalid_message="Invalid random.recommendation.pick_mode",
+                )
+            except ApiError:
+                if strict:
+                    raise
+                pick_mode = pick_mode_default
 
     temperature_default = float(_DEFAULT_RECOMMENDATION["temperature"])
     temperature = temperature_default
@@ -383,9 +397,12 @@ async def update_settings(
             updates.append(("proxy.fail_closed", bool(v)))
 
         if "route_mode" in proxy:
-            route_mode = str(proxy.get("route_mode") or "").strip().lower()
-            if route_mode not in {"pixiv_only", "all", "allowlist", "off"}:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid proxy.route_mode", status_code=400)
+            route_mode = parse_choice(
+                proxy.get("route_mode"),
+                field="route_mode",
+                choices=frozenset({"pixiv_only", "all", "allowlist", "off"}),
+                invalid_message="Invalid proxy.route_mode",
+            )
             updates.append(("proxy.route_mode", route_mode))
 
         if "allowlist_domains" in proxy:
@@ -399,12 +416,11 @@ async def update_settings(
             if raw is None or raw == "":
                 updates.append(("proxy.default_pool_id", None))
             else:
-                try:
-                    pool_id = int(raw)
-                except Exception as exc:
-                    raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid proxy.default_pool_id", status_code=400) from exc
-                if pool_id <= 0:
-                    raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid proxy.default_pool_id", status_code=400)
+                pool_id = parse_positive_int(
+                    raw,
+                    field="default_pool_id",
+                    invalid_message="Invalid proxy.default_pool_id",
+                )
                 updates.append(("proxy.default_pool_id", int(pool_id)))
 
         if "route_pools" in proxy:
@@ -498,10 +514,12 @@ async def update_settings(
                     raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Invalid random.{key}", status_code=400)
                 defaults[key] = n
             elif key == "strategy":
-                s = str(random.get(key) or "").strip().lower()
-                if s not in {"quality", "random"}:
-                    raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.strategy", status_code=400)
-                defaults[key] = s
+                defaults[key] = parse_choice(
+                    random.get(key),
+                    field="strategy",
+                    choices=frozenset({"quality", "random"}),
+                    invalid_message="Invalid random.strategy",
+                )
             else:
                 v = _as_bool(random.get(key))
                 if v is None:
