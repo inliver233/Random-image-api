@@ -6,6 +6,12 @@ from typing import Any, Mapping
 from fastapi.responses import RedirectResponse
 
 from app.core.errors import ApiError, ErrorCode
+from app.core.public_list_filters import (
+    ORIENTATION_ALIASES,
+    ORIENTATION_MAP,
+    parse_ai_type_param,
+    parse_orientation_param,
+)
 from app.core.pximg_reverse_proxy import normalize_pximg_mirror_host
 from app.core.random_query import (
     MAX_TAG_FILTERS,
@@ -99,14 +105,7 @@ def parse_random_filters(
     if seed_norm and len(seed_norm) > 128:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported seed", status_code=400)
 
-    ai_type_raw = (ai_type or "any").strip().lower()
-    ai_type_i: int | None = None
-    if ai_type_raw in {"", "any"}:
-        ai_type_i = None
-    elif ai_type_raw in {"0", "1"}:
-        ai_type_i = int(ai_type_raw)
-    else:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported ai_type", status_code=400)
+    ai_type_raw, ai_type_i = parse_ai_type_param(ai_type)
 
     illust_type_raw = (illust_type or "any").strip().lower()
     illust_type_i: int | None = None
@@ -142,16 +141,12 @@ def parse_random_filters(
         layout_source = "layout"
         raw_layout = layout
 
-    layout_norm = (raw_layout or "").strip().lower()
-    alias_map = {"vertical": "portrait", "horizontal": "landscape"}
-    layout_norm = alias_map.get(layout_norm, layout_norm)
-    orientation_map: dict[str, int | None] = {"any": None, "portrait": 1, "landscape": 2, "square": 3}
-    if layout_norm not in orientation_map:
-        raise ApiError(
-            code=ErrorCode.BAD_REQUEST,
-            message="Unsupported layout" if layout_source == "layout" else "Unsupported orientation",
-            status_code=400,
-        )
+    layout_norm, _orientation_code = parse_orientation_param(
+        str(raw_layout or ""),
+        aliases=ORIENTATION_ALIASES,
+        invalid_message="Unsupported layout" if layout_source == "layout" else "Unsupported orientation",
+    )
+    orientation_map = dict(ORIENTATION_MAP)
 
     min_width_i = int(min_width)
     min_height_i = int(min_height)

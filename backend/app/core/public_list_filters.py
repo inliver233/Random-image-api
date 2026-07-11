@@ -18,6 +18,36 @@ ORIENTATION_MAP: dict[str, int | None] = {
     "square": 3,
 }
 
+ORIENTATION_ALIASES: dict[str, str] = {
+    "vertical": "portrait",
+    "horizontal": "landscape",
+}
+
+
+def parse_ai_type_param(ai_type: str) -> tuple[str, int | None]:
+    """Parse public ai_type query token → (normalized_raw, code). Unsupported → BAD_REQUEST."""
+    ai_type_raw = (ai_type or "any").strip().lower()
+    if ai_type_raw in {"", "any"}:
+        return ai_type_raw, None
+    if ai_type_raw in {"0", "1"}:
+        return ai_type_raw, int(ai_type_raw)
+    raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported ai_type", status_code=400)
+
+
+def parse_orientation_param(
+    value: str,
+    *,
+    aliases: dict[str, str] | None = None,
+    invalid_message: str = "Unsupported orientation",
+) -> tuple[str, int | None]:
+    """Parse orientation/layout token → (normalized_name, code)."""
+    layout_norm = (value or "").strip().lower()
+    if aliases:
+        layout_norm = aliases.get(layout_norm, layout_norm)
+    if layout_norm not in ORIENTATION_MAP:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid_message, status_code=400)
+    return layout_norm, ORIENTATION_MAP[layout_norm]
+
 
 @dataclass(frozen=True, slots=True)
 class ParsedPublicListFilters:
@@ -69,18 +99,8 @@ def parse_public_list_filters(
     if r18_strict not in {0, 1}:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported r18_strict", status_code=400)
 
-    ai_type_raw = (ai_type or "any").strip().lower()
-    ai_type_i: int | None = None
-    if ai_type_raw in {"", "any"}:
-        ai_type_i = None
-    elif ai_type_raw in {"0", "1"}:
-        ai_type_i = int(ai_type_raw)
-    else:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported ai_type", status_code=400)
-
-    orientation_norm = (orientation or "").strip().lower()
-    if orientation_norm not in ORIENTATION_MAP:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported orientation", status_code=400)
+    _, ai_type_i = parse_ai_type_param(ai_type)
+    orientation_norm, orientation_code = parse_orientation_param(orientation)
 
     if min_width < 0 or min_height < 0 or min_pixels < 0:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported min_*", status_code=400)
@@ -115,7 +135,7 @@ def parse_public_list_filters(
         r18=int(r18),
         r18_strict=int(r18_strict),
         ai_type_i=ai_type_i,
-        orientation_code=ORIENTATION_MAP[orientation_norm],
+        orientation_code=orientation_code,
         min_width_i=int(min_width),
         min_height_i=int(min_height),
         min_pixels_i=int(min_pixels),

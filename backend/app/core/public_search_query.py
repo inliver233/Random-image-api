@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.errors import ApiError, ErrorCode
 
 
@@ -26,27 +27,23 @@ def parse_public_search_query(
     q_max_len: int = 200,
     cursor_kind: Literal["int", "str"] = "int",
 ) -> ParsedPublicSearchQuery:
-    if limit < 1 or limit > int(limit_max):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported limit", status_code=400)
-
     q_norm = (q or "").strip()
     if q_norm and len(q_norm) > int(q_max_len):
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported q", status_code=400)
 
-    cursor_raw = (cursor or "").strip()
     cursor_i: int | None = None
     cursor_s: str | None = None
 
     if cursor_kind == "int":
-        if cursor_raw:
-            if not cursor_raw.isdigit():
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
-            cursor_i = int(cursor_raw)
-            if cursor_i <= 0:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
+        # Same limit/cursor contract as admin/public list int cursors.
+        parsed = parse_admin_int_cursor(limit=limit, cursor=cursor, limit_max=limit_max)
+        limit = parsed.limit
+        cursor_i = parsed.cursor_i
     else:
+        if limit < 1 or limit > int(limit_max):
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported limit", status_code=400)
         # Tag name cursors: empty => no cursor; non-empty opaque string passthrough.
-        cursor_s = cursor_raw or None
+        cursor_s = (cursor or "").strip() or None
 
     return ParsedPublicSearchQuery(
         q=q_norm or None,
