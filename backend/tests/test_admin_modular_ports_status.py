@@ -41,6 +41,7 @@ def test_admin_modular_ports_status_defaults(tmp_path: Path, monkeypatch) -> Non
         assert body["recent_dedup"]["active_backend"] == "memory"
         assert body["recent_dedup"]["using_memory_fallback"] is False
         assert body["random_service"]["backend"] == "default"
+        assert body["random_pick"]["backend"] == "sqlite"
 
 
 def test_admin_modular_ports_status_recent_redis_fallback(tmp_path: Path, monkeypatch) -> None:

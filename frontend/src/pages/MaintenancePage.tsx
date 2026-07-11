@@ -111,6 +111,7 @@ type ModularPortsStatusResponse = {
     using_memory_fallback: boolean;
   };
   random_service?: { backend: string };
+  random_pick?: { backend: string };
   request_id: string;
 };
 
@@ -428,6 +429,9 @@ export function MaintenancePage() {
               </Descriptions.Item>
               <Descriptions.Item label="Random Service">
                 <Tag>{modularPortsStatus.data.random_service?.backend ?? "default"}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Random Pick">
+                <Tag>{modularPortsStatus.data.random_pick?.backend ?? "sqlite"}</Tag>
               </Descriptions.Item>
             </Descriptions>
           ) : null}

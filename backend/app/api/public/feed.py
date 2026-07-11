@@ -67,6 +67,7 @@ async def feed_images(
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     recent_dedup = resolve_recent_dedup(getattr(request.app.state, "recent_dedup", None))
     random_service = resolve_random_service_factory(getattr(request.app.state, "random_service", None))
+    random_pick = getattr(request.app.state, "random_pick", None)
     Session = create_sessionmaker(engine)
     runtime = await resolve_runtime_for_request(request, engine)
 
@@ -162,6 +163,7 @@ async def feed_images(
                     filters=filters,
                     exclude_image_ids=list(exclude_ids) if exclude_ids else None,
                     catalog=catalog,
+                    pick=random_pick,
                 )
                 if image is None:
                     break

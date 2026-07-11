@@ -20,6 +20,7 @@ from app.core.random_engine_pick import pick_with_strategy
 from app.core.random_request import ParsedRandomFilters
 from app.core.recent_dedup import MemoryRecentDedup, RecentDedupPort
 from app.db.catalog import CatalogStore
+from app.db.random_pick_port import RandomPickPort
 
 # Cap NOT IN size for SQLite plan quality; remaining recent ids still apply logit penalties.
 RECENT_EXCLUDE_SQL_CAP = 512
@@ -42,6 +43,7 @@ class RandomService(Protocol):
         filters: ParsedRandomFilters,
         exclude_image_ids: list[int] | None = None,
         catalog: CatalogStore | None = None,
+        pick: RandomPickPort | None = None,
     ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]: ...
 
     async def try_engine_batch(
@@ -232,6 +234,7 @@ class RandomPickContext:
         filters: ParsedRandomFilters,
         exclude_image_ids: list[int] | None = None,
         catalog: CatalogStore | None = None,
+        pick: RandomPickPort | None = None,
     ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
         return await pick_with_strategy(
             session=session,
@@ -241,6 +244,7 @@ class RandomPickContext:
             filters=filters,
             exclude_image_ids=exclude_image_ids,
             catalog=catalog,
+            pick=pick,
         )
 
 

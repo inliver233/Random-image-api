@@ -203,6 +203,12 @@ async def healthz(request: Request) -> Any:
                     str(getattr(getattr(request.app.state, "random_service", None), "backend", "default") or "default")
                 ),
             },
+            # Python SQL ring-pick fallback (sqlite default).
+            "random_pick": {
+                "backend": (
+                    str(getattr(getattr(request.app.state, "random_pick", None), "backend", "sqlite") or "sqlite")
+                ),
+            },
         }
 
         resp = JSONResponse(

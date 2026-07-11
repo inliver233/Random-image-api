@@ -58,6 +58,7 @@ async def random_image(
     tag_store = resolve_tag_store(getattr(request.app.state, "tag_store", None))
     recent_dedup = resolve_recent_dedup(getattr(request.app.state, "recent_dedup", None))
     random_service = resolve_random_service_factory(getattr(request.app.state, "random_service", None))
+    random_pick = getattr(request.app.state, "random_pick", None)
     Session = create_sessionmaker(engine)
     runtime = await resolve_runtime_for_request(request, engine)
 
@@ -106,6 +107,7 @@ async def random_image(
             httpx_client=getattr(request.app.state, "httpx_client", None),
             filters=filters,
             catalog=catalog,
+            pick=random_pick,
             exclude_image_ids=exclude_image_ids,
         )
 

@@ -17,7 +17,7 @@ Implementation:
 | `RandomService.pick` | Single pick (Go dual-run + Python fallback) |
 | `RandomService.try_engine_batch` | `/feed` batch engine path |
 
-Catalog + RecentDedup remain separate ports injected into the plan / pick path.
+Catalog + RecentDedup + **RandomPickPort** (Python SQL ring) remain separate ports injected into the plan / pick path.
 
 ## Ops
 

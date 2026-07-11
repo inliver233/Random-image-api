@@ -300,6 +300,8 @@ async def modular_ports_status(
         job_requested = "sqlite"
     random_service = getattr(request.app.state, "random_service", None)
     random_backend = str(getattr(random_service, "backend", "default") or "default")
+    random_pick = getattr(request.app.state, "random_pick", None)
+    random_pick_backend = str(getattr(random_pick, "backend", "sqlite") or "sqlite")
     return admin_ok(
         request,
         payload={
@@ -322,6 +324,9 @@ async def modular_ports_status(
             },
             "random_service": {
                 "backend": random_backend,
+            },
+            "random_pick": {
+                "backend": random_pick_backend,
             },
         },
         request_id=rid,

@@ -324,15 +324,19 @@ async def pick_with_strategy(
     filters: Any,
     exclude_image_ids: list[int] | None = None,
     catalog: CatalogStore | None = None,
+    pick: Any | None = None,
 ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
     """Engine-first pick (feature flag) with Python random/quality fallback.
 
     ``pick_ctx`` is the resolved RandomPickContext plan; ``filters`` is ParsedRandomFilters.
     Routes stay thin adapters over this service entrypoint.
+    ``pick`` is optional RandomPickPort for the Python SQL ring path.
     """
     from app.core.random_engine_client import random_engine_base_url, should_route_pick_to_engine
+    from app.db.random_pick_port import resolve_random_pick
 
     store = resolve_catalog_store(catalog)
+    pick_port = resolve_random_pick(pick)
     debug_base = dict(pick_ctx.debug_base)
     engine_url = random_engine_base_url(settings) if settings is not None else None
     # Traffic roll uses process RNG only — never pick_ctx.rng (seed must stay deterministic).
@@ -394,6 +398,7 @@ async def pick_with_strategy(
             recent_exclude_image_ids=pick_ctx.recent_exclude_image_ids,
             dedup_strict=bool(pick_ctx.dedup_strict),
             debug_base=debug_base,
+            pick=pick_port,
         )
 
     return await pick_by_quality(
@@ -417,4 +422,5 @@ async def pick_with_strategy(
         velocity_smooth_days=float(pick_ctx.velocity_smooth_days),
         time_boost_enabled=bool(pick_ctx.time_boost_enabled),
         debug_base=debug_base,
+        pick=pick_port,
     )

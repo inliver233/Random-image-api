@@ -111,4 +111,5 @@ def test_healthz_reports_worker_and_queue_status_when_available(tmp_path: Path) 
     assert "modules" in body
     assert body["modules"]["image_edge"]["ready"] is False
     assert body["modules"]["random_service"]["backend"] == "default"
+    assert body["modules"]["random_pick"]["backend"] == "sqlite"
     assert body["modules"]["catalog"]["backend"] == "sqlite"

@@ -4,7 +4,7 @@ import math
 from typing import Any
 
 from app.core.recommendation import multiplier_for_image, score_image_with_time_boosts
-from app.db.random_pick import pick_random_image, pick_random_images
+from app.db.random_pick_port import RandomPickPort, resolve_random_pick
 
 
 async def pick_by_random_key(
@@ -17,15 +17,17 @@ async def pick_by_random_key(
     recent_exclude_image_ids: list[int],
     dedup_strict: bool,
     debug_base: dict[str, Any],
+    pick: RandomPickPort | None = None,
 ) -> tuple[Any | None, dict[str, Any]]:
+    port = resolve_random_pick(pick)
     base_exclude = list(exclude_image_ids or [])
     exclude_set: set[int] = set(int(x) for x in base_exclude)
     if bool(anti_repeat_enabled) and recent_exclude_image_ids:
         exclude_set.update(int(x) for x in recent_exclude_image_ids)
 
-    image = await pick_random_image(session, r=rng.random(), exclude_image_ids=list(exclude_set), **pick_kwargs)
+    image = await port.pick_one(session, r=rng.random(), exclude_image_ids=list(exclude_set), **pick_kwargs)
     if image is None and bool(anti_repeat_enabled) and bool(recent_exclude_image_ids) and not bool(dedup_strict):
-        image = await pick_random_image(session, r=rng.random(), exclude_image_ids=base_exclude, **pick_kwargs)
+        image = await port.pick_one(session, r=rng.random(), exclude_image_ids=base_exclude, **pick_kwargs)
     if image is None:
         return None, {**debug_base, "attempts_used": 1, "picked_by": "random_key"}
     return image, {**debug_base, "attempts_used": 1, "picked_by": "random_key"}
@@ -53,6 +55,7 @@ async def pick_by_quality(
     velocity_smooth_days: float,
     time_boost_enabled: bool,
     debug_base: dict[str, Any],
+    pick: RandomPickPort | None = None,
 ) -> tuple[Any | None, dict[str, Any]]:
     base_exclude_set: set[int] = set(int(x) for x in exclude_image_ids or [])
     exclude_set: set[int] = set(base_exclude_set)
@@ -92,7 +95,8 @@ async def pick_by_quality(
             "quality_temperature": float(temperature),
         }
 
-    images = await pick_random_images(
+    port = resolve_random_pick(pick)
+    images = await port.pick_many(
         session,
         r=rng.random(),
         limit=int(quality_samples_i),
@@ -102,7 +106,7 @@ async def pick_by_quality(
         **pick_kwargs,
     )
     if not images and bool(anti_repeat_enabled) and bool(recent_exclude_image_ids) and not bool(dedup_strict):
-        images = await pick_random_images(
+        images = await port.pick_many(
             session,
             r=rng.random(),
             limit=int(quality_samples_i),
