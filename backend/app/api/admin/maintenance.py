@@ -98,9 +98,19 @@ async def random_engine_status(
     settings = getattr(request.app.state, "settings", None)
     base = random_engine_base_url(settings) if settings is not None else None
     enabled = bool(getattr(settings, "random_engine_enabled", False)) if settings is not None else False
+    traffic_percent = (
+        int(getattr(settings, "random_engine_traffic_percent", 100) or 0) if settings is not None else 0
+    )
+    if traffic_percent < 0:
+        traffic_percent = 0
+    if traffic_percent > 100:
+        traffic_percent = 100
+    timeout_ms = int(getattr(settings, "random_engine_timeout_ms", 800) or 800) if settings is not None else 800
     payload: dict[str, Any] = {
         "enabled": enabled,
         "url": base or "",
+        "traffic_percent": traffic_percent,
+        "timeout_ms": timeout_ms,
         "healthy": False,
         "health": None,
     }

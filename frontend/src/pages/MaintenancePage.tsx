@@ -1,8 +1,9 @@
-import { useMutation } from "@tanstack/react-query";
-import { Button, Card, Form, InputNumber, Skeleton, Space, Switch, Typography } from "antd";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Button, Card, Descriptions, Form, InputNumber, Skeleton, Space, Switch, Tag, Typography } from "antd";
 import React from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 
@@ -23,9 +24,35 @@ type CleanupResponse = {
   request_id: string;
 };
 
+type RandomEngineStatusResponse = {
+  ok: true;
+  enabled: boolean;
+  url: string;
+  traffic_percent?: number;
+  timeout_ms?: number;
+  healthy: boolean;
+  health: Record<string, unknown> | null;
+  request_id: string;
+};
+
+type RandomEngineSnapshotResponse = {
+  ok: true;
+  revision: string;
+  engine: Record<string, unknown>;
+  request_id: string;
+};
+
 export function MaintenancePage() {
   const [form] = Form.useForm<CleanupFormValues>();
   const alerts = useActionAlerts();
+  const engineAlerts = useActionAlerts();
+  const queryClient = useQueryClient();
+
+  const engineStatus = useQuery({
+    queryKey: ["admin", "maintenance", "random-engine"],
+    queryFn: () => apiJson<RandomEngineStatusResponse>("/admin/api/maintenance/random-engine"),
+    refetchInterval: 15_000,
+  });
 
   const cleanup = useMutation({
     mutationFn: (values: CleanupFormValues) =>
@@ -53,11 +80,88 @@ export function MaintenancePage() {
     },
   });
 
+  const pushSnapshot = useMutation({
+    mutationFn: () =>
+      apiJson<RandomEngineSnapshotResponse>("/admin/api/maintenance/random-engine/snapshot", {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    onMutate: () => {
+      engineAlerts.clear();
+    },
+    onSuccess: (data) => {
+      engineAlerts.setSuccess(`快照已推送 revision=${data.revision}`, data.request_id);
+      void queryClient.invalidateQueries({ queryKey: ["admin", "maintenance", "random-engine"] });
+    },
+    onError: (err) => {
+      engineAlerts.setError(err);
+    },
+  });
+
+  const engine = engineStatus.data;
+  const health = engine?.health && typeof engine.health === "object" ? engine.health : null;
+  const indexSize =
+    health && typeof (health as { index_size?: unknown }).index_size === "number"
+      ? Number((health as { index_size: number }).index_size)
+      : null;
+  const revision =
+    health && typeof (health as { snapshot_revision?: unknown }).snapshot_revision === "string"
+      ? String((health as { snapshot_revision: string }).snapshot_revision)
+      : null;
+
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       <Typography.Title level={3} style={{ margin: 0 }}>
         维护工具
       </Typography.Title>
+
+      <Card title="Random Engine（Go 双跑）">
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          只读状态 + 全量快照推送。切流由环境变量控制（默认关）：RANDOM_ENGINE_ENABLED /
+          RANDOM_ENGINE_TRAFFIC_PERCENT。未配置 URL 时推送会失败。
+        </Typography.Paragraph>
+
+        <QueryState query={engineStatus}>
+          {engine ? (
+            <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
+              <Descriptions.Item label="URL">{engine.url || "（未配置）"}</Descriptions.Item>
+              <Descriptions.Item label="双跑开关">
+                {engine.enabled ? <Tag color="green">ENABLED</Tag> : <Tag>OFF</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="切流 %">
+                {typeof engine.traffic_percent === "number" ? engine.traffic_percent : "—"}
+              </Descriptions.Item>
+              <Descriptions.Item label="超时 ms">
+                {typeof engine.timeout_ms === "number" ? engine.timeout_ms : "—"}
+              </Descriptions.Item>
+              <Descriptions.Item label="健康">
+                {engine.healthy ? <Tag color="green">healthy</Tag> : <Tag color="orange">unreachable</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="索引规模">{indexSize ?? "—"}</Descriptions.Item>
+              <Descriptions.Item label="快照 revision">{revision || "—"}</Descriptions.Item>
+            </Descriptions>
+          ) : null}
+        </QueryState>
+
+        <Space wrap>
+          <Button onClick={() => void engineStatus.refetch()} loading={engineStatus.isFetching}>
+            刷新状态
+          </Button>
+          <Button type="primary" onClick={() => pushSnapshot.mutate()} loading={pushSnapshot.isPending}>
+            推送全量快照
+          </Button>
+        </Space>
+
+        <div style={{ marginTop: 16 }}>
+          <ActionAlerts
+            message={engineAlerts.message}
+            requestId={engineAlerts.requestId}
+            errorMessage={engineAlerts.errorMessage}
+            errorRequestId={engineAlerts.errorRequestId}
+            requestIdPlacement="description"
+          />
+        </div>
+      </Card>
 
       <Card title="请求日志清理">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
