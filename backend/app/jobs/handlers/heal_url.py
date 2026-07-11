@@ -74,7 +74,12 @@ def build_heal_url_handler(
                 catalog=catalog_store,
                 tag_store=tag_store_port,
             )
-            await maybe_enqueue_r2_prewarm(image_ids=list(healed_ids), settings=s)
+            await maybe_enqueue_r2_prewarm(
+                image_ids=list(healed_ids),
+                settings=s,
+                engine=engine,
+                catalog=catalog_store,
+            )
 
     return _handler
 

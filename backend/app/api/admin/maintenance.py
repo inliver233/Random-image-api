@@ -11,7 +11,7 @@ from app.core.admin_json import admin_ok
 from app.core.admin_request import load_json_object_optional, load_json_object, parse_bool, parse_int_in_range
 from app.core.cf_api_proxy import load_cf_api_proxy_config_from_settings
 from app.core.image_edge import load_image_edge_config_from_settings
-from app.core.r2_prewarm import r2_prewarm_enabled, r2_prewarm_url
+from app.core.r2_prewarm import r2_prewarm_enabled, r2_prewarm_secret, r2_prewarm_url
 from app.core.random_defaults import resolve_fail_cooldown_ms, resolve_r18_strict
 from app.core.random_engine_client import engine_filter_count, engine_health, random_engine_base_url
 from app.core.random_engine_pick import build_engine_filters
@@ -186,8 +186,9 @@ async def r2_prewarm_status(
 ) -> dict[str, Any]:
     """Read-only R2 prewarm webhook status (never returns full secrets).
 
-    BFF best-effort POST of image_ids after hydrate/import/heal when enabled.
-    Worker R2 binding / R2_MODE is separate (edge/img-worker).
+    BFF maps catalog image_ids → pximg paths, then POSTs Worker
+    ``POST /v1/prewarm`` with ``{paths}`` + ``X-Prewarm-Secret`` after
+    hydrate/import/heal when enabled. Worker R2 binding / R2_MODE is separate.
     """
     _ = _claims
     rid = get_or_create_request_id(request)
@@ -196,11 +197,14 @@ async def r2_prewarm_status(
     raw_url = str(getattr(settings, "r2_prewarm_url", "") or "").strip() if settings is not None else ""
     ready = r2_prewarm_enabled(settings) if settings is not None else False
     url = r2_prewarm_url(settings) if settings is not None else None
+    secret_configured = bool(r2_prewarm_secret(settings)) if settings is not None else False
     missing: list[str] = []
     if not flag_enabled:
         missing.append("R2_PREWARM_ENABLED")
     if not raw_url:
         missing.append("R2_PREWARM_URL")
+    if ready and not secret_configured:
+        missing.append("R2_PREWARM_SECRET|IMAGE_EDGE_SECRET")
     # Never return the full URL if it embeds credentials; only host-ish preview.
     url_preview = ""
     if url:
@@ -215,8 +219,10 @@ async def r2_prewarm_status(
         request,
         payload={
             "enabled_flag": flag_enabled,
-            "ready": ready,
+            "ready": ready and secret_configured,
             "url_configured": bool(raw_url),
+            "secret_configured": secret_configured,
+            "payload_shape": "paths",
             "url_preview": url_preview,
             "missing": missing,
         },

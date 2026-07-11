@@ -106,8 +106,17 @@ Header: X-Prewarm-Secret: {PREWARM_SECRET or IMAGE_EDGE_SECRET}
 Body: { "paths": ["/img-original/img/.../x_p0.jpg", ...] }   // max 50, allowlisted paths only
 ```
 
-Fetches each path via the same origin/mirror chain and stores into R2 (+ warms Cache).  
-BFF hook `R2_PREWARM_URL` posts `{image_ids}` to an external consumer; map ids→paths in that consumer or call `/v1/prewarm` with paths directly.
+Fetches each path via the same origin/mirror chain and stores into R2 (+ warms Cache).
+
+BFF adapter (`backend/app/core/r2_prewarm.py`, default off):
+
+| Env | Role |
+| --- | --- |
+| `R2_PREWARM_ENABLED` | Master flag (also requires URL) |
+| `R2_PREWARM_URL` | Worker base (e.g. `https://img.example.com`) |
+| `R2_PREWARM_SECRET` / `PREWARM_SECRET` | `X-Prewarm-Secret`; falls back to `IMAGE_EDGE_SECRET` |
+
+After hydrate/import/heal catalog upserts, BFF resolves `image_ids` → `original_url` via CatalogStore, allowlists paths, and POSTs `{ "paths": [...] }` in chunks of 50. Call sites pass `engine=` + optional `catalog=`.
 
 Backend note: pure edge **302** does **not** call `mark_image_ok` (bytes not verified). Local stream path still marks ok/fail.
 

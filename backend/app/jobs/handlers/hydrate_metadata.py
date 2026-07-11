@@ -1277,7 +1277,12 @@ LIMIT 1;
                     catalog=catalog_store,
                     tag_store=tags_store,
                 )
-                await maybe_enqueue_r2_prewarm(image_ids=list(persisted_ids), settings=settings)
+                await maybe_enqueue_r2_prewarm(
+                    image_ids=list(persisted_ids),
+                    settings=settings,
+                    engine=engine,
+                    catalog=catalog_store,
+                )
             await _mark_token_ok(token_id, now_dt=now_dt)
             return
 

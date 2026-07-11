@@ -61,6 +61,8 @@ class Settings:
     # Optional R2 prewarm webhook after catalog upserts (Phase 2; default off).
     r2_prewarm_enabled: bool
     r2_prewarm_url: str
+    # Worker X-Prewarm-Secret; empty falls back to IMAGE_EDGE_SECRET at call time.
+    r2_prewarm_secret: str
     # Optional CF Worker API egress pool for hydrate/OAuth (residential proxy fallback).
     cf_api_proxy_enabled: bool
     cf_api_proxy_base_urls: list[str]
@@ -269,6 +271,12 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     )
     r2_prewarm_url = _get(env, "R2_PREWARM_URL", "").rstrip("/")
     r2_prewarm_enabled = parse_bool_env("R2_PREWARM_ENABLED", default=False, env=env) and bool(r2_prewarm_url)
+    # Prefer dedicated prewarm secret; IMAGE_EDGE_SECRET is Worker fallback (authorizePrewarm).
+    r2_prewarm_secret = (
+        _get(env, "R2_PREWARM_SECRET", "")
+        or _get(env, "PREWARM_SECRET", "")
+        or _get(env, "IMAGE_EDGE_SECRET", "")
+    )
 
     cf_api_proxy_enabled = parse_bool_env("CF_API_PROXY_ENABLED", default=False, env=env)
     cf_api_proxy_secret = _get(env, "CF_API_PROXY_SECRET", "")
@@ -314,6 +322,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         random_engine_traffic_percent=random_engine_traffic_percent,
         r2_prewarm_enabled=r2_prewarm_enabled,
         r2_prewarm_url=r2_prewarm_url,
+        r2_prewarm_secret=r2_prewarm_secret,
         cf_api_proxy_enabled=cf_api_proxy_enabled,
         cf_api_proxy_base_urls=cf_api_proxy_base_urls,
         cf_api_proxy_secret=cf_api_proxy_secret,

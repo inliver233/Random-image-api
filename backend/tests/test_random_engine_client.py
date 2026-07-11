@@ -30,6 +30,7 @@ def test_random_engine_settings_default_off() -> None:
     assert s.random_engine_traffic_percent == 100
     assert s.r2_prewarm_enabled is False
     assert s.r2_prewarm_url == ""
+    assert s.r2_prewarm_secret == ""
     assert random_engine_base_url(s) is None
     assert should_route_pick_to_engine(s) is False
     assert r2_prewarm_enabled(s) is False

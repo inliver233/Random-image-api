@@ -52,6 +52,7 @@ def test_admin_r2_prewarm_status_ready_no_url_leak(tmp_path: Path, monkeypatch) 
     monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
     monkeypatch.setenv("R2_PREWARM_ENABLED", "1")
     monkeypatch.setenv("R2_PREWARM_URL", "https://prewarm.example.com/hook?token=super-secret")
+    monkeypatch.setenv("IMAGE_EDGE_SECRET", "edge-secret-for-prewarm")
 
     app = create_app()
     with TestClient(app) as client:
@@ -71,6 +72,9 @@ def test_admin_r2_prewarm_status_ready_no_url_leak(tmp_path: Path, monkeypatch) 
         assert body["enabled_flag"] is True
         assert body["ready"] is True
         assert body["url_configured"] is True
+        assert body["secret_configured"] is True
+        assert body["payload_shape"] == "paths"
         assert body["url_preview"] == "https://prewarm.example.com"
         assert "super-secret" not in str(body)
+        assert "edge-secret-for-prewarm" not in str(body)
         assert body["missing"] == []

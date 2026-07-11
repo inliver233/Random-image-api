@@ -256,7 +256,12 @@ def build_import_images_handler(
                     catalog=catalog_store,
                     tag_store=tag_store_port,
                 )
-                await maybe_enqueue_r2_prewarm(image_ids=list(image_ids), settings=s)
+                await maybe_enqueue_r2_prewarm(
+                    image_ids=list(image_ids),
+                    settings=s,
+                    engine=engine,
+                    catalog=catalog_store,
+                )
             return list(image_ids or [])
 
         if input_format == "pixiv_batch_downloader_json":

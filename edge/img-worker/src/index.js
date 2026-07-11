@@ -368,7 +368,7 @@ function authorizePrewarm(request, env) {
  * Body: { "paths": ["/img-original/..."] }  (max 50)
  * Auth: X-Prewarm-Secret == PREWARM_SECRET or IMAGE_EDGE_SECRET
  *
- * Note: BFF r2_prewarm.py posts image_ids; use scripts/edge or a BFF adapter to map ids→paths.
+ * BFF r2_prewarm.py maps catalog image_ids → paths and POSTs this shape when R2_PREWARM_* is on.
  */
 async function handlePrewarm(request, env, ctx) {
   if (request.method === "OPTIONS") {
