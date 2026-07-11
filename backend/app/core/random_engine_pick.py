@@ -5,6 +5,7 @@ from typing import Any, Mapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.random_engine_client import engine_pick
+from app.core.random_strategy import pick_by_quality, pick_by_random_key
 from app.db.images_get import get_image_by_id
 
 
@@ -161,3 +162,145 @@ async def try_pick_via_engine(
     meta["engine_image_id"] = image_id
     meta["picked_by"] = "random_engine"
     return image, meta
+
+
+async def pick_with_strategy(
+    *,
+    session: Any,
+    settings: Any,
+    httpx_client: Any,
+    rng: Any,
+    pick_kwargs: dict[str, Any],
+    debug_base: dict[str, Any],
+    strategy_norm: str,
+    seed_norm: str,
+    r18: int,
+    r18_strict: int,
+    ai_type_raw: str,
+    ai_type_i: int | None,
+    illust_type_i: int | None,
+    orientation_code: int | None,
+    min_width_i: int,
+    min_height_i: int,
+    min_pixels_i: int,
+    min_bookmarks_i: int,
+    min_views_i: int,
+    min_comments_i: int,
+    included: list[str],
+    excluded: list[str],
+    user_id: int | None,
+    illust_id: int | None,
+    created_from_norm: str | None,
+    created_to_norm: str | None,
+    fail_cooldown_before: str | None,
+    quality_samples_i: int,
+    pick_mode_raw: str,
+    temperature: float,
+    score_weights: Mapping[str, Any],
+    multipliers: Mapping[str, Any],
+    freshness_half_life_days: float,
+    velocity_smooth_days: float,
+    time_boost_enabled: bool,
+    anti_repeat_enabled: bool,
+    recent_exclude_image_ids: list[int],
+    recent_image_ids: set[int],
+    recent_author_ids: set[int],
+    dedup_strict: bool,
+    dedup_image_penalty: float,
+    dedup_author_penalty: float,
+    exclude_image_ids: list[int] | None = None,
+) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
+    """Engine-first pick (feature flag) with Python random/quality fallback."""
+    engine_enabled = bool(getattr(settings, "random_engine_enabled", False))
+    engine_url = str(getattr(settings, "random_engine_url", "") or "").strip().rstrip("/")
+    if engine_enabled and engine_url and httpx_client is not None:
+        base_exclude = list(exclude_image_ids or [])
+        exclude_set: set[int] = set(int(x) for x in base_exclude)
+        if bool(anti_repeat_enabled) and recent_exclude_image_ids:
+            exclude_set.update(int(x) for x in recent_exclude_image_ids)
+
+        engine_filters = build_engine_filters(
+            r18=int(r18),
+            r18_strict=int(r18_strict),
+            ai_type_raw=ai_type_raw,
+            ai_type_i=ai_type_i,
+            illust_type_i=illust_type_i,
+            orientation_code=orientation_code,
+            min_width_i=int(min_width_i),
+            min_height_i=int(min_height_i),
+            min_pixels_i=int(min_pixels_i),
+            min_bookmarks_i=int(min_bookmarks_i),
+            min_views_i=int(min_views_i),
+            min_comments_i=int(min_comments_i),
+            included=included,
+            excluded=excluded,
+            exclude_image_ids=exclude_set,
+            user_id=user_id,
+            illust_id=illust_id,
+            created_from_norm=created_from_norm,
+            created_to_norm=created_to_norm,
+            fail_cooldown_before=fail_cooldown_before,
+        )
+        quality_params = build_engine_quality_params(
+            strategy_norm=strategy_norm,
+            quality_samples_i=int(quality_samples_i),
+            pick_mode_raw=pick_mode_raw,
+            temperature=float(temperature),
+            score_weights=score_weights,
+            multipliers=multipliers,
+            freshness_half_life_days=float(freshness_half_life_days),
+            velocity_smooth_days=float(velocity_smooth_days),
+        )
+        payload = build_engine_pick_payload(
+            filters=engine_filters,
+            strategy=strategy_norm,
+            quality=quality_params,
+            seed=seed_norm or None,
+            limit=1,
+            debug=False,
+        )
+        timeout_s = float(getattr(settings, "random_engine_timeout_ms", 800) or 800) / 1000.0
+        image, eng_meta = await try_pick_via_engine(
+            client=httpx_client,
+            base_url=engine_url,
+            session=session,
+            payload=payload,
+            timeout_s=timeout_s,
+        )
+        if image is not None:
+            return image, {**debug_base, "attempts_used": 1, **eng_meta}
+
+    if strategy_norm == "random":
+        return await pick_by_random_key(
+            session=session,
+            rng=rng,
+            pick_kwargs=pick_kwargs,
+            exclude_image_ids=exclude_image_ids,
+            anti_repeat_enabled=bool(anti_repeat_enabled),
+            recent_exclude_image_ids=recent_exclude_image_ids,
+            dedup_strict=bool(dedup_strict),
+            debug_base=debug_base,
+        )
+
+    return await pick_by_quality(
+        session=session,
+        rng=rng,
+        pick_kwargs=pick_kwargs,
+        exclude_image_ids=exclude_image_ids,
+        anti_repeat_enabled=bool(anti_repeat_enabled),
+        recent_exclude_image_ids=recent_exclude_image_ids,
+        recent_image_ids=recent_image_ids,
+        recent_author_ids=recent_author_ids,
+        dedup_strict=bool(dedup_strict),
+        dedup_image_penalty=float(dedup_image_penalty),
+        dedup_author_penalty=float(dedup_author_penalty),
+        quality_samples_i=int(quality_samples_i),
+        pick_mode_raw=pick_mode_raw,
+        temperature=float(temperature),
+        score_weights=score_weights,
+        multipliers=multipliers,
+        freshness_half_life_days=float(freshness_half_life_days),
+        velocity_smooth_days=float(velocity_smooth_days),
+        time_boost_enabled=bool(time_boost_enabled),
+        debug_base=debug_base,
+    )

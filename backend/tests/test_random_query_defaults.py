@@ -4,6 +4,8 @@ import pytest
 
 from app.core.errors import ApiError
 from app.core.random_defaults import (
+    build_pick_kwargs,
+    build_random_debug_base,
     resolve_attempts,
     resolve_dedup,
     resolve_quality_samples,
@@ -253,3 +255,69 @@ def test_build_json_bodies() -> None:
     )
     assert full["data"]["tags"] == ["x"]
     assert full["data"]["image"]["title"] == "t"
+
+
+def test_build_pick_kwargs_shape() -> None:
+    kw = build_pick_kwargs(
+        r18=0,
+        r18_strict=1,
+        ai_type_i=None,
+        illust_type_i=0,
+        orientation=1,
+        min_width_i=100,
+        min_height_i=200,
+        min_pixels_i=1000,
+        min_bookmarks_i=1,
+        min_views_i=2,
+        min_comments_i=3,
+        included=["a", "b"],
+        excluded=["c"],
+        user_id=9,
+        illust_id=None,
+        created_from_norm="2020-01-01T00:00:00Z",
+        created_to_norm=None,
+        fail_cooldown_before="2024-01-01T00:00:00.000Z",
+    )
+    assert kw["r18"] == 0
+    assert kw["r18_strict"] is True
+    assert kw["orientation"] == 1
+    assert kw["included_tags"] == ["a", "b"]
+    assert kw["excluded_tags"] == ["c"]
+    assert kw["user_id"] == 9
+    assert kw["created_from"] == "2020-01-01T00:00:00Z"
+    assert kw["fail_cooldown_before"] == "2024-01-01T00:00:00.000Z"
+
+
+def test_build_random_debug_base_keys() -> None:
+    dbg = build_random_debug_base(
+        attempts=3,
+        attempts_source="fallback",
+        r18_strict=1,
+        r18_strict_source="fallback",
+        fail_cooldown_ms=0,
+        fail_cooldown_source="fallback",
+        strategy_norm="quality",
+        strategy_source="fallback",
+        quality_samples_i=12,
+        quality_samples_base=12,
+        quality_samples_multiplier=1,
+        quality_samples_scaled=False,
+        quality_samples_source="fallback",
+        anti_repeat_enabled=True,
+        dedup_enabled_setting=True,
+        dedup_window_s=1200.0,
+        dedup_max_images=5000,
+        dedup_max_authors=2000,
+        dedup_strict=False,
+        dedup_image_penalty=2.0,
+        dedup_author_penalty=1.0,
+        time_boost_enabled=True,
+        recommendation_source="fallback",
+        rec_override_keys=["rec_pick_mode"],
+        freshness_half_life_days=30.0,
+        velocity_smooth_days=7.0,
+    )
+    assert dbg["strategy"] == "quality"
+    assert dbg["anti_repeat_enabled"] is True
+    assert dbg["recommendation_query_overrides"] == ["rec_pick_mode"]
+    assert dbg["quality_samples"] == 12

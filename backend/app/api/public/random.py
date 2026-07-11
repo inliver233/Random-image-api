@@ -16,6 +16,8 @@ from app.core.pximg_reverse_proxy import (
 )
 from app.core.recent_dedup import get_recent_lists, record_recent
 from app.core.random_defaults import (
+    build_pick_kwargs,
+    build_random_debug_base,
     resolve_attempts,
     resolve_dedup,
     resolve_fail_cooldown_ms,
@@ -30,16 +32,11 @@ from app.core.random_delivery import (
     build_edge_redirect_response,
     deliver_random_image_stream,
 )
-from app.core.random_engine_pick import (
-    build_engine_filters,
-    build_engine_pick_payload,
-    build_engine_quality_params,
-    try_pick_via_engine,
-)
+from app.core.random_engine_pick import pick_with_strategy
 from app.core.random_query import build_no_match_error
 from app.core.random_request import local_i_query_string, parse_random_filters, prefer_image_edge
 from app.core.random_response import build_json_body, build_simple_json_body
-from app.core.random_strategy import needs_opportunistic_hydrate, pick_by_quality, pick_by_random_key
+from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.runtime_config_cache import get_cached_runtime_config
 from app.db.tags_get import get_tag_names_for_image
 from app.db.session import create_sessionmaker
@@ -198,26 +195,26 @@ async def random_image(
 
     fail_cooldown_ms_i, fail_cooldown_source, fail_cooldown_before = resolve_fail_cooldown_ms(random_defaults)
 
-    pick_kwargs: dict[str, Any] = {
-        "r18": r18,
-        "r18_strict": bool(r18_strict),
-        "ai_type": ai_type_i,
-        "illust_type": illust_type_i,
-        "orientation": orientation_map[layout_norm],
-        "min_width": int(min_width_i),
-        "min_height": int(min_height_i),
-        "min_pixels": int(min_pixels_i),
-        "min_bookmarks": int(min_bookmarks_i),
-        "min_views": int(min_views_i),
-        "min_comments": int(min_comments_i),
-        "included_tags": included,
-        "excluded_tags": excluded,
-        "user_id": user_id,
-        "illust_id": illust_id,
-        "created_from": created_from_norm,
-        "created_to": created_to_norm,
-        "fail_cooldown_before": fail_cooldown_before,
-    }
+    pick_kwargs: dict[str, Any] = build_pick_kwargs(
+        r18=int(r18),
+        r18_strict=int(r18_strict),
+        ai_type_i=ai_type_i,
+        illust_type_i=illust_type_i,
+        orientation=orientation_map[layout_norm],
+        min_width_i=int(min_width_i),
+        min_height_i=int(min_height_i),
+        min_pixels_i=int(min_pixels_i),
+        min_bookmarks_i=int(min_bookmarks_i),
+        min_views_i=int(min_views_i),
+        min_comments_i=int(min_comments_i),
+        included=included,
+        excluded=excluded,
+        user_id=user_id,
+        illust_id=illust_id,
+        created_from_norm=created_from_norm,
+        created_to_norm=created_to_norm,
+        fail_cooldown_before=fail_cooldown_before,
+    )
 
     rng = random.Random(seed_norm) if seed_norm else random
     time_boost_enabled = not bool(seed_norm)
@@ -289,129 +286,68 @@ async def random_image(
     freshness_half_life_days = float(rec_cfg.freshness_half_life_days)
     velocity_smooth_days = float(rec_cfg.velocity_smooth_days)
 
-    debug_base = {
-        "attempts": int(attempts),
-        "attempts_source": attempts_source,
-        "r18_strict": int(r18_strict),
-        "r18_strict_source": r18_strict_source,
-        "fail_cooldown_ms": int(fail_cooldown_ms_i),
-        "fail_cooldown_source": fail_cooldown_source,
-        "strategy": strategy_norm,
-        "strategy_source": strategy_source,
-        "quality_samples": int(quality_samples_i),
-        "quality_samples_base": int(quality_samples_base),
-        "quality_samples_multiplier": int(quality_samples_multiplier),
-        "quality_samples_scaled": bool(quality_samples_scaled),
-        "quality_samples_source": quality_samples_source,
-        "anti_repeat_enabled": bool(anti_repeat_enabled),
-        "dedup_enabled": bool(dedup_enabled_setting),
-        "dedup_window_s": float(dedup_window_s),
-        "dedup_max_images": int(dedup_max_images),
-        "dedup_max_authors": int(dedup_max_authors),
-        "dedup_strict": bool(dedup_strict),
-        "dedup_image_penalty": float(dedup_image_penalty),
-        "dedup_author_penalty": float(dedup_author_penalty),
-        "time_boost_enabled": bool(time_boost_enabled),
-        "recommendation_source": recommendation_source,
-        "recommendation_query_overrides": list(rec_override_keys or []),
-        "freshness_half_life_days": float(freshness_half_life_days),
-        "velocity_smooth_days": float(velocity_smooth_days),
-    }
+    debug_base = build_random_debug_base(
+        attempts=int(attempts),
+        attempts_source=attempts_source,
+        r18_strict=int(r18_strict),
+        r18_strict_source=r18_strict_source,
+        fail_cooldown_ms=int(fail_cooldown_ms_i),
+        fail_cooldown_source=fail_cooldown_source,
+        strategy_norm=strategy_norm,
+        strategy_source=strategy_source,
+        quality_samples_i=int(quality_samples_i),
+        quality_samples_base=int(quality_samples_base),
+        quality_samples_multiplier=int(quality_samples_multiplier),
+        quality_samples_scaled=bool(quality_samples_scaled),
+        quality_samples_source=quality_samples_source,
+        anti_repeat_enabled=bool(anti_repeat_enabled),
+        dedup_enabled_setting=bool(dedup_enabled_setting),
+        dedup_window_s=float(dedup_window_s),
+        dedup_max_images=int(dedup_max_images),
+        dedup_max_authors=int(dedup_max_authors),
+        dedup_strict=bool(dedup_strict),
+        dedup_image_penalty=float(dedup_image_penalty),
+        dedup_author_penalty=float(dedup_author_penalty),
+        time_boost_enabled=bool(time_boost_enabled),
+        recommendation_source=recommendation_source,
+        rec_override_keys=list(rec_override_keys or []),
+        freshness_half_life_days=float(freshness_half_life_days),
+        velocity_smooth_days=float(velocity_smooth_days),
+    )
 
     async def _pick_with_strategy(
         *,
         session: Any,
         exclude_image_ids: list[int] | None = None,
     ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
-        # Optional Go random-engine path (feature flag). On any miss/unavailable, fall back to Python.
-        settings = getattr(request.app.state, "settings", None)
-        engine_enabled = bool(getattr(settings, "random_engine_enabled", False))
-        engine_url = str(getattr(settings, "random_engine_url", "") or "").strip().rstrip("/")
-        httpx_client = getattr(request.app.state, "httpx_client", None)
-        if engine_enabled and engine_url and httpx_client is not None:
-            base_exclude = list(exclude_image_ids or [])
-            exclude_set: set[int] = set(int(x) for x in base_exclude)
-            if bool(anti_repeat_enabled) and recent_exclude_image_ids:
-                exclude_set.update(int(x) for x in recent_exclude_image_ids)
-
-            engine_filters = build_engine_filters(
-                r18=int(r18),
-                r18_strict=int(r18_strict),
-                ai_type_raw=ai_type_raw,
-                ai_type_i=ai_type_i,
-                illust_type_i=illust_type_i,
-                orientation_code=orientation_map[layout_norm],
-                min_width_i=int(min_width_i),
-                min_height_i=int(min_height_i),
-                min_pixels_i=int(min_pixels_i),
-                min_bookmarks_i=int(min_bookmarks_i),
-                min_views_i=int(min_views_i),
-                min_comments_i=int(min_comments_i),
-                included=included,
-                excluded=excluded,
-                exclude_image_ids=exclude_set,
-                user_id=user_id,
-                illust_id=illust_id,
-                created_from_norm=created_from_norm,
-                created_to_norm=created_to_norm,
-                fail_cooldown_before=fail_cooldown_before,
-            )
-            quality_params = build_engine_quality_params(
-                strategy_norm=strategy_norm,
-                quality_samples_i=int(quality_samples_i),
-                pick_mode_raw=pick_mode_raw,
-                temperature=float(temperature),
-                score_weights=score_weights,
-                multipliers=multipliers,
-                freshness_half_life_days=float(freshness_half_life_days),
-                velocity_smooth_days=float(velocity_smooth_days),
-            )
-
-            payload = build_engine_pick_payload(
-                filters=engine_filters,
-                strategy=strategy_norm,
-                quality=quality_params,
-                seed=seed_norm or None,
-                limit=1,
-                debug=False,
-            )
-            timeout_s = float(getattr(settings, "random_engine_timeout_ms", 800) or 800) / 1000.0
-            image, eng_meta = await try_pick_via_engine(
-                client=httpx_client,
-                base_url=engine_url,
-                session=session,
-                payload=payload,
-                timeout_s=timeout_s,
-            )
-            if image is not None:
-                return image, {**debug_base, "attempts_used": 1, **eng_meta}
-            # Soft no-match from a healthy engine: still fall back to Python (index may be stale).
-            # Hard unavailable also falls through.
-
-        if strategy_norm == "random":
-            return await pick_by_random_key(
-                session=session,
-                rng=rng,
-                pick_kwargs=pick_kwargs,
-                exclude_image_ids=exclude_image_ids,
-                anti_repeat_enabled=bool(anti_repeat_enabled),
-                recent_exclude_image_ids=recent_exclude_image_ids,
-                dedup_strict=bool(dedup_strict),
-                debug_base=debug_base,
-            )
-
-        return await pick_by_quality(
+        return await pick_with_strategy(
             session=session,
+            settings=getattr(request.app.state, "settings", None),
+            httpx_client=getattr(request.app.state, "httpx_client", None),
             rng=rng,
             pick_kwargs=pick_kwargs,
-            exclude_image_ids=exclude_image_ids,
-            anti_repeat_enabled=bool(anti_repeat_enabled),
-            recent_exclude_image_ids=recent_exclude_image_ids,
-            recent_image_ids=recent_image_ids,
-            recent_author_ids=recent_author_ids,
-            dedup_strict=bool(dedup_strict),
-            dedup_image_penalty=float(dedup_image_penalty),
-            dedup_author_penalty=float(dedup_author_penalty),
+            debug_base=debug_base,
+            strategy_norm=strategy_norm,
+            seed_norm=seed_norm,
+            r18=int(r18),
+            r18_strict=int(r18_strict),
+            ai_type_raw=ai_type_raw,
+            ai_type_i=ai_type_i,
+            illust_type_i=illust_type_i,
+            orientation_code=orientation_map[layout_norm],
+            min_width_i=int(min_width_i),
+            min_height_i=int(min_height_i),
+            min_pixels_i=int(min_pixels_i),
+            min_bookmarks_i=int(min_bookmarks_i),
+            min_views_i=int(min_views_i),
+            min_comments_i=int(min_comments_i),
+            included=included,
+            excluded=excluded,
+            user_id=user_id,
+            illust_id=illust_id,
+            created_from_norm=created_from_norm,
+            created_to_norm=created_to_norm,
+            fail_cooldown_before=fail_cooldown_before,
             quality_samples_i=int(quality_samples_i),
             pick_mode_raw=pick_mode_raw,
             temperature=float(temperature),
@@ -420,7 +356,14 @@ async def random_image(
             freshness_half_life_days=float(freshness_half_life_days),
             velocity_smooth_days=float(velocity_smooth_days),
             time_boost_enabled=bool(time_boost_enabled),
-            debug_base=debug_base,
+            anti_repeat_enabled=bool(anti_repeat_enabled),
+            recent_exclude_image_ids=recent_exclude_image_ids,
+            recent_image_ids=recent_image_ids,
+            recent_author_ids=recent_author_ids,
+            dedup_strict=bool(dedup_strict),
+            dedup_image_penalty=float(dedup_image_penalty),
+            dedup_author_penalty=float(dedup_author_penalty),
+            exclude_image_ids=exclude_image_ids,
         )
 
     if format in {"json", "simple_json"} or (format == "image" and redirect == 1):
