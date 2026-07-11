@@ -235,8 +235,10 @@ async def modular_ports_status(
     rid = get_or_create_request_id(request)
     settings = getattr(request.app.state, "settings", None)
     catalog = getattr(request.app.state, "catalog_store", None)
+    tag_store = getattr(request.app.state, "tag_store", None)
     recent = getattr(request.app.state, "recent_dedup", None)
     catalog_backend = str(getattr(catalog, "backend", "sqlite") or "sqlite")
+    tag_backend = str(getattr(tag_store, "backend", "sqlite") or "sqlite")
     recent_active = str(getattr(recent, "backend", "memory") or "memory").lower()
     if recent_active not in {"memory", "redis"}:
         recent_active = "memory"
@@ -257,6 +259,9 @@ async def modular_ports_status(
         payload={
             "catalog": {
                 "backend": catalog_backend,
+            },
+            "tags": {
+                "backend": tag_backend,
             },
             "job_queue": {
                 # Implemented claim path is always sqlite until a real alternate ships.

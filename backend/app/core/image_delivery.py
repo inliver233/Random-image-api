@@ -44,18 +44,14 @@ def normalize_image_ext(ext: str | None) -> str:
     return normalized
 
 
-async def needs_image_proxy_hydrate(session: Any, image: Any) -> bool:
+async def needs_image_proxy_hydrate(session: Any, image: Any, *, tag_store: Any | None = None) -> bool:
     """DB-aware hydrate check for /i proxy (includes missing tags)."""
     if needs_opportunistic_hydrate(image):
         return True
-    import sqlalchemy as sa
+    from app.db.tag_store import resolve_tag_store
 
-    from app.db.models.image_tags import ImageTag
-
-    tag_row = (
-        await session.execute(sa.select(ImageTag.image_id).where(ImageTag.image_id == int(image.id)).limit(1))
-    ).scalar_one_or_none()
-    return tag_row is None
+    tags = resolve_tag_store(tag_store)
+    return not await tags.image_has_any_tag(session, image_id=int(image.id))
 
 
 async def deliver_public_image_from_request(

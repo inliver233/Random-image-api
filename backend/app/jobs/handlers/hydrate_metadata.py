@@ -10,7 +10,6 @@ from typing import Any
 
 import httpx
 import sqlalchemy as sa
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.random_query import normalize_iso_utc_optional
@@ -31,13 +30,12 @@ from app.core.runtime_settings import RuntimeConfig, load_runtime_config
 from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
 from app.db.catalog import CatalogStore, build_catalog_store
-from app.db.models.image_tags import ImageTag
 from app.db.models.hydration_runs import HydrationRun
 from app.db.models.pixiv_tokens import PixivToken
 from app.db.models.proxy_endpoints import ProxyEndpoint
-from app.db.models.tags import Tag
 from app.db.models.token_proxy_bindings import TokenProxyBinding
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.db.tag_store import TagStore, build_tag_store
 from app.jobs.payload import parse_job_payload_object
 from app.jobs.errors import JobDeferError, JobPermanentError
 from app.pixiv.access_token_cache import AccessTokenCache
@@ -165,6 +163,7 @@ def build_hydrate_metadata_handler(
     transport: httpx.BaseTransport | None = None,
     token_strategy: str = "least_error",
     catalog: CatalogStore | None = None,
+    tag_store: TagStore | None = None,
 ) -> Any:
     settings = load_settings()
     encryptor = FieldEncryptor.from_key(settings.field_encryption_key)
@@ -174,6 +173,7 @@ def build_hydrate_metadata_handler(
         hash_secret=(settings.pixiv_oauth_hash_secret or "").strip() or None,
     )
     catalog_store = catalog if catalog is not None else build_catalog_store(database_url=str(engine.url))
+    tags_store = tag_store if tag_store is not None else build_tag_store(database_url=str(engine.url))
 
     Session = create_sessionmaker(engine)
 
@@ -1010,36 +1010,9 @@ LIMIT 1;
         tags: list[tuple[str, str | None]],
         source_import_id: int | None,
     ) -> list[int]:
-        normalized_tag_names = [name for name, _t in tags]
-
         async def _op() -> list[int]:
             async with Session() as session:
-                existing = {}
-                if normalized_tag_names:
-                    rows = (
-                        (
-                            await session.execute(
-                                sa.select(Tag).where(Tag.name.in_(normalized_tag_names))
-                            )
-                        )
-                        .scalars()
-                        .all()
-                    )
-                    existing = {str(t.name): t for t in rows}
-
-                tag_ids: dict[str, int] = {}
-                for name, translated in tags:
-                    row = existing.get(name)
-                    if row is None:
-                        row = Tag(name=name, translated_name=translated)
-                        session.add(row)
-                        await session.flush()
-                        existing[name] = row
-                    else:
-                        if translated is not None and translated != row.translated_name:
-                            row.translated_name = translated
-                            row.updated_at = iso_utc_ms()
-                    tag_ids[name] = int(row.id)
+                tag_ids = await tags_store.upsert_tags_with_translations(session, tags=list(tags))
 
                 image_ids: list[int] = []
                 for page in pages:
@@ -1069,15 +1042,11 @@ LIMIT 1;
                     image_ids.append(image_id)
 
                 if image_ids:
-                    await session.execute(sa.delete(ImageTag).where(ImageTag.image_id.in_(image_ids)))
-                    if tag_ids:
-                        values = [
-                            {"image_id": int(img_id), "tag_id": int(tag_id)}
-                            for img_id in image_ids
-                            for tag_id in tag_ids.values()
-                        ]
-                        stmt2 = sqlite_insert(ImageTag).values(values).on_conflict_do_nothing()
-                        await session.execute(stmt2)
+                    await tags_store.replace_image_tags(
+                        session,
+                        image_ids=image_ids,
+                        tag_ids=list(tag_ids.values()),
+                    )
 
                 await session.commit()
                 return list(image_ids)

@@ -46,8 +46,9 @@ Public delivery/get paths adopt the port progressively:
 - Admin manual hydrate `image_id` → illust resolve → `catalog.get_image_by_id_any_status`
 - Admin `DELETE /admin/api/images/{id}` + `POST /admin/api/images/bulk-delete` → `catalog.delete_images_by_ids` (image_tags remain in handler)
 - Admin `POST /admin/api/images/clear` → `catalog.clear_all_images` (image_tags / Tag wipe remain in handler)
-- Admin `GET /admin/api/images` → `catalog.list_admin_images` (missing-field response shaping remains in handler)
+- Admin `GET /admin/api/images` → `catalog.list_admin_images` (missing-field response shaping remains in handler; tag_count join stays in helper)
 - Worker `build_default_dispatcher` builds one `CatalogStore` and injects into import/hydrate/heal
+- Tag domain is **not** on CatalogStore — see `contracts/tag-store.md`
 
 Helpers remain available for non-public paths; injected store is preferred via `app.state.catalog_store`.
 

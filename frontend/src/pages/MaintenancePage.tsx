@@ -93,6 +93,7 @@ type ApiKeyRateLimitStatusResponse = {
 type ModularPortsStatusResponse = {
   ok: true;
   catalog: { backend: string };
+  tags?: { backend: string };
   job_queue: { backend: string; requested: string };
   recent_dedup: {
     configured_backend: string;
@@ -341,8 +342,9 @@ export function MaintenancePage() {
 
       <Card title="模块端口（Phase 4）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          Catalog / JobQueue / RecentDedup / RandomService 端口只读状态。Catalog/JobQueue 默认本地；RecentDedup
-          支持 RECENT_DEDUP_BACKEND=redis + REDIS_URL（失败回落 memory）。RandomService 为默认 pick 计划工厂。不展示密钥或连接串。
+          Catalog / TagStore / JobQueue / RecentDedup / RandomService 端口只读状态。Catalog/TagStore/JobQueue
+          默认本地；RecentDedup 支持 RECENT_DEDUP_BACKEND=redis + REDIS_URL（失败回落 memory）。RandomService
+          为默认 pick 计划工厂。不展示密钥或连接串。
         </Typography.Paragraph>
 
         <QueryState query={modularPortsStatus}>
@@ -350,6 +352,9 @@ export function MaintenancePage() {
             <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
               <Descriptions.Item label="Catalog">
                 <Tag>{modularPortsStatus.data.catalog.backend}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Tag Store">
+                <Tag>{modularPortsStatus.data.tags?.backend ?? "sqlite"}</Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Job Queue">
                 <Tag>{modularPortsStatus.data.job_queue.backend}</Tag>

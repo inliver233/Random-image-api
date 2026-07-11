@@ -175,6 +175,12 @@ async def healthz(request: Request) -> Any:
                     str(getattr(getattr(request.app.state, "catalog_store", None), "backend", "sqlite") or "sqlite")
                 ),
             },
+            # Tag store dialect (sqlite default; separate from CatalogStore image rows).
+            "tags": {
+                "backend": (
+                    str(getattr(getattr(request.app.state, "tag_store", None), "backend", "sqlite") or "sqlite")
+                ),
+            },
             # Anti-repeat short window (memory default; redis when ready). Active store label.
             "recent_dedup": {
                 "backend": (

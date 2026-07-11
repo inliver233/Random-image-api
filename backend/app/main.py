@@ -41,6 +41,7 @@ from app.core.runtime_config_cache import RuntimeConfigCache
 from app.core.security import decode_jwt, parse_bearer_token
 from app.db.catalog import build_catalog_store
 from app.db.engine import create_engine
+from app.db.tag_store import build_tag_store
 from app.db.models.admin_audit import AdminAudit
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 from app.web.admin_ui import mount_admin_ui
@@ -187,6 +188,7 @@ def create_app() -> FastAPI:
     engine = create_engine(settings.database_url)
     app.state.engine = engine
     app.state.catalog_store = build_catalog_store(database_url=str(settings.database_url))
+    app.state.tag_store = build_tag_store(database_url=str(settings.database_url))
     app.state.recent_dedup = build_recent_dedup(
         backend=str(getattr(settings, "recent_dedup_backend", "memory") or "memory"),
         redis_url=str(getattr(settings, "redis_url", "") or ""),

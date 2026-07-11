@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.api.admin.deps import get_admin_claims
@@ -13,9 +12,8 @@ from app.core.errors import ApiError, ErrorCode
 from app.core.random_delivery import resolve_catalog_store
 from app.core.random_engine_sync import maybe_publish_engine_deletes, maybe_publish_engine_empty_snapshot
 from app.core.request_id import get_or_create_request_id
-from app.db.models.image_tags import ImageTag
-from app.db.models.tags import Tag
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.db.tag_store import resolve_tag_store
 
 router = APIRouter()
 
@@ -135,23 +133,6 @@ async def _load_bulk_delete_json(request: Request) -> dict[str, Any]:
     return {"image_ids": ids}
 
 
-def _chunks(values: list[int], *, chunk_size: int) -> list[list[int]]:
-    if chunk_size <= 0:
-        return [values]
-    out: list[list[int]] = []
-    for i in range(0, len(values), chunk_size):
-        out.append(values[i : i + chunk_size])
-    return out
-
-
-def _safe_rowcount(result: Any) -> int:
-    try:
-        rc = int(getattr(result, "rowcount", 0) or 0)
-    except Exception:
-        return 0
-    return rc if rc > 0 else 0
-
-
 @router.delete("/images/{image_id}")
 async def delete_admin_image(
     image_id: int,
@@ -165,11 +146,12 @@ async def delete_admin_image(
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
+    tags = resolve_tag_store(getattr(request.app.state, "tag_store", None))
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
-            # Tags stay outside CatalogStore; clear links before image rows.
-            await session.execute(sa.delete(ImageTag).where(ImageTag.image_id == int(image_id)))
+            # Tags via TagStore; clear links before image rows.
+            await tags.delete_image_tags_for_image_ids(session, image_ids=[int(image_id)])
             deleted_ids = await catalog.delete_images_by_ids(session, image_ids=[int(image_id)])
             if not deleted_ids:
                 raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
@@ -195,12 +177,12 @@ async def bulk_delete_admin_images(
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
+    tags = resolve_tag_store(getattr(request.app.state, "tag_store", None))
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
-            # Tags stay outside CatalogStore; clear links before image rows.
-            for chunk in _chunks(ids, chunk_size=900):
-                await session.execute(sa.delete(ImageTag).where(ImageTag.image_id.in_(chunk)))
+            # Tags via TagStore; clear links before image rows.
+            await tags.delete_image_tags_for_image_ids(session, image_ids=list(ids))
             found_ids = await catalog.delete_images_by_ids(session, image_ids=list(ids))
             await session.commit()
 
@@ -250,24 +232,25 @@ async def clear_admin_images(
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
+    tags = resolve_tag_store(getattr(request.app.state, "tag_store", None))
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
-            # Tags stay outside CatalogStore; clear links (and optional Tag rows) first.
-            result_links = await session.execute(sa.delete(ImageTag))
+            # Tags via TagStore; clear links (and optional Tag rows) first.
+            deleted_image_tags = await tags.clear_all_image_tags(session)
             deleted_images = await catalog.clear_all_images(session)
-            result_tags = None
+            deleted_tags = 0
             if delete_tags:
-                result_tags = await session.execute(sa.delete(Tag))
+                deleted_tags = await tags.clear_all_tags(session)
 
             await session.commit()
 
         return admin_ok(
             request,
             payload={
-                "deleted_image_tags": _safe_rowcount(result_links),
+                "deleted_image_tags": int(deleted_image_tags),
                 "deleted_images": int(deleted_images),
-                "deleted_tags": _safe_rowcount(result_tags) if result_tags is not None else 0,
+                "deleted_tags": int(deleted_tags),
             },
             request_id=rid,
         )

@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.admin_request import parse_bool
@@ -20,11 +19,10 @@ from app.core.pixiv_urls import parse_pixiv_original_url
 from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
 from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.db.catalog import CatalogStore, build_catalog_store
-from app.db.models.image_tags import ImageTag
 from app.db.models.imports import Import
 from app.db.models.jobs import JobRow
-from app.db.models.tags import Tag
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.db.tag_store import TagStore, build_tag_store
 from app.jobs.payload import parse_job_payload_object
 from app.jobs.errors import JobPermanentError
 
@@ -118,9 +116,15 @@ def _iter_lines(payload: dict[str, Any], *, file_path: Path | None) -> Iterable[
     raise JobPermanentError("payload.text_lines or payload.text or payload.file_ref is required")
 
 
-def build_import_images_handler(engine: AsyncEngine, *, catalog: CatalogStore | None = None):
+def build_import_images_handler(
+    engine: AsyncEngine,
+    *,
+    catalog: CatalogStore | None = None,
+    tag_store: TagStore | None = None,
+):
     Session = create_sessionmaker(engine)
     catalog_store = catalog if catalog is not None else build_catalog_store(database_url=str(engine.url))
+    tags = tag_store if tag_store is not None else build_tag_store(database_url=str(engine.url))
 
     async def _handler(job: dict[str, Any]) -> None:
         payload_json = str(job.get("payload_json") or "")
@@ -200,19 +204,10 @@ def build_import_images_handler(engine: AsyncEngine, *, catalog: CatalogStore | 
                                 names.append(name)
 
                         if names:
-                            tag_stmt = sqlite_insert(Tag).values([{"name": n, "translated_name": None} for n in names])
-                            tag_stmt = tag_stmt.on_conflict_do_nothing(index_elements=["name"])
-                            await session.execute(tag_stmt)
-
-                            tag_rows = (
-                                (await session.execute(sa.select(Tag.id, Tag.name).where(Tag.name.in_(names))))
-                                .all()
-                            )
-                            tag_id_by_name = {str(name): int(tag_id) for (tag_id, name) in tag_rows}
-
+                            tag_id_by_name = await tags.ensure_tags_by_names(session, names=names)
                             image_id_by_key = await catalog_store.map_image_ids_by_illust_page(session, keys=list(keys))
 
-                            image_tag_rows: list[dict[str, Any]] = []
+                            pairs: list[tuple[int, int]] = []
                             for key, lst in tags_by_key.items():
                                 image_id = image_id_by_key.get(key)
                                 if image_id is None:
@@ -226,14 +221,10 @@ def build_import_images_handler(engine: AsyncEngine, *, catalog: CatalogStore | 
                                     tag_id = tag_id_by_name.get(name)
                                     if tag_id is None:
                                         continue
-                                    image_tag_rows.append({"image_id": int(image_id), "tag_id": int(tag_id)})
+                                    pairs.append((int(image_id), int(tag_id)))
 
-                            if image_tag_rows:
-                                for offset in range(0, len(image_tag_rows), 5000):
-                                    sub = image_tag_rows[offset : offset + 5000]
-                                    it_stmt = sqlite_insert(ImageTag).values(sub)
-                                    it_stmt = it_stmt.on_conflict_do_nothing(index_elements=["image_id", "tag_id"])
-                                    await session.execute(it_stmt)
+                            if pairs:
+                                await tags.link_image_tags(session, pairs=pairs)
 
                     await session.execute(
                         sa.update(Import)
