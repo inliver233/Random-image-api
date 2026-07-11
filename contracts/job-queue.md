@@ -15,6 +15,8 @@ Implementation:
   - `admin/imports`, `admin/hydration_runs` → `enqueue_pending_in_session` (coupled txn)
   - `handlers/import_images` bulk hydrate → `new_pending_job` batch add
 - Factory: `build_job_queue(engine, backend=...)` — unknown backends fall back to sqlite
+- Resolve: `resolve_job_queue(queue, engine)` prefers injected port
+- Wire-up: `app.state.job_queue` in `main.py`
 
 ## Methods
 
@@ -42,4 +44,5 @@ Implementation:
 
 ## Ops
 
-`/healthz` → `modules.job_queue.backend` (config-only; always `sqlite` until a real alternate backend ships).
+`/healthz` → `modules.job_queue.backend` from `app.state.job_queue` (sqlite until a real alternate ships).
+Admin → `GET /admin/api/maintenance/modular-ports` → `job_queue.backend` / `requested`.

@@ -26,11 +26,10 @@ from app.core.random_delivery import resolve_catalog_store
 from app.db.models.imports import Import
 from app.db.models.jobs import JobRow
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
-from app.jobs.claim import claim_pending_job_by_id
 from app.jobs.dispatch import JobDispatcher
 from app.jobs.executor import execute_claimed_job
 from app.jobs.handlers.import_images import build_import_images_handler
-from app.jobs.queue import enqueue_pending_in_session
+from app.jobs.queue import enqueue_pending_in_session, resolve_job_queue
 
 router = APIRouter()
 
@@ -370,8 +369,9 @@ async def create_import(
         now = iso_utc_ms()
         actor = str(_claims.get("sub") or "admin").strip() or "admin"
         worker_id = f"inline-import:{actor}"
-        claimed = await claim_pending_job_by_id(
-            engine, job_id=int(job_id), worker_id=worker_id, now=now
+        queue = resolve_job_queue(getattr(request.app.state, "job_queue", None), engine)
+        claimed = await queue.claim_pending_by_id(
+            job_id=int(job_id), worker_id=worker_id, now=now
         )
         if claimed is not None:
             dispatcher = JobDispatcher()

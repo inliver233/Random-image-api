@@ -35,7 +35,7 @@ from app.db.models.proxy_pool_endpoints import ProxyPoolEndpoint
 from app.db.models.proxy_pools import ProxyPool
 from app.db.models.token_proxy_bindings import TokenProxyBinding
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
-from app.jobs.queue import build_job_queue
+from app.jobs.queue import resolve_job_queue
 from app.easy_proxies.client import EasyProxiesError, easy_proxies_auth, easy_proxies_export
 from app.easy_proxies.normalize import normalize_exported_proxy_host, resolve_export_host
 
@@ -987,7 +987,7 @@ async def probe_proxies(
     opts = await _load_probe_json(request)
 
     engine = request.app.state.engine
-    queue = build_job_queue(engine)
+    queue = resolve_job_queue(getattr(request.app.state, "job_queue", None), engine)
     job_id = await queue.enqueue(
         type="proxy_probe",
         payload_json=json.dumps({"scope": "all", **opts}, ensure_ascii=False),

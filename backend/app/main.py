@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from contextlib import asynccontextmanager
 
@@ -46,6 +47,7 @@ from app.db.random_pick_port import build_random_pick
 from app.db.tag_store import build_tag_store
 from app.db.models.admin_audit import AdminAudit
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.jobs.queue import build_job_queue
 from app.web.admin_ui import mount_admin_ui
 
 log = get_logger(__name__)
@@ -223,6 +225,10 @@ def create_app() -> FastAPI:
     app.state.catalog_store = build_catalog_store(database_url=str(settings.database_url))
     app.state.tag_store = build_tag_store(database_url=str(settings.database_url))
     app.state.random_pick = build_random_pick(database_url=str(settings.database_url))
+    app.state.job_queue = build_job_queue(
+        engine,
+        backend=str(os.environ.get("JOB_QUEUE_BACKEND", "sqlite") or "sqlite"),
+    )
     app.state.recent_dedup = build_recent_dedup(
         backend=str(getattr(settings, "recent_dedup_backend", "memory") or "memory"),
         redis_url=str(getattr(settings, "redis_url", "") or ""),

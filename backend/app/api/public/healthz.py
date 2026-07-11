@@ -174,9 +174,11 @@ async def healthz(request: Request) -> Any:
                 "redis_url_configured": redis_url_configured,
                 "required": bool(getattr(settings, "public_api_key_required", False)) if settings is not None else False,
             },
-            # Job claim port (SQLite today; Redis/NATS reserved). Config-only.
+            # Job claim port (SQLite today; Redis/NATS reserved). Active from app.state.
             "job_queue": {
-                "backend": "sqlite",
+                "backend": (
+                    str(getattr(getattr(request.app.state, "job_queue", None), "backend", "sqlite") or "sqlite")
+                ),
                 "requested": job_queue_requested,
             },
             # Catalog store dialect (sqlite default; postgres when DATABASE_URL is postgres*).

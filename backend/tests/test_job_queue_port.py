@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 
 from app.db.engine import create_engine
-from app.jobs.queue import JobQueuePort, SqliteJobQueue, build_job_queue
+from app.jobs.queue import JobQueuePort, SqliteJobQueue, build_job_queue, resolve_job_queue
 
 
 def _sqlite_url(db_path: Path) -> str:
@@ -21,6 +21,10 @@ def test_build_job_queue_defaults_to_sqlite(tmp_path: Path) -> None:
     # Unknown / future backends fall back to sqlite (no hard fail).
     q2 = build_job_queue(engine, backend="redis")
     assert q2.backend == "sqlite"
+
+    # resolve prefers injected port.
+    assert resolve_job_queue(q, engine) is q
+    assert resolve_job_queue(None, engine).backend == "sqlite"
 
 
 def test_sqlite_job_queue_claim_roundtrip(tmp_path: Path) -> None:

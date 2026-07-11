@@ -298,6 +298,8 @@ async def modular_ports_status(
     job_requested = str(os.environ.get("JOB_QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
     if job_requested not in {"sqlite", "memory", "redis", "nats"}:
         job_requested = "sqlite"
+    job_queue = getattr(request.app.state, "job_queue", None)
+    job_queue_backend = str(getattr(job_queue, "backend", "sqlite") or "sqlite")
     random_service = getattr(request.app.state, "random_service", None)
     random_backend = str(getattr(random_service, "backend", "default") or "default")
     random_pick = getattr(request.app.state, "random_pick", None)
@@ -312,8 +314,8 @@ async def modular_ports_status(
                 "backend": tag_backend,
             },
             "job_queue": {
-                # Implemented claim path is always sqlite until a real alternate ships.
-                "backend": "sqlite",
+                # Active port from app.state (sqlite until a real alternate ships).
+                "backend": job_queue_backend,
                 "requested": job_requested,
             },
             "recent_dedup": {

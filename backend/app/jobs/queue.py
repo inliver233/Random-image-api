@@ -267,3 +267,17 @@ def build_job_queue(engine: AsyncEngine, *, backend: str = "sqlite") -> JobQueue
         # redis/nats reserved — fall back to sqlite until implemented.
         backend_norm = "sqlite"
     return SqliteJobQueue(engine)
+
+
+def resolve_job_queue(
+    queue: JobQueuePort | None = None,
+    engine: AsyncEngine | None = None,
+    *,
+    backend: str = "sqlite",
+) -> JobQueuePort:
+    """Prefer injected JobQueuePort; else build from engine (sqlite default)."""
+    if queue is not None:
+        return queue
+    if engine is None:
+        raise ValueError("engine is required when job queue is not injected")
+    return build_job_queue(engine, backend=backend)
