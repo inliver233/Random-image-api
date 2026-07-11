@@ -70,5 +70,14 @@ async def get_cached_runtime_config(engine: AsyncEngine, *, force: bool = False)
     return await _GLOBAL_CACHE.get(engine, force=force)
 
 
+async def resolve_runtime_for_request(request: Any, engine: AsyncEngine, *, force: bool = False) -> RuntimeConfig:
+    """Prefer app.state.runtime_config_cache; fall back to process-global TTL cache."""
+    cache = getattr(getattr(request, "app", None), "state", None)
+    cache = getattr(cache, "runtime_config_cache", None) if cache is not None else None
+    if cache is not None:
+        return await cache.get(engine, force=force)
+    return await get_cached_runtime_config(engine, force=force)
+
+
 def invalidate_runtime_config_cache() -> None:
     _GLOBAL_CACHE.invalidate()

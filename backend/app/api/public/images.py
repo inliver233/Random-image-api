@@ -9,14 +9,10 @@ from app.core.errors import ApiError, ErrorCode
 from app.core.image_delivery import deliver_known_image, needs_image_proxy_hydrate, should_mark_image_ok
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
 from app.core.proxy_mirror import resolve_proxy_mirror
-from app.core.random_query import (
-    MAX_TAG_FILTERS,
-    normalize_iso_utc,
-    parse_tag_filters,
-    validate_tag_filters,
-)
+from app.core.public_list_filters import parse_public_list_filters
+from app.core.random_request import force_local_from_query
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
-from app.core.runtime_config_cache import get_cached_runtime_config
+from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.db.images_get import get_image_by_id
 from app.db.images_list import list_images as db_list_images
 from app.db.session import create_sessionmaker
@@ -44,86 +40,44 @@ async def list_images(
     created_from: str | None = None,
     created_to: str | None = None,
 ) -> Any:
-    if limit < 1 or limit > 200:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported limit", status_code=400)
-
-    cursor_i: int | None = None
-    cursor_raw = (cursor or "").strip()
-    if cursor_raw:
-        if not cursor_raw.isdigit():
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
-        cursor_i = int(cursor_raw)
-        if cursor_i <= 0:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
-
-    if r18 not in {0, 1, 2}:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported r18", status_code=400)
-    if r18_strict not in {0, 1}:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported r18_strict", status_code=400)
-
-    ai_type_raw = (ai_type or "any").strip().lower()
-    ai_type_i: int | None = None
-    if ai_type_raw in {"", "any"}:
-        ai_type_i = None
-    elif ai_type_raw in {"0", "1"}:
-        ai_type_i = int(ai_type_raw)
-    else:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported ai_type", status_code=400)
-
-    orientation = (orientation or "").strip().lower()
-    orientation_map = {"any": None, "portrait": 1, "landscape": 2, "square": 3}
-    if orientation not in orientation_map:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported orientation", status_code=400)
-
-    if min_width < 0 or min_height < 0 or min_pixels < 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported min_*", status_code=400)
-
-    included = parse_tag_filters(included_tags)
-    excluded = parse_tag_filters(excluded_tags)
-    if len(included) > MAX_TAG_FILTERS or len(excluded) > MAX_TAG_FILTERS:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag filters", status_code=400)
-    validate_tag_filters(included)
-    validate_tag_filters(excluded)
-
-    if user_id is not None and int(user_id) <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported user_id", status_code=400)
-    if illust_id is not None and int(illust_id) <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported illust_id", status_code=400)
-
-    created_from_norm: str | None = None
-    created_to_norm: str | None = None
-    try:
-        if created_from is not None:
-            created_from_norm = normalize_iso_utc(created_from)
-        if created_to is not None:
-            created_to_norm = normalize_iso_utc(created_to)
-    except Exception:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported created_*", status_code=400)
-
-    if created_from_norm is not None and created_to_norm is not None:
-        if created_from_norm > created_to_norm:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="created_from > created_to", status_code=400)
+    filters = parse_public_list_filters(
+        limit=limit,
+        cursor=cursor,
+        r18=r18,
+        r18_strict=r18_strict,
+        ai_type=ai_type,
+        orientation=orientation,
+        min_width=min_width,
+        min_height=min_height,
+        min_pixels=min_pixels,
+        included_tags=included_tags,
+        excluded_tags=excluded_tags,
+        user_id=user_id,
+        illust_id=illust_id,
+        created_from=created_from,
+        created_to=created_to,
+    )
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
     async with Session() as session:
         images, next_cursor = await db_list_images(
             session,
-            limit=limit,
-            cursor=cursor_i,
-            r18=r18,
-            r18_strict=bool(r18_strict),
-            orientation=orientation_map[orientation],
-            ai_type=ai_type_i,
-            min_width=min_width,
-            min_height=min_height,
-            min_pixels=min_pixels,
-            included_tags=included,
-            excluded_tags=excluded,
-            user_id=user_id,
-            illust_id=illust_id,
-            created_from=created_from_norm,
-            created_to=created_to_norm,
+            limit=filters.limit,
+            cursor=filters.cursor_i,
+            r18=filters.r18,
+            r18_strict=bool(filters.r18_strict),
+            orientation=filters.orientation_code,
+            ai_type=filters.ai_type_i,
+            min_width=filters.min_width_i,
+            min_height=filters.min_height_i,
+            min_pixels=filters.min_pixels_i,
+            included_tags=filters.included,
+            excluded_tags=filters.excluded,
+            user_id=filters.user_id,
+            illust_id=filters.illust_id,
+            created_from=filters.created_from_norm,
+            created_to=filters.created_to_norm,
         )
 
     rid = get_or_create_request_id(request)
@@ -242,11 +196,7 @@ async def proxy_image(
         should_mark_ok = should_mark_image_ok(image)
         needs_hydrate = await needs_image_proxy_hydrate(session, image)
 
-    cache = getattr(request.app.state, "runtime_config_cache", None)
-    if cache is not None:
-        runtime = await cache.get(engine)
-    else:
-        runtime = await get_cached_runtime_config(engine)
+    runtime = await resolve_runtime_for_request(request, engine)
     resolved = resolve_proxy_mirror(
         runtime=runtime,
         headers=request.headers,
@@ -254,7 +204,7 @@ async def proxy_image(
         pximg_mirror_host=pximg_mirror_host,
         proxy=proxy,
     )
-    force_local = str(request.query_params.get("local") or "").strip().lower() in {"1", "true", "yes"}
+    force_local = force_local_from_query(request.query_params)
 
     return await deliver_known_image(
         request=request,

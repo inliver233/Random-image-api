@@ -232,6 +232,11 @@ def parse_random_filters(
     )
 
 
+def force_local_from_query(query_params: Any) -> bool:
+    """True when client forces local /i stream (skip CF edge 302)."""
+    return str(query_params.get("local") or "").strip().lower() in {"1", "true", "yes"}
+
+
 def prefer_image_edge(
     *,
     proxy_override: str | None,

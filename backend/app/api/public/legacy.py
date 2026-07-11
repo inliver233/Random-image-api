@@ -6,18 +6,12 @@ from app.core.errors import ApiError, ErrorCode
 from app.core.image_delivery import deliver_known_image
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
 from app.core.proxy_mirror import resolve_proxy_mirror
-from app.core.runtime_config_cache import get_cached_runtime_config
+from app.core.random_request import force_local_from_query
+from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.db.images_get_by_illust import get_image_by_illust_page
 from app.db.session import create_sessionmaker
 
 router = APIRouter()
-
-
-async def _resolve_runtime(request: Request, engine):
-    cache = getattr(request.app.state, "runtime_config_cache", None)
-    if cache is not None:
-        return await cache.get(engine)
-    return await get_cached_runtime_config(engine)
 
 
 async def _deliver_legacy_image(
@@ -29,7 +23,7 @@ async def _deliver_legacy_image(
     proxy: str | None,
 ):
     engine = request.app.state.engine
-    runtime = await _resolve_runtime(request, engine)
+    runtime = await resolve_runtime_for_request(request, engine)
     resolved = resolve_proxy_mirror(
         runtime=runtime,
         headers=request.headers,
@@ -37,7 +31,7 @@ async def _deliver_legacy_image(
         pximg_mirror_host=pximg_mirror_host,
         proxy=proxy,
     )
-    force_local = str(request.query_params.get("local") or "").strip().lower() in {"1", "true", "yes"}
+    force_local = force_local_from_query(request.query_params)
     return await deliver_known_image(
         request=request,
         engine=engine,

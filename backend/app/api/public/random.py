@@ -17,10 +17,15 @@ from app.core.random_delivery import (
 )
 from app.core.random_pick_context import build_random_pick_context
 from app.core.random_query import build_no_match_error
-from app.core.random_request import local_i_query_string, parse_random_filters, prefer_image_edge
+from app.core.random_request import (
+    force_local_from_query,
+    local_i_query_string,
+    parse_random_filters,
+    prefer_image_edge,
+)
 from app.core.random_response import build_json_body, build_simple_json_body
 from app.core.random_strategy import needs_opportunistic_hydrate
-from app.core.runtime_config_cache import get_cached_runtime_config
+from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.db.tags_get import get_tag_names_for_image
 from app.db.session import create_sessionmaker
 
@@ -137,11 +142,7 @@ async def random_image(
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
-    cache = getattr(request.app.state, "runtime_config_cache", None)
-    if cache is not None:
-        runtime = await cache.get(engine)
-    else:
-        runtime = await get_cached_runtime_config(engine)
+    runtime = await resolve_runtime_for_request(request, engine)
 
     resolved_proxy = resolve_proxy_mirror(
         runtime=runtime,
@@ -288,7 +289,7 @@ async def random_image(
         )
 
     # When edge is enabled and client did not force local mirror/proxy, hand bytes off to CF.
-    force_local = str(request.query_params.get("local") or "").strip().lower() in {"1", "true", "yes"}
+    force_local = force_local_from_query(request.query_params)
     prefer_edge_redirect = prefer_image_edge(
         proxy_override=proxy_override,
         pixiv_cat=int(pixiv_cat),
