@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import math
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
 from app.core.recommendation import (
     DEFAULT_RECOMMENDATION,
@@ -134,12 +134,12 @@ def resolve_fail_cooldown_ms(random_defaults: dict[str, Any]) -> tuple[int, str,
 
     if fail_cooldown_ms_i is None:
         source = "fallback"
-        cooldown_s_raw = (os.environ.get("RANDOM_FAIL_COOLDOWN_SECONDS") or "600").strip()
-        try:
-            cooldown_s = int(cooldown_s_raw)
-        except Exception:
-            cooldown_s = 600
-        cooldown_s = max(0, min(int(cooldown_s), 24 * 60 * 60))
+        cooldown_s = parse_int_env(
+            "RANDOM_FAIL_COOLDOWN_SECONDS",
+            default=600,
+            min_v=0,
+            max_v=24 * 60 * 60,
+        )
         fail_cooldown_ms_i = int(cooldown_s) * 1000
     fail_cooldown_ms_i = max(0, min(int(fail_cooldown_ms_i), 24 * 60 * 60 * 1000))
 

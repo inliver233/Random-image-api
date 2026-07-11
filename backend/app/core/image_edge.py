@@ -8,7 +8,7 @@ from typing import Mapping
 from urllib.parse import urlparse
 
 from app.core.b64url import b64url_encode
-from app.core.config import Settings
+from app.core.config import Settings, parse_csv_urls
 
 # Keep aligned with edge/img-worker path allowlist (contract: contracts/image-edge.md).
 _ALLOWED_EDGE_PREFIXES = ("/img-original/", "/img-master/", "/img-/", "/c/")
@@ -41,20 +41,6 @@ class ImageEdgeConfig:
         return out
 
 
-def _parse_base_urls(raw: str) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    for part in (raw or "").replace(";", ",").split(","):
-        base = part.strip().rstrip("/")
-        if not base or base in seen:
-            continue
-        if not (base.startswith("https://") or base.startswith("http://")):
-            continue
-        seen.add(base)
-        out.append(base)
-    return out
-
-
 def load_image_edge_config_from_settings(settings: Settings) -> ImageEdgeConfig | None:
     enabled = bool(getattr(settings, "image_edge_enabled", False))
     secret = str(getattr(settings, "image_edge_secret", "") or "").strip()
@@ -82,7 +68,7 @@ def load_image_edge_config(env: Mapping[str, str]) -> ImageEdgeConfig | None:
     secret_previous = (env.get("IMAGE_EDGE_SECRET_PREVIOUS") or "").strip()
     if secret_previous and secret_previous == secret:
         secret_previous = ""
-    base_urls = _parse_base_urls(env.get("IMAGE_EDGE_BASE_URLS") or env.get("IMAGE_EDGE_BASE_URL") or "")
+    base_urls = parse_csv_urls(env.get("IMAGE_EDGE_BASE_URLS") or env.get("IMAGE_EDGE_BASE_URL") or "")
     try:
         ttl = int((env.get("IMAGE_EDGE_SIGN_TTL_SECONDS") or "604800").strip() or "604800")
     except Exception:

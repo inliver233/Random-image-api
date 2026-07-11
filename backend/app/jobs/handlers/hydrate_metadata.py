@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import random
 import time
 from dataclasses import dataclass
@@ -1365,8 +1364,12 @@ LIMIT 1;
             missing_predicate_sql = _build_missing_predicate_sql(missing)
 
             cursor_image_id = int(run_state.get("cursor_image_id") or 0)
-            batch_size = as_int(os.environ.get("HYDRATION_RUN_BATCH_SIZE"), default=10)
-            batch_size = max(1, min(int(batch_size), 200))
+            batch_size = parse_int_env(
+                "HYDRATION_RUN_BATCH_SIZE",
+                default=10,
+                min_v=1,
+                max_v=200,
+            )
 
             processed = 0
             for _ in range(batch_size):

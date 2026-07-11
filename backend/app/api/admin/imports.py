@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import asdict, dataclass
 from typing import Any, Literal, cast
 from uuid import uuid4
@@ -17,6 +16,7 @@ from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.admin_request import load_json_object, parse_bool, require_positive_id
 from app.core.data_files import get_sqlite_db_dir, make_file_ref
+from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.soft_json import soft_json_object
@@ -61,28 +61,21 @@ class ImportErrorItem:
 
 
 def _max_import_text_bytes() -> int:
-    default = 200 * 1024 * 1024
-    cap = 600 * 1024 * 1024
-    raw = (os.environ.get("IMPORT_MAX_BYTES") or "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except Exception:
-        return default
-    return max(1024, min(int(value), int(cap)))
+    return parse_int_env(
+        "IMPORT_MAX_BYTES",
+        default=200 * 1024 * 1024,
+        min_v=1024,
+        max_v=600 * 1024 * 1024,
+    )
 
 
 def _import_inline_max_accepted() -> int:
-    default = 200
-    raw = (os.environ.get("IMPORT_INLINE_MAX_ACCEPTED") or "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
-    except Exception:
-        return default
-    return max(0, min(int(value), 10_000))
+    return parse_int_env(
+        "IMPORT_INLINE_MAX_ACCEPTED",
+        default=200,
+        min_v=0,
+        max_v=10_000,
+    )
 
 
 def _parse_import_text(

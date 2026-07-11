@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -8,27 +7,10 @@ from fastapi import APIRouter, Depends, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_json import admin_ok
 from app.core.request_id import get_or_create_request_id
+from app.core.runtime_settings import worker_last_seen_from_value_json
 from app.db.session import with_sqlite_busy_retry
 
 router = APIRouter()
-
-
-def _worker_last_seen_from_value_json(value_json: str | None) -> str | None:
-    if value_json is None:
-        return None
-    raw = str(value_json or "").strip()
-    if not raw:
-        return None
-    try:
-        data = json.loads(raw)
-    except Exception:
-        return None
-    if isinstance(data, dict):
-        at = data.get("at")
-        return str(at) if isinstance(at, str) and at.strip() else None
-    if isinstance(data, str):
-        return data.strip() or None
-    return None
 
 
 @router.get("/summary")
@@ -127,7 +109,9 @@ WHERE status=1
             worker_last_seen_json = (
                 await conn.exec_driver_sql("SELECT value_json FROM runtime_settings WHERE key = ?;", ("worker.last_seen_at",))
             ).scalar_one_or_none()
-            worker_last_seen_at = _worker_last_seen_from_value_json(str(worker_last_seen_json) if worker_last_seen_json is not None else None)
+            worker_last_seen_at = worker_last_seen_from_value_json(
+                str(worker_last_seen_json) if worker_last_seen_json is not None else None
+            )
 
         return {
             "images": {"total": images_total, "enabled": images_enabled},

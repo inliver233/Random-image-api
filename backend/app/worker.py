@@ -9,7 +9,7 @@ from typing import Any
 
 from app.easy_proxies.auto_refresh import EasyProxiesAutoRefreshConfig, EasyProxiesAutoRefresher
 from app.core.config import load_settings
-from app.core.env_parse import parse_bool_env, parse_int_env
+from app.core.env_parse import parse_bool_env, parse_float_env, parse_int_env
 from app.core.logging import configure_logging, get_logger
 from app.core.redact import redact_text
 from app.core.time import iso_utc_ms
@@ -242,8 +242,7 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
         dispatcher = build_default_dispatcher(engine)
 
         base_url = (os.environ.get("EASY_PROXIES_BASE_URL") or "").strip()
-        raw_auto = (os.environ.get("EASY_PROXIES_AUTO_REFRESH") or "").strip().lower()
-        auto_refresh_disabled = raw_auto in {"0", "false", "no", "n", "off"}
+        auto_refresh_enabled = parse_bool_env("EASY_PROXIES_AUTO_REFRESH", default=True)
 
         raw_ms = (os.environ.get("EASY_PROXIES_REFRESH_INTERVAL_MS") or "").strip()
         raw_s = (os.environ.get("EASY_PROXIES_REFRESH_INTERVAL_SECONDS") or "").strip()
@@ -262,15 +261,14 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
             except Exception:
                 interval_s = 0.0
 
-        if auto_refresh_disabled:
+        if not auto_refresh_enabled:
             interval_s = 0.0
 
         conflict_policy = (os.environ.get("EASY_PROXIES_CONFLICT_POLICY") or "skip_non_easy_proxies").strip()
 
         host_override = (os.environ.get("EASY_PROXIES_HOST_OVERRIDE") or "").strip() or None
 
-        raw_attach = (os.environ.get("EASY_PROXIES_AUTO_ATTACH") or "").strip().lower()
-        auto_attach_disabled = raw_attach in {"0", "false", "no", "n", "off"}
+        auto_attach = parse_bool_env("EASY_PROXIES_AUTO_ATTACH", default=True)
 
         attach_pool_id: int | None = None
         raw_attach_pool = (os.environ.get("EASY_PROXIES_ATTACH_POOL_ID") or "").strip()
@@ -289,9 +287,7 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
             max_v=1000,
         )
 
-        raw_recompute = (os.environ.get("EASY_PROXIES_AUTO_RECOMPUTE_BINDINGS") or "").strip().lower()
-        recompute_disabled = raw_recompute in {"0", "false", "no", "n", "off"}
-        recompute_bindings = not recompute_disabled
+        recompute_bindings = parse_bool_env("EASY_PROXIES_AUTO_RECOMPUTE_BINDINGS", default=True)
 
         max_tokens_per_proxy = parse_int_env(
             "EASY_PROXIES_MAX_TOKENS_PER_PROXY",
@@ -300,8 +296,7 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
             max_v=1000,
         )
 
-        raw_strict = (os.environ.get("EASY_PROXIES_BINDINGS_STRICT") or "").strip().lower()
-        strict = raw_strict in {"1", "true", "yes", "y", "on"}
+        strict = parse_bool_env("EASY_PROXIES_BINDINGS_STRICT", default=False)
 
         refresher = EasyProxiesAutoRefresher(
             EasyProxiesAutoRefreshConfig(
@@ -309,7 +304,7 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
                 interval_s=interval_s,
                 conflict_policy=conflict_policy or "skip_non_easy_proxies",
                 host_override=host_override,
-                auto_attach=not auto_attach_disabled,
+                auto_attach=bool(auto_attach),
                 attach_pool_id=attach_pool_id,
                 attach_weight=int(attach_weight),
                 recompute_bindings=bool(recompute_bindings),
@@ -346,11 +341,12 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
             min_v=1,
             max_v=3600,
         )
-        try:
-            heartbeat_interval_s = float((os.environ.get("WORKER_HEARTBEAT_INTERVAL_SECONDS") or "10").strip() or "10")
-        except Exception:
-            heartbeat_interval_s = 10.0
-        heartbeat_interval_s = max(1.0, min(float(heartbeat_interval_s), 300.0))
+        heartbeat_interval_s = parse_float_env(
+            "WORKER_HEARTBEAT_INTERVAL_SECONDS",
+            default=10.0,
+            min_v=1.0,
+            max_v=300.0,
+        )
         last_heartbeat_m = 0.0
         last_auto_refresh_m = 0.0
         cached_enabled_tokens: int | None = None

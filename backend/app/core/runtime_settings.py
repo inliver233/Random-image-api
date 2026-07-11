@@ -15,6 +15,7 @@ from app.core.pximg_reverse_proxy import (
     normalize_pximg_mirror_host,
 )
 from app.core.logging import get_logger
+from app.core.soft_json import soft_json_value
 from app.core.time import iso_utc_ms
 from app.db.models.runtime_settings import RuntimeSetting
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
@@ -37,6 +38,24 @@ def as_str_list(value: Any) -> list[str]:
         seen.add(v)
         out.append(v)
     return out
+
+
+def worker_last_seen_from_value_json(value_json: str | None) -> str | None:
+    """Extract worker heartbeat `at` from runtime_settings value_json."""
+    if value_json is None:
+        return None
+    raw = str(value_json or "").strip()
+    if not raw:
+        return None
+    data = soft_json_value(raw)
+    if isinstance(data, dict):
+        at = data.get("at")
+        return str(at) if isinstance(at, str) and at.strip() else None
+    if isinstance(data, str):
+        return data.strip() or None
+    # soft_json_value returns None for invalid JSON; healthz distinguishes that.
+    # For summary we treat invalid as missing.
+    return None
 
 
 @dataclass(frozen=True, slots=True)

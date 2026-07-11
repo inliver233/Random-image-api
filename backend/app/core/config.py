@@ -68,7 +68,8 @@ def _get_bool(env: Mapping[str, str], key: str, default: bool) -> bool:
     return default
 
 
-def _parse_csv_urls(raw: str) -> list[str]:
+def parse_csv_urls(raw: str) -> list[str]:
+    """Parse comma/semicolon-separated http(s) base URLs; de-dupe, strip trailing slash."""
     out: list[str] = []
     seen: set[str] = set()
     for part in (raw or "").replace(";", ",").split(","):
@@ -187,7 +188,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     # Never keep a previous secret that equals the active one (no dual-check noise).
     if image_edge_secret_previous and image_edge_secret_previous == image_edge_secret:
         image_edge_secret_previous = ""
-    image_edge_base_urls = _parse_csv_urls(
+    image_edge_base_urls = parse_csv_urls(
         _get(env, "IMAGE_EDGE_BASE_URLS", "") or _get(env, "IMAGE_EDGE_BASE_URL", "")
     )
     try:

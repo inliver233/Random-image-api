@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -10,8 +9,10 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.data_files import ensure_sqlite_parent_dir
+from app.core.env_parse import parse_int_env
 from app.core.errors import ErrorCode, error_body
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
+from app.core.runtime_settings import worker_last_seen_from_value_json
 from app.core.time import parse_iso_dt
 from app.db.session import with_sqlite_busy_retry
 
@@ -55,21 +56,16 @@ async def _query_worker_last_seen(engine: AsyncEngine) -> tuple[str | None, str]
     if raw is None:
         return None, "no_heartbeat"
 
+    # Distinguish invalid JSON vs missing/invalid value shape for health diagnostics.
     try:
-        value = json.loads(raw)
+        _ = json.loads(str(raw))
     except Exception:
         return None, "invalid_json"
 
-    if isinstance(value, dict):
-        at = value.get("at")
-        if isinstance(at, str):
-            return at, "ok"
+    at = worker_last_seen_from_value_json(str(raw))
+    if at is None:
         return None, "invalid_value"
-
-    if isinstance(value, str):
-        return value, "ok"
-
-    return None, "invalid_value"
+    return at, "ok"
 
 
 async def _query_queue_status_counts(engine: AsyncEngine) -> tuple[dict[str, int] | None, str]:
@@ -102,11 +98,12 @@ async def healthz(request: Request) -> Any:
     db_ok = await _check_db(engine) if engine is not None else False
 
     if db_ok:
-        try:
-            stale_after_s = int((os.environ.get("WORKER_HEARTBEAT_STALE_SECONDS") or "60").strip() or "60")
-        except Exception:
-            stale_after_s = 60
-        stale_after_s = max(1, min(int(stale_after_s), 24 * 60 * 60))
+        stale_after_s = parse_int_env(
+            "WORKER_HEARTBEAT_STALE_SECONDS",
+            default=60,
+            min_v=1,
+            max_v=24 * 60 * 60,
+        )
 
         worker_last_seen_at, worker_reason = await _query_worker_last_seen(engine)  # type: ignore[arg-type]
         worker_ok = False

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from sqlalchemy import event
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+from app.core.env_parse import parse_float_env, parse_int_env
 
 # Under concurrent writers (API requests + worker jobs), large imports/backfills can
 # legitimately hold the SQLite writer lock for several seconds. A higher default
@@ -20,12 +21,17 @@ SQLITE_MAX_OVERFLOW = 30
 SQLITE_POOL_TIMEOUT_S = 30
 
 
+def _sqlite_busy_timeout_ms() -> int:
+    return parse_int_env(
+        "SQLITE_BUSY_TIMEOUT_MS",
+        default=int(SQLITE_BUSY_TIMEOUT_MS),
+        min_v=1000,
+        max_v=5 * 60_000,
+    )
+
+
 def apply_sqlite_pragmas(dbapi_connection: Any) -> None:
-    try:
-        busy_timeout_ms = int((os.environ.get("SQLITE_BUSY_TIMEOUT_MS") or str(SQLITE_BUSY_TIMEOUT_MS)).strip() or SQLITE_BUSY_TIMEOUT_MS)
-    except Exception:
-        busy_timeout_ms = int(SQLITE_BUSY_TIMEOUT_MS)
-    busy_timeout_ms = max(1000, min(int(busy_timeout_ms), 5 * 60_000))
+    busy_timeout_ms = _sqlite_busy_timeout_ms()
 
     cursor = dbapi_connection.cursor()
     try:
@@ -56,32 +62,29 @@ def _is_sqlite_file_url(database_url: str) -> bool:
 def create_engine(database_url: str) -> AsyncEngine:
     kwargs: dict[str, Any] = {}
     if database_url.lower().startswith("sqlite"):
-        try:
-            busy_timeout_ms = int((os.environ.get("SQLITE_BUSY_TIMEOUT_MS") or str(SQLITE_BUSY_TIMEOUT_MS)).strip() or SQLITE_BUSY_TIMEOUT_MS)
-        except Exception:
-            busy_timeout_ms = int(SQLITE_BUSY_TIMEOUT_MS)
-        busy_timeout_ms = max(1000, min(int(busy_timeout_ms), 5 * 60_000))
+        busy_timeout_ms = _sqlite_busy_timeout_ms()
 
         kwargs["connect_args"] = {"timeout": float(busy_timeout_ms) / 1000.0}
         if _is_sqlite_file_url(database_url):
             # 限制单进程内同时打开的 SQLite 连接数，减少并发写导致的 "database is locked"。
-            try:
-                pool_size = int((os.environ.get("SQLITE_POOL_SIZE") or str(SQLITE_POOL_SIZE)).strip() or SQLITE_POOL_SIZE)
-            except Exception:
-                pool_size = int(SQLITE_POOL_SIZE)
-            pool_size = max(1, min(int(pool_size), 200))
-
-            try:
-                max_overflow = int((os.environ.get("SQLITE_MAX_OVERFLOW") or str(SQLITE_MAX_OVERFLOW)).strip() or SQLITE_MAX_OVERFLOW)
-            except Exception:
-                max_overflow = int(SQLITE_MAX_OVERFLOW)
-            max_overflow = max(0, min(int(max_overflow), 200))
-
-            try:
-                pool_timeout_s = float((os.environ.get("SQLITE_POOL_TIMEOUT_S") or str(SQLITE_POOL_TIMEOUT_S)).strip() or SQLITE_POOL_TIMEOUT_S)
-            except Exception:
-                pool_timeout_s = float(SQLITE_POOL_TIMEOUT_S)
-            pool_timeout_s = float(max(0.5, min(float(pool_timeout_s), 120.0)))
+            pool_size = parse_int_env(
+                "SQLITE_POOL_SIZE",
+                default=int(SQLITE_POOL_SIZE),
+                min_v=1,
+                max_v=200,
+            )
+            max_overflow = parse_int_env(
+                "SQLITE_MAX_OVERFLOW",
+                default=int(SQLITE_MAX_OVERFLOW),
+                min_v=0,
+                max_v=200,
+            )
+            pool_timeout_s = parse_float_env(
+                "SQLITE_POOL_TIMEOUT_S",
+                default=float(SQLITE_POOL_TIMEOUT_S),
+                min_v=0.5,
+                max_v=120.0,
+            )
 
             kwargs.update(
                 {

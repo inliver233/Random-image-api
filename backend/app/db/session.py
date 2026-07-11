@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import random
 import sqlite3
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -9,6 +8,8 @@ from typing import TypeVar
 
 from sqlalchemy.exc import OperationalError, TimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+
+from app.core.env_parse import parse_float_env, parse_int_env
 
 T = TypeVar("T")
 
@@ -36,23 +37,24 @@ async def with_sqlite_busy_retry(
     retries: int = 12,
     base_delay_s: float = 0.05,
 ) -> T:
-    try:
-        env_retries = int((os.environ.get("SQLITE_BUSY_RETRIES") or "").strip() or retries)
-    except Exception:
-        env_retries = int(retries)
-    retries_i = max(0, min(int(env_retries), 50))
-
-    try:
-        env_base = float((os.environ.get("SQLITE_BUSY_BASE_DELAY_S") or "").strip() or base_delay_s)
-    except Exception:
-        env_base = float(base_delay_s)
-    base_delay = float(max(0.0, min(float(env_base), 5.0)))
-
-    try:
-        env_max_delay = float((os.environ.get("SQLITE_BUSY_MAX_DELAY_S") or "").strip() or 5.0)
-    except Exception:
-        env_max_delay = 5.0
-    max_delay = float(max(0.0, min(float(env_max_delay), 30.0)))
+    retries_i = parse_int_env(
+        "SQLITE_BUSY_RETRIES",
+        default=int(retries),
+        min_v=0,
+        max_v=50,
+    )
+    base_delay = parse_float_env(
+        "SQLITE_BUSY_BASE_DELAY_S",
+        default=float(base_delay_s),
+        min_v=0.0,
+        max_v=5.0,
+    )
+    max_delay = parse_float_env(
+        "SQLITE_BUSY_MAX_DELAY_S",
+        default=5.0,
+        min_v=0.0,
+        max_v=30.0,
+    )
 
     attempt = 0
     while True:
