@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.data_files import ensure_sqlite_parent_dir
 from app.core.errors import ErrorCode, error_body
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.time import parse_iso_dt
@@ -28,19 +28,9 @@ _JOB_STATUSES: tuple[str, ...] = (
 )
 
 
-def _ensure_sqlite_dir(engine: AsyncEngine) -> None:
-    url = engine.url
-    if url.get_backend_name() != "sqlite":
-        return
-    db_path = url.database
-    if not db_path or db_path == ":memory:":
-        return
-    Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
-
-
 async def _check_db(engine: AsyncEngine) -> bool:
     try:
-        _ensure_sqlite_dir(engine)
+        ensure_sqlite_parent_dir(engine.url)
         async with engine.connect() as conn:
             await conn.exec_driver_sql("SELECT 1")
         return True

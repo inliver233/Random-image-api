@@ -1,8 +1,32 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy.engine.url import make_url
+
+
+def ensure_sqlite_parent_dir(database_url: str | Any) -> None:
+    """
+    Ensure the parent directory of a SQLite file DB exists.
+
+    Accepts a URL string or a SQLAlchemy URL-like object with get_backend_name/database.
+    No-op for non-SQLite and in-memory databases.
+    """
+    try:
+        if hasattr(database_url, "get_backend_name") and hasattr(database_url, "database"):
+            url = database_url
+        else:
+            url = make_url(str(database_url or ""))
+    except Exception:
+        return
+
+    if url.get_backend_name() != "sqlite":
+        return
+    db_path = url.database
+    if not db_path or db_path == ":memory:":
+        return
+    Path(db_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
 
 
 def get_sqlite_db_dir(database_url: str) -> Path:
