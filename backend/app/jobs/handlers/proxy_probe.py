@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.coerce import format_exc, truncate_text
-from app.core.config import load_settings
+from app.core.config import Settings, load_settings
 from app.core.crypto import FieldEncryptor
 from app.core.metrics import PROXY_PROBE_LATENCY_MS
 from app.core.proxy_health import (
@@ -87,8 +87,10 @@ def build_proxy_probe_handler(
     engine: AsyncEngine,
     *,
     prober: ProbeFunc | None = None,
+    settings: Settings | None = None,
 ) -> Any:
-    settings = load_settings()
+    if settings is None:
+        settings = load_settings()
     encryptor = FieldEncryptor.from_key(settings.field_encryption_key)
     Session = create_sessionmaker(engine)
 

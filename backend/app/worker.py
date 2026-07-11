@@ -8,7 +8,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.easy_proxies.auto_refresh import EasyProxiesAutoRefreshConfig, EasyProxiesAutoRefresher
-from app.core.config import load_settings
+from app.core.config import Settings, load_settings
 from app.core.env_parse import (
     parse_bool_env,
     parse_float_env,
@@ -60,13 +60,17 @@ def _disabled_handler(job_type: str, *, reason: str):
     return _handler
 
 
-def build_default_dispatcher(engine) -> JobDispatcher:
+def build_default_dispatcher(engine, *, settings: Settings | None = None) -> JobDispatcher:
     # One catalog + tag store for catalog-writing handlers (import / hydrate / heal).
+    s = settings if settings is not None else load_settings()
     db_url = str(getattr(engine, "url", "") or "")
     catalog = build_catalog_store(database_url=db_url)
     tags = build_tag_store(database_url=db_url)
     dispatcher = JobDispatcher()
-    dispatcher.register("import_images", build_import_images_handler(engine, catalog=catalog, tag_store=tags))
+    dispatcher.register(
+        "import_images",
+        build_import_images_handler(engine, catalog=catalog, tag_store=tags, settings=s),
+    )
 
     def _safe_register(job_type: str, builder: Callable[[], Any]) -> None:
         try:
@@ -78,11 +82,11 @@ def build_default_dispatcher(engine) -> JobDispatcher:
 
     _safe_register(
         "hydrate_metadata",
-        lambda: build_hydrate_metadata_handler(engine, catalog=catalog, tag_store=tags),
+        lambda: build_hydrate_metadata_handler(engine, catalog=catalog, tag_store=tags, settings=s),
     )
-    _safe_register("heal_url", lambda: build_heal_url_handler(engine, catalog=catalog))
-    _safe_register("proxy_probe", lambda: build_proxy_probe_handler(engine))
-    _safe_register("easy_proxies_import", lambda: build_easy_proxies_import_handler(engine))
+    _safe_register("heal_url", lambda: build_heal_url_handler(engine, catalog=catalog, settings=s))
+    _safe_register("proxy_probe", lambda: build_proxy_probe_handler(engine, settings=s))
+    _safe_register("easy_proxies_import", lambda: build_easy_proxies_import_handler(engine, settings=s))
     return dispatcher
 
 
@@ -268,7 +272,7 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
     engine = create_engine(settings.database_url)
     scheduler: _JobScheduler | None = None
     try:
-        dispatcher = build_default_dispatcher(engine)
+        dispatcher = build_default_dispatcher(engine, settings=settings)
 
         base_url = parse_str_env("EASY_PROXIES_BASE_URL")
         auto_refresh_enabled = parse_bool_env("EASY_PROXIES_AUTO_REFRESH", default=True)

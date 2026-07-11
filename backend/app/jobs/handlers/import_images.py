@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.admin_request import parse_bool
 from app.core.coerce import as_optional_int, as_str, derive_orientation
-from app.core.config import load_settings
+from app.core.config import Settings, load_settings
 from app.core.data_files import get_sqlite_db_dir, resolve_file_ref
 from app.core.pixiv_urls import parse_pixiv_original_url
 from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
@@ -122,7 +122,9 @@ def build_import_images_handler(
     *,
     catalog: CatalogStore | None = None,
     tag_store: TagStore | None = None,
+    settings: Settings | None = None,
 ):
+    s = settings if settings is not None else load_settings()
     Session = create_sessionmaker(engine)
     catalog_store = catalog if catalog is not None else build_catalog_store(database_url=str(engine.url))
     tag_store_port = tag_store if tag_store is not None else build_tag_store(database_url=str(engine.url))
@@ -243,9 +245,8 @@ def build_import_images_handler(
             image_ids = await with_sqlite_busy_retry(_op)
             if image_ids:
                 # Best-effort: warm random-engine index (+ optional R2 prewarm) after each import chunk.
-                settings = load_settings()
-                await maybe_publish_engine_upserts(engine, image_ids=list(image_ids), settings=settings)
-                await maybe_enqueue_r2_prewarm(image_ids=list(image_ids), settings=settings)
+                await maybe_publish_engine_upserts(engine, image_ids=list(image_ids), settings=s)
+                await maybe_enqueue_r2_prewarm(image_ids=list(image_ids), settings=s)
             return list(image_ids or [])
 
         if input_format == "pixiv_batch_downloader_json":

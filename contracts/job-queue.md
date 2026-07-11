@@ -37,6 +37,7 @@ Wire-up reads settings (not raw `os.environ` at call sites):
 
 - API: `app.state.job_queue = build_job_queue(engine, backend=settings.job_queue_backend)`
 - Worker: same via `load_settings().job_queue_backend`
+- Worker handlers: `build_default_dispatcher(engine, settings=…)` injects the same Settings into import / hydrate / heal / proxy_probe / easy_proxies builders (optional kwarg; `load_settings()` fallback for direct builder tests)
 - `/healthz` + `GET /admin/api/maintenance/modular-ports` → `requested` from settings
 
 ## Semantics (must preserve on any backend)

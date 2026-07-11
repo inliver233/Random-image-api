@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.random_query import normalize_iso_utc_optional
 from app.core.coerce import as_int, as_optional_int, as_str, clamp_int, derive_orientation, format_exc, truncate_text
-from app.core.config import load_settings
+from app.core.config import Settings, load_settings
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
@@ -164,8 +164,10 @@ def build_hydrate_metadata_handler(
     token_strategy: str = "least_error",
     catalog: CatalogStore | None = None,
     tag_store: TagStore | None = None,
+    settings: Settings | None = None,
 ) -> Any:
-    settings = load_settings()
+    if settings is None:
+        settings = load_settings()
     encryptor = FieldEncryptor.from_key(settings.field_encryption_key)
     oauth_config = PixivOauthConfig(
         client_id=settings.pixiv_oauth_client_id,

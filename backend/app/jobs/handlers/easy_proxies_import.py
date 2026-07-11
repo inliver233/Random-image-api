@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.source_ref import sanitize_source_ref
-from app.core.config import load_settings
+from app.core.config import Settings, load_settings
 from app.core.crypto import FieldEncryptor
 from app.core.env_parse import parse_str_env
 from app.core.proxy_uri import parse_proxy_uri
@@ -31,8 +31,14 @@ def _parse_conflict_policy(value: Any) -> str:
     return v
 
 
-def build_easy_proxies_import_handler(engine: AsyncEngine, *, transport: httpx.BaseTransport | None = None) -> Any:
-    settings = load_settings()
+def build_easy_proxies_import_handler(
+    engine: AsyncEngine,
+    *,
+    transport: httpx.BaseTransport | None = None,
+    settings: Settings | None = None,
+) -> Any:
+    if settings is None:
+        settings = load_settings()
     encryptor = FieldEncryptor.from_key(settings.field_encryption_key)
     Session = create_sessionmaker(engine)
 

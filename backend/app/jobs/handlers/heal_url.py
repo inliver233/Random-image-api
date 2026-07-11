@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.core.config import load_settings
+from app.core.config import Settings, load_settings
 from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
 from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.core.time import iso_utc_ms
@@ -22,9 +22,13 @@ def build_heal_url_handler(
     *,
     transport: httpx.BaseTransport | None = None,
     catalog: CatalogStore | None = None,
+    settings: Settings | None = None,
 ) -> Any:
+    s = settings if settings is not None else load_settings()
     catalog_store = catalog if catalog is not None else build_catalog_store(database_url=str(engine.url))
-    hydrate = build_hydrate_metadata_handler(engine, transport=transport, catalog=catalog_store)
+    hydrate = build_hydrate_metadata_handler(
+        engine, transport=transport, catalog=catalog_store, settings=s
+    )
     Session = create_sessionmaker(engine)
 
     async def _handler(job: dict[str, Any]) -> None:
@@ -56,13 +60,12 @@ def build_heal_url_handler(
         healed_ids = await with_sqlite_busy_retry(_op)
         # hydrate already published upserts; re-publish after status=3→1 so engine re-indexes.
         if healed_ids:
-            settings = load_settings()
             await maybe_publish_engine_upserts(
                 engine,
                 image_ids=list(healed_ids),
-                settings=settings,
+                settings=s,
             )
-            await maybe_enqueue_r2_prewarm(image_ids=list(healed_ids), settings=settings)
+            await maybe_enqueue_r2_prewarm(image_ids=list(healed_ids), settings=s)
 
     return _handler
 
