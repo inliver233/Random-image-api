@@ -200,6 +200,7 @@ def test_pick_with_strategy_skip_engine_bypasses_engine(monkeypatch) -> None:
         assert meta.get("engine_status") == "skipped_sticky"
         assert engine_calls == []
         assert "skipped_traffic" not in observed
+        assert observed.count("skipped_sticky") == 1
 
     asyncio.run(_run())
 

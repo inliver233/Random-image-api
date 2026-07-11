@@ -594,6 +594,10 @@ async def pick_with_strategy(
         }
     elif skip_engine:
         # Sticky Python path after first dual-run attempt — no traffic metric pollution.
+        try:
+            observe_random_engine_pick(status="skipped_sticky")
+        except Exception:
+            pass
         debug_base = {
             **debug_base,
             "engine_status": "skipped_sticky",

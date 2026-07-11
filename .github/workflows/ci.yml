@@ -59,6 +59,40 @@ jobs:
         run: npm test
         working-directory: frontend
 
+  edge-img-worker-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+        working-directory: edge/img-worker
+
+      - name: Pure tests
+        run: npm test
+        working-directory: edge/img-worker
+
+  edge-api-worker-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install --no-fund --no-audit
+        working-directory: edge/api-worker
+
+      - name: Pure tests
+        run: npm test
+        working-directory: edge/api-worker
+
   compose-config:
     runs-on: ubuntu-latest
     steps:

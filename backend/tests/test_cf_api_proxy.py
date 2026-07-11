@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from app.core.cf_api_proxy import (
+    DEFAULT_CF_API_PROXY_HOSTS,
     CfApiProxyConfig,
     cf_api_proxy_headers,
     is_cf_api_proxy_host_allowed,
@@ -130,3 +134,31 @@ def test_settings_disables_flag_without_bases() -> None:
     )
     assert isinstance(settings, Settings)
     assert settings.cf_api_proxy_enabled is False
+
+
+def test_cf_api_proxy_matches_frozen_proxy_vectors() -> None:
+    """Parity with edge/api-worker/test/proxy_vectors.json (Worker parse + allowlist)."""
+    vectors_path = (
+        Path(__file__).resolve().parents[2] / "edge" / "api-worker" / "test" / "proxy_vectors.json"
+    )
+    vectors = json.loads(vectors_path.read_text(encoding="utf-8"))
+    assert set(vectors["default_hosts"]) == set(DEFAULT_CF_API_PROXY_HOSTS)
+
+    cfg = CfApiProxyConfig(enabled=True, base_urls=["https://edge.example.com"], secret="")
+    base = "https://edge.example.com"
+
+    for row in vectors["parse_ok"]:
+        host = row["host"]
+        path_with_query = row["pathWithQuery"]
+        if "?" in path_with_query:
+            path, q = path_with_query.split("?", 1)
+            raw = f"https://{host}{path}?{q}"
+        else:
+            path = path_with_query
+            raw = f"https://{host}{path}"
+        out = rewrite_url_via_cf_api_proxy(cfg, raw)
+        assert out == f"{base}/p/{host}{path_with_query}", row
+
+    for host in vectors["host_reject_in_allowlist_parse"]:
+        assert is_cf_api_proxy_host_allowed(host) is False, host
+        assert rewrite_url_via_cf_api_proxy(cfg, f"https://{host}/v1/x") is None
