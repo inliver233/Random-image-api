@@ -135,6 +135,12 @@ async def healthz(request: Request) -> Any:
         if rl_backend not in {"memory", "redis"}:
             rl_backend = "memory"
         redis_url_configured = bool(str(getattr(settings, "redis_url", "") or "").strip()) if settings is not None else False
+        rl_active = str(
+            getattr(getattr(request.app.state, "api_key_limiter", None), "backend", "memory") or "memory"
+        ).strip().lower()
+        if rl_active not in {"memory", "redis"}:
+            # No limiter on app.state (minimal healthz harness) → fold config like before.
+            rl_active = rl_backend if (rl_backend != "redis" or redis_url_configured) else "memory"
         job_queue_requested = (
             str(getattr(settings, "job_queue_backend", "sqlite") or "sqlite").strip().lower()
             if settings is not None
@@ -184,10 +190,12 @@ async def healthz(request: Request) -> Any:
                 else 0,
             },
             "api_key_rate_limit": {
-                # Config only — no outbound Redis probe on /healthz.
-                "backend": rl_backend if (rl_backend != "redis" or redis_url_configured) else "memory",
+                # No outbound Redis probe on /healthz. backend = active limiter label.
+                "backend": rl_active,
+                "requested": rl_backend,
                 "redis_url_configured": redis_url_configured,
                 "required": bool(getattr(settings, "public_api_key_required", False)) if settings is not None else False,
+                "using_memory_fallback": rl_backend == "redis" and rl_active == "memory",
             },
             # Job claim port (SQLite today; Redis/NATS reserved). Active from app.state.
             "job_queue": {

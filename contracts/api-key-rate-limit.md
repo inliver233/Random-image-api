@@ -27,7 +27,7 @@ Redis activates only when **backend=redis and URL set**. Missing `redis` package
 
 | Surface | Notes |
 | --- | --- |
-| `/healthz` → `modules.api_key_rate_limit` | Config only (no Redis probe; no secrets) |
+| `/healthz` → `modules.api_key_rate_limit` | `backend` (active), `requested` (Settings), `using_memory_fallback`, `redis_url_configured`, `required` — no Redis probe / secrets |
 | `GET /admin/api/maintenance/api-key-rate-limit` | Active vs configured backend; never returns URL |
 | Prometheus `new_pixiv_api_key_rate_limit_total{result,backend}` | `allowed` / `limited` × `memory` / `redis` |
 

@@ -37,8 +37,10 @@ def test_healthz_ok_includes_request_id() -> None:
     assert modules["random_engine"]["enabled"] is False
     assert modules["random_engine"]["url_configured"] is False
     assert modules["api_key_rate_limit"]["backend"] == "memory"
+    assert modules["api_key_rate_limit"]["requested"] == "memory"
     assert modules["api_key_rate_limit"]["redis_url_configured"] is False
     assert modules["api_key_rate_limit"]["required"] is False
+    assert modules["api_key_rate_limit"]["using_memory_fallback"] is False
     assert modules["job_queue"]["backend"] == "sqlite"
     assert modules["job_queue"]["requested"] == "sqlite"
     assert modules["job_queue"]["implemented"] is True
@@ -111,6 +113,39 @@ def test_healthz_recent_dedup_reports_settings_fallback(tmp_path: Path, monkeypa
         assert rd.get("backend") == "memory"
         assert rd.get("requested") == "redis"
         assert rd.get("using_memory_fallback") is True
+
+
+def test_healthz_api_key_rate_limit_reports_settings_fallback(tmp_path: Path, monkeypatch) -> None:
+    """PUBLIC_API_KEY_RATE_LIMIT_BACKEND=redis without REDIS_URL → memory active + fallback honesty."""
+    from app.main import create_app
+
+    db_path = tmp_path / "healthz_api_key_rl.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
+    monkeypatch.setenv("PUBLIC_API_KEY_RATE_LIMIT_BACKEND", "redis")
+    # No REDIS_URL → factory falls back to memory.
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        resp = client.get("/healthz", headers={"X-Request-Id": "req_test"})
+        assert resp.status_code == 200
+        modules = resp.json().get("modules") or {}
+        rl = modules.get("api_key_rate_limit") or {}
+        assert rl.get("backend") == "memory"
+        assert rl.get("requested") == "redis"
+        assert rl.get("using_memory_fallback") is True
+        assert rl.get("redis_url_configured") is False
 
 
 def test_healthz_uses_request_id_header_if_provided() -> None:
