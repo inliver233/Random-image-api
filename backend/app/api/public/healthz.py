@@ -156,6 +156,12 @@ async def healthz(request: Request) -> Any:
             "job_queue": {
                 "backend": "sqlite",
             },
+            # Catalog store dialect (sqlite default; postgres when DATABASE_URL is postgres*).
+            "catalog": {
+                "backend": (
+                    str(getattr(getattr(request.app.state, "catalog_store", None), "backend", "sqlite") or "sqlite")
+                ),
+            },
         }
 
         resp = JSONResponse(

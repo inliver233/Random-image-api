@@ -37,6 +37,7 @@ from app.core.random_request_stats import RandomRequestStats
 from app.core.request_id import build_request_id_middleware, get_or_create_request_id, set_request_id_on_state
 from app.core.runtime_config_cache import RuntimeConfigCache
 from app.core.security import decode_jwt, parse_bearer_token
+from app.db.catalog import build_catalog_store
 from app.db.engine import create_engine
 from app.db.models.admin_audit import AdminAudit
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
@@ -183,6 +184,7 @@ def create_app() -> FastAPI:
 
     engine = create_engine(settings.database_url)
     app.state.engine = engine
+    app.state.catalog_store = build_catalog_store(database_url=str(settings.database_url))
     app.state.httpx_transport = build_default_async_transport()
     app.state.httpx_client = build_shared_async_client(transport=app.state.httpx_transport)
     app.state.runtime_config_cache = RuntimeConfigCache(ttl_s=2.0)
