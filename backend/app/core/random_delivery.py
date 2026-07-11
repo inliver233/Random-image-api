@@ -249,6 +249,10 @@ async def deliver_random_image_stream(
             illust_id_for_hydrate = int(image.illust_id)
             needs_hydrate = needs_opportunistic_hydrate(image)
             should_mark_ok = should_mark_image_ok(image)
+            # Engine DTOs set last_ok_at="engine" so edge/JSON skip catalog mark without a
+            # row load. Local stream below proves origin bytes — force mark_ok for DTOs.
+            if getattr(image, "from_engine_item", False):
+                should_mark_ok = True
             user_id_for_recent = int(image.user_id) if getattr(image, "user_id", None) is not None else None
 
         if prefer_edge_redirect:

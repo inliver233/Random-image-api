@@ -248,3 +248,170 @@ def test_deliver_random_image_stream_edge_unavailable_falls_to_local(monkeypatch
     after_local = IMAGE_DELIVERY_TOTAL.labels(path="local_stream")._value.get()
     assert after_miss == before_miss + 1.0
     assert after_local == before_local + 1.0
+    # Catalog row with last_ok_at=None → mark_ok scheduled after local stream.
+    assert len(bg.tasks) == 1
+
+
+def test_deliver_random_image_stream_engine_dto_marks_ok_on_local(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Engine DTO last_ok_at='engine' skips mark on edge/JSON but local stream proves bytes."""
+    image = SimpleNamespace(
+        id=3,
+        illust_id=30,
+        original_url="https://i.pximg.net/img-original/img/2021/02/03/04/05/06/30_p0.jpg",
+        user_id=5,
+        last_ok_at="engine",
+        last_error_code=None,
+        from_engine_item=True,
+        width=100,
+        height=100,
+        x_restrict=0,
+        ai_type=0,
+        user_name="u",
+        title="t",
+        created_at_pixiv="2021-01-01T00:00:00Z",
+        bookmark_count=1,
+        view_count=1,
+        comment_count=0,
+    )
+
+    class _SessionCtx:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *args):
+            return False
+
+    def Session():  # noqa: N802
+        return _SessionCtx()
+
+    async def pick(*, session, exclude_image_ids=None):  # type: ignore[no-untyped-def]
+        return image, {"picked_by": "engine"}
+
+    monkeypatch.setattr(
+        "app.core.random_delivery.resolve_image_edge_redirect_url",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr("app.core.random_delivery.needs_opportunistic_hydrate", lambda _img: False)
+
+    async def _prepare(**kwargs):  # type: ignore[no-untyped-def]
+        return ("https://origin.example/img.jpg", None)
+
+    monkeypatch.setattr("app.core.random_delivery.prepare_origin_stream", _prepare)
+
+    class _FakeResp:
+        status_code = 200
+
+    async def _stream_url(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return _FakeResp()
+
+    monkeypatch.setattr("app.core.random_delivery.stream_url", _stream_url)
+
+    bg = BackgroundTasks()
+
+    def no_match() -> ApiError:
+        return ApiError(code=ErrorCode.NOT_FOUND, message="none", status_code=404)
+
+    async def _run():
+        return await deliver_random_image_stream(
+            pick=pick,
+            Session=Session,
+            engine=object(),
+            settings=object(),
+            runtime=object(),
+            httpx_transport=None,
+            httpx_client=None,
+            range_header=None,
+            attempts=1,
+            prefer_edge_redirect=False,
+            use_pixiv_cat=False,
+            mirror_host="i.pixiv.cat",
+            anti_repeat_enabled=False,
+            dedup_window_s=60.0,
+            dedup_max_images=10,
+            dedup_max_authors=10,
+            background_tasks=bg,
+            no_match_error=no_match,
+        )
+
+    resp = asyncio.run(_run())
+    assert isinstance(resp, _FakeResp)
+    # Forced mark_ok for engine DTO after local stream proves bytes.
+    assert len(bg.tasks) == 1
+    assert getattr(bg.tasks[0].func, "__name__", "") == "best_effort"
+
+
+def test_deliver_random_image_stream_engine_dto_skips_mark_ok_on_edge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Even with from_engine_item, edge 302 must not schedule mark_ok."""
+    image = SimpleNamespace(
+        id=4,
+        illust_id=40,
+        original_url="https://i.pximg.net/img-original/img/2021/02/03/04/05/06/40_p0.jpg",
+        user_id=5,
+        last_ok_at="engine",
+        last_error_code=None,
+        from_engine_item=True,
+        width=100,
+        height=100,
+        x_restrict=0,
+        ai_type=0,
+        user_name="u",
+        title="t",
+        created_at_pixiv="2021-01-01T00:00:00Z",
+        bookmark_count=1,
+        view_count=1,
+        comment_count=0,
+    )
+
+    class _SessionCtx:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *args):
+            return False
+
+    def Session():  # noqa: N802
+        return _SessionCtx()
+
+    async def pick(*, session, exclude_image_ids=None):  # type: ignore[no-untyped-def]
+        return image, {"picked_by": "engine"}
+
+    monkeypatch.setattr(
+        "app.core.random_delivery.resolve_image_edge_redirect_url",
+        lambda **kwargs: "https://img.example.com/u/1/sig/b64",
+    )
+    monkeypatch.setattr("app.core.random_delivery.needs_opportunistic_hydrate", lambda _img: False)
+
+    bg = BackgroundTasks()
+
+    def no_match() -> ApiError:
+        return ApiError(code=ErrorCode.NOT_FOUND, message="none", status_code=404)
+
+    async def _run():
+        return await deliver_random_image_stream(
+            pick=pick,
+            Session=Session,
+            engine=object(),
+            settings=object(),
+            runtime=object(),
+            httpx_transport=None,
+            httpx_client=None,
+            range_header=None,
+            attempts=1,
+            prefer_edge_redirect=True,
+            use_pixiv_cat=False,
+            mirror_host="i.pixiv.cat",
+            anti_repeat_enabled=False,
+            dedup_window_s=60.0,
+            dedup_max_images=10,
+            dedup_max_authors=10,
+            background_tasks=bg,
+            no_match_error=no_match,
+        )
+
+    resp = asyncio.run(_run())
+    assert isinstance(resp, RedirectResponse)
+    assert len(bg.tasks) == 0

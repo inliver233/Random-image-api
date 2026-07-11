@@ -245,8 +245,9 @@ class EnginePickImage:
     """Lightweight delivery DTO from Go PickItem (avoids SQLite rehydrate on happy path).
 
     Attribute surface matches what public delivery / side-effects read via getattr.
-    last_ok_at is set to a non-null marker so should_mark_image_ok skips catalog write
-    (we do not know fail/error state without a row load; edge path already skips mark_ok).
+    last_ok_at is set to a non-null marker so should_mark_image_ok is False for edge/JSON
+    paths (no byte proof, no fail-state without a row load). Local stream delivery must
+    still force mark_ok when from_engine_item is True (see deliver_random_image_stream).
     """
 
     __slots__ = (
