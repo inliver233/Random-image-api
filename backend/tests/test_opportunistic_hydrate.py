@@ -139,7 +139,13 @@ def test_image_proxy_opportunistically_enqueues_hydrate_metadata_once(tmp_path: 
         assert req.headers.get("Referer") == "https://www.pixiv.net/"
         return httpx.Response(200, headers={"Content-Type": "image/jpeg"}, content=b"img-bytes")
 
-    app.state.httpx_transport = httpx.MockTransport(handler)
+    transport = httpx.MockTransport(handler)
+
+    def _install_mock_http() -> None:
+        # deliver_known_image prefers the shared client when no residential proxy is selected.
+        # Re-install after each TestClient: app shutdown closes app.state.httpx_client.
+        app.state.httpx_transport = transport
+        app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
 
     def _count_jobs() -> int:
         async def _op() -> int:
@@ -176,6 +182,7 @@ def test_image_proxy_opportunistically_enqueues_hydrate_metadata_once(tmp_path: 
 
         return asyncio.run(_op())
 
+    _install_mock_http()
     with TestClient(app) as client:
         resp1 = client.get("/i/1.jpg", headers={"X-Request-Id": "req_test"})
         assert resp1.status_code == 200
@@ -184,6 +191,7 @@ def test_image_proxy_opportunistically_enqueues_hydrate_metadata_once(tmp_path: 
     assert _count_jobs() == 1
     assert _fetch_payload_reason() == "image_proxy"
 
+    _install_mock_http()
     with TestClient(app) as client:
         resp2 = client.get("/i/1.jpg", headers={"X-Request-Id": "req_test2"})
         assert resp2.status_code == 200

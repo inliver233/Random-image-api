@@ -3,15 +3,10 @@ from __future__ import annotations
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.coerce import truncate_text
 from app.core.redact import redact_text
 from app.db.models.images import Image
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
-
-
-def _truncate(text: str, *, max_len: int = 500) -> str:
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 3] + "..."
 
 
 async def mark_image_failure(
@@ -23,7 +18,7 @@ async def mark_image_failure(
     error_message: str,
 ) -> None:
     Session = create_sessionmaker(engine)
-    msg = _truncate(redact_text(error_message or ""))
+    msg = truncate_text(redact_text(error_message or ""))
 
     async def _op() -> None:
         async with Session() as session:

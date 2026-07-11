@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.core.coerce import as_int, as_optional_int, as_str, derive_orientation
+from app.core.coerce import as_int, as_optional_int, as_str, derive_orientation, truncate_text
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.errors import ApiError, ErrorCode
@@ -230,11 +230,6 @@ def build_hydrate_metadata_handler(
         max_v=24 * 60 * 60,
     )
 
-    def _truncate(text: str, *, max_len: int = 500) -> str:
-        if len(text) <= max_len:
-            return text
-        return text[: max_len - 3] + "..."
-
     async def _mark_proxy_ok(endpoint_id: int, *, latency_ms: float | None, now_iso: str) -> None:
         if int(endpoint_id) <= 0:
             return
@@ -274,7 +269,7 @@ def build_hydrate_metadata_handler(
             else None
         )
         msg_raw = f"{type(error).__name__}: {error}" if isinstance(error, BaseException) else str(error)
-        msg = _truncate(redact_text(msg_raw))
+        msg = truncate_text(redact_text(msg_raw))
 
         async def _op() -> None:
             async with Session() as session:

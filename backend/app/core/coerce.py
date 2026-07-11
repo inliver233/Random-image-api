@@ -44,3 +44,12 @@ def derive_orientation(width: int | None, height: int | None) -> tuple[float | N
     else:
         orientation = 3
     return float(width) / float(height), orientation
+
+
+def truncate_text(text: str, *, max_len: int = 500) -> str:
+    """Truncate with trailing ellipsis when longer than max_len (min useful max_len ≈ 4)."""
+    if len(text) <= max_len:
+        return text
+    if max_len <= 3:
+        return text[:max_len]
+    return text[: max_len - 3] + "..."

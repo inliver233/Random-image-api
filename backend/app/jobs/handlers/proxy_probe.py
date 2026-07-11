@@ -11,6 +11,7 @@ import httpx
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.coerce import truncate_text
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor
 from app.core.metrics import PROXY_PROBE_LATENCY_MS
@@ -50,12 +51,6 @@ class ProbeResult:
 
 
 ProbeFunc = Callable[[ProbeTarget, ProbeConfig], Awaitable[ProbeResult]]
-
-
-def _truncate(text: str, *, max_len: int = 500) -> str:
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 3] + "..."
 
 
 def _build_proxy_uri(
@@ -217,7 +212,7 @@ def build_proxy_probe_handler(
                         )
                         continue
 
-                    msg = _truncate(redact_text(r.error or "probe_failed"))
+                    msg = truncate_text(redact_text(r.error or "probe_failed"))
                     blacklist_expr = sa.case(
                         (
                             (ProxyEndpoint.failure_count + 1) >= int(BLACKLIST_AFTER_FAILURES),

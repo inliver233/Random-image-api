@@ -4,7 +4,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 
+from app.core.coerce import truncate_text
 from app.core.redact import redact_text
+from app.core.time import iso_utc_ms
 from app.jobs.backoff import backoff_seconds
 
 
@@ -41,18 +43,6 @@ class JobTransition:
     updated_at: str
 
 
-def _iso_utc_ms(dt: datetime) -> str:
-    dt = dt.astimezone(timezone.utc)
-    ms = dt.microsecond // 1000
-    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ms:03d}Z"
-
-
-def _truncate(text: str, *, max_len: int = 2000) -> str:
-    if len(text) <= max_len:
-        return text
-    return text[: max_len - 3] + "..."
-
-
 def on_job_success(job: Job, *, now: datetime | None = None) -> JobTransition:
     now_dt = now or datetime.now(timezone.utc)
     return JobTransition(
@@ -62,14 +52,14 @@ def on_job_success(job: Job, *, now: datetime | None = None) -> JobTransition:
         last_error=None,
         locked_by=None,
         locked_at=None,
-        updated_at=_iso_utc_ms(now_dt),
+        updated_at=iso_utc_ms(now_dt),
     )
 
 
 def on_job_failure(job: Job, *, error: str, now: datetime | None = None) -> JobTransition:
     now_dt = now or datetime.now(timezone.utc)
     next_attempt = job.attempt + 1
-    redacted_error = _truncate(redact_text(error))
+    redacted_error = truncate_text(redact_text(error), max_len=2000)
 
     if next_attempt >= job.max_attempts:
         return JobTransition(
@@ -79,7 +69,7 @@ def on_job_failure(job: Job, *, error: str, now: datetime | None = None) -> JobT
             last_error=redacted_error,
             locked_by=None,
             locked_at=None,
-            updated_at=_iso_utc_ms(now_dt),
+            updated_at=iso_utc_ms(now_dt),
         )
 
     delay_s = backoff_seconds(next_attempt)
@@ -87,11 +77,11 @@ def on_job_failure(job: Job, *, error: str, now: datetime | None = None) -> JobT
     return JobTransition(
         status=JobStatus.FAILED,
         attempt=next_attempt,
-        run_after=_iso_utc_ms(run_after_dt),
+        run_after=iso_utc_ms(run_after_dt),
         last_error=redacted_error,
         locked_by=None,
         locked_at=None,
-        updated_at=_iso_utc_ms(now_dt),
+        updated_at=iso_utc_ms(now_dt),
     )
 
 
@@ -100,7 +90,7 @@ def on_job_defer(job: Job, *, run_after: str, error: str, now: datetime | None =
     run_after = (run_after or "").strip()
     if not run_after:
         raise ValueError("run_after is required")
-    redacted_error = _truncate(redact_text(error))
+    redacted_error = truncate_text(redact_text(error), max_len=2000)
 
     return JobTransition(
         status=JobStatus.FAILED,
@@ -109,5 +99,5 @@ def on_job_defer(job: Job, *, run_after: str, error: str, now: datetime | None =
         last_error=redacted_error,
         locked_by=None,
         locked_at=None,
-        updated_at=_iso_utc_ms(now_dt),
+        updated_at=iso_utc_ms(now_dt),
     )

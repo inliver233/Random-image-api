@@ -6,15 +6,10 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.metrics import JOBS_CLAIM_TOTAL
+from app.core.time import iso_utc_ms
 from app.db.session import with_sqlite_busy_retry
 
 DEFAULT_LOCK_TTL_S = 300
-
-
-def _iso_utc_ms(dt: datetime) -> str:
-    dt = dt.astimezone(timezone.utc)
-    ms = dt.microsecond // 1000
-    return dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ms:03d}Z"
 
 
 async def claim_next_job(
@@ -26,8 +21,8 @@ async def claim_next_job(
 ) -> dict[str, Any] | None:
     now_dt = now or datetime.now(timezone.utc)
     expired_before_dt = now_dt - timedelta(seconds=lock_ttl_s)
-    now_s = _iso_utc_ms(now_dt)
-    expired_before_s = _iso_utc_ms(expired_before_dt)
+    now_s = iso_utc_ms(now_dt)
+    expired_before_s = iso_utc_ms(expired_before_dt)
 
     sql = """
 WITH candidate AS (
@@ -108,7 +103,7 @@ async def renew_job_lock(
     now: datetime | None = None,
 ) -> bool:
     now_dt = now or datetime.now(timezone.utc)
-    now_s = _iso_utc_ms(now_dt)
+    now_s = iso_utc_ms(now_dt)
 
     sql = """
 UPDATE jobs
