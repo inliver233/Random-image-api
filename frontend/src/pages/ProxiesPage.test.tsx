@@ -165,11 +165,14 @@ describe("ProxiesPage", () => {
       target: { value: "http://u:pa@ss@1.2.3.4:8080\nsocks5://5.6.7.8:1080\n" },
     });
 
-    const form = document.querySelector("form");
+    const manualCard = screen.getByText("手动导入代理节点").closest(".ant-card");
+    expect(manualCard).not.toBeNull();
+    const form = manualCard!.querySelector("form");
     expect(form).not.toBeNull();
     fireEvent.submit(form as HTMLFormElement);
 
-    expect(await screen.findByText("手动导入完成")).toBeInTheDocument();
+    // ActionAlerts + result Alert both show the same title.
+    expect((await screen.findAllByText("手动导入完成")).length).toBeGreaterThanOrEqual(1);
     expect(await screen.findByText(/请求ID:\s*req_manual/)).toBeInTheDocument();
   });
 
@@ -182,9 +185,10 @@ describe("ProxiesPage", () => {
     );
 
     expect(await screen.findByText("代理管理（仅 Hydrate / OAuth）")).toBeInTheDocument();
+    expect(await screen.findByText("http://***:***@1.2.3.4:8080")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "启动健康探测任务" }));
 
-    expect(await screen.findByText("探测任务已入队")).toBeInTheDocument();
+    expect((await screen.findAllByText("探测任务已入队")).length).toBeGreaterThanOrEqual(1);
     expect(await screen.findByText(/任务ID:\s*job_1/)).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:\s*req_probe/)).toBeInTheDocument();
   });

@@ -597,8 +597,9 @@ export function ProxiesPage() {
                 if (Number.isFinite(autoId) && autoId > 0) attachPoolId = autoId;
               }
             }
-            if (values.bootstrap && typeof attachPoolId !== "number") {
-              setEasyErrorMessage("请选择要加入的代理池");
+            if (values.bootstrap && (typeof attachPoolId !== "number" || attachPoolId <= 0)) {
+              // Was setEasyErrorMessage (undefined) — crash; route through easyAlerts.
+              easyAlerts.setErrorMessage("请选择要加入的代理池");
               return;
             }
             easyImport.mutate({ ...values, attach_pool_id: attachPoolId });

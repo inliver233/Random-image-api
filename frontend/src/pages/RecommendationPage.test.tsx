@@ -130,8 +130,7 @@ describe("RecommendationPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /漫画倍率设为 0/ }));
     fireEvent.click(screen.getByRole("button", { name: /保存推荐配置/ }));
 
-    expect(await screen.findByText("保存成功")).toBeInTheDocument();
-    expect(await screen.findByText(/更新条目数:\s*3/)).toBeInTheDocument();
+    expect(await screen.findByText(/保存成功（更新条目数:\s*3）/)).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:\s*req_save/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /预览一次随机结果/ }));

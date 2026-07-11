@@ -323,11 +323,11 @@ export function PlaygroundPage() {
                   <Form.Item
                     label="质量抽样数量（quality，留空=服务端默认）"
                     name="quality_samples"
-                    extra="与服务端一致：硬上限 200。"
+                    extra="与服务端一致：查询/运行时硬上限 64。"
                   >
                     <InputNumber
                       min={1}
-                      max={200}
+                      max={64}
                       placeholder="留空使用服务端默认"
                       style={{ width: "100%" }}
                       disabled={getFieldValue("strategy") !== "quality"}
