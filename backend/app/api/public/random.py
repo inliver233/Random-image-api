@@ -810,11 +810,17 @@ async def random_image(
                 quality_samples_i = int(raw)
             except Exception:
                 quality_samples_i = 12
-    if quality_samples_i < 1 or quality_samples_i > 1000:
+    # Hard cap keeps latency/CPU bounded on SQLite even under strict multi-filter loads.
+    # Explicit query values may still request higher (up to 200) for debugging.
+    _QUALITY_SAMPLES_MAX_QUERY = 200
+    _QUALITY_SAMPLES_MAX_AUTO = 64
+    if quality_samples_i < 1 or quality_samples_i > _QUALITY_SAMPLES_MAX_QUERY:
         if quality_samples_source == "query":
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported quality_samples", status_code=400)
         quality_samples_source = "fallback"
         quality_samples_i = 12
+    elif quality_samples_source != "query" and quality_samples_i > _QUALITY_SAMPLES_MAX_AUTO:
+        quality_samples_i = _QUALITY_SAMPLES_MAX_AUTO
 
     quality_samples_base = int(quality_samples_i)
     quality_samples_multiplier = 1
@@ -854,7 +860,10 @@ async def random_image(
         else:
             quality_samples_multiplier = 1
 
-        quality_samples_i = min(1000, int(max(1, int(quality_samples_base) * int(quality_samples_multiplier))))
+        quality_samples_i = min(
+            _QUALITY_SAMPLES_MAX_AUTO,
+            int(max(1, int(quality_samples_base) * int(quality_samples_multiplier))),
+        )
 
     quality_samples_scaled = bool(quality_samples_i != quality_samples_base)
 

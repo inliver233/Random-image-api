@@ -165,6 +165,7 @@ class _JobScheduler:
                         self._dispatcher,
                         job_row=row,
                         worker_id=str(self._worker_id),
+                        lock_ttl_s=int(self._lock_ttl_s),
                     )
                 except Exception as exc:
                     msg = redact_text(f"{type(exc).__name__}: {exc}")
@@ -212,7 +213,13 @@ async def poll_and_execute_jobs(
             break
 
         try:
-            await execute_claimed_job(engine, dispatcher, job_row=job_row, worker_id=worker_id)
+            await execute_claimed_job(
+                engine,
+                dispatcher,
+                job_row=job_row,
+                worker_id=worker_id,
+                lock_ttl_s=int(lock_ttl_s),
+            )
         except Exception as exc:
             msg = redact_text(f"{type(exc).__name__}: {exc}")
             log.warning("job_execute_failed err=%s", msg)
