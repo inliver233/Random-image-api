@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import Request
 
+from app.core.coerce import clamp_float, clamp_int
 from app.core.errors import ApiError, ErrorCode
 
 
@@ -251,15 +252,9 @@ def parse_int_clamped(
         if default is None:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400) from exc
         return int(default)
-    if n < min_value:
-        if strict:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
-        n = min_value
-    if n > max_value:
-        if strict:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
-        n = max_value
-    return int(n)
+    if strict and (n < min_value or n > max_value):
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+    return clamp_int(n, min_v=min_value, max_v=max_value)
 
 
 def parse_float_clamped(
@@ -289,7 +284,7 @@ def parse_float_clamped(
         if default is None:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
         return float(default)
-    return float(max(float(min_value), min(float(v), float(max_value))))
+    return clamp_float(float(v), min_v=float(min_value), max_v=float(max_value))
 
 
 def _is_finite(value: float) -> bool:

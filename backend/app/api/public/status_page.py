@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from app.core.coerce import clamp_float
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.time import iso_utc_ms
 from app.db.session import with_sqlite_busy_retry
@@ -15,7 +16,8 @@ from app.db.session import with_sqlite_busy_retry
 router = APIRouter()
 
 
-def _clamp_int(value: Any) -> int:
+def _as_nonneg_stat(value: Any) -> int:
+    """Status-page stats: invalid/None → 0 (display-only, not a range clamp)."""
     try:
         return int(value or 0)
     except Exception:
@@ -80,19 +82,19 @@ def _build_status_html(*, base_url: str, status_code: int, payload: dict[str, An
     updated_at = str(payload.get("updated_at") or "")
 
     gallery = payload.get("gallery") if isinstance(payload.get("gallery"), dict) else {}
-    images_total = _clamp_int(gallery.get("images_total"))
-    images_enabled = _clamp_int(gallery.get("images_enabled"))
-    illust_total = _clamp_int(gallery.get("illust_total"))
-    authors_total = _clamp_int(gallery.get("authors_total"))
+    images_total = _as_nonneg_stat(gallery.get("images_total"))
+    images_enabled = _as_nonneg_stat(gallery.get("images_enabled"))
+    illust_total = _as_nonneg_stat(gallery.get("illust_total"))
+    authors_total = _as_nonneg_stat(gallery.get("authors_total"))
 
     random_stats = payload.get("random") if isinstance(payload.get("random"), dict) else {}
-    random_total = _clamp_int(random_stats.get("total_requests"))
-    random_in_flight = _clamp_int(random_stats.get("in_flight"))
-    last_window_requests = _clamp_int(random_stats.get("last_window_requests"))
+    random_total = _as_nonneg_stat(random_stats.get("total_requests"))
+    random_in_flight = _as_nonneg_stat(random_stats.get("in_flight"))
+    last_window_requests = _as_nonneg_stat(random_stats.get("last_window_requests"))
     last_window_success_rate = float(random_stats.get("last_window_success_rate") or 0.0)
     if not math.isfinite(last_window_success_rate):
         last_window_success_rate = 0.0
-    last_window_success_rate = max(0.0, min(float(last_window_success_rate), 1.0))
+    last_window_success_rate = clamp_float(float(last_window_success_rate), min_v=0.0, max_v=1.0)
 
     json_url = u("/status.json")
     docs_url = u("/docs")
