@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object, parse_bool, parse_int_in_range
+from app.core.admin_request import load_json_object_optional, load_json_object, parse_bool, parse_int_in_range
 from app.core.random_engine_client import engine_health, random_engine_base_url
 from app.core.random_engine_sync import push_engine_snapshot
 from app.core.request_id import get_or_create_request_id
@@ -135,14 +135,14 @@ async def random_engine_push_snapshot(
         raise ApiError(code=ErrorCode.INTERNAL_ERROR, message="HTTP client unavailable", status_code=500)
 
     limit: int | None = None
-    try:
-        body = await request.json()
-        if isinstance(body, dict) and body.get("limit") is not None:
-            limit = int(body["limit"])
-            if limit < 1:
-                limit = None
-    except Exception:
-        limit = None
+    body = await load_json_object_optional(request)
+    if body.get("limit") is not None:
+        try:
+            n = int(body["limit"])
+            if n >= 1:
+                limit = n
+        except Exception:
+            limit = None
 
     revision = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     result = await push_engine_snapshot(

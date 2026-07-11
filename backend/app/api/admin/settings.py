@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -12,6 +11,8 @@ from app.core.admin_request import (
     load_json_object,
     parse_bool_optional,
     parse_choice,
+    parse_float_clamped,
+    parse_int_clamped,
     parse_int_in_range,
     parse_positive_int,
 )
@@ -72,17 +73,6 @@ def _as_str_list(value: Any) -> list[str]:
     return out
 
 
-def _as_float(value: Any) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return None
-    try:
-        return float(value)
-    except Exception:
-        return None
-
-
 def _normalize_dedup(value: Any, *, strict: bool) -> dict[str, Any]:
     default = dict(_DEFAULT_SETTINGS["random"]["dedup"])
     if value is None:
@@ -104,73 +94,69 @@ def _normalize_dedup(value: Any, *, strict: bool) -> dict[str, Any]:
 
     window_s = int(default["window_s"])
     if "window_s" in value:
-        if strict:
-            window_s = parse_int_in_range(
-                value.get("window_s"),
-                field="window_s",
-                min_value=0,
-                max_value=24 * 60 * 60,
-                invalid_message="Invalid random.dedup.window_s",
-            )
-        else:
-            try:
-                n = int(value.get("window_s"))
-                window_s = int(max(0, min(n, 24 * 60 * 60)))
-            except Exception:
-                window_s = int(default["window_s"])
+        window_s = parse_int_clamped(
+            value.get("window_s"),
+            field="window_s",
+            min_value=0,
+            max_value=24 * 60 * 60,
+            strict=strict,
+            default=int(default["window_s"]),
+            invalid_message="Invalid random.dedup.window_s",
+        )
 
     max_images = int(default["max_images"])
     if "max_images" in value:
-        if strict:
-            max_images = parse_int_in_range(
-                value.get("max_images"),
-                field="max_images",
-                min_value=1,
-                max_value=200_000,
-                invalid_message="Invalid random.dedup.max_images",
-            )
-        else:
-            try:
-                n = int(value.get("max_images"))
-                max_images = int(max(1, min(n, 200_000)))
-            except Exception:
-                max_images = int(default["max_images"])
+        max_images = parse_int_clamped(
+            value.get("max_images"),
+            field="max_images",
+            min_value=1,
+            max_value=200_000,
+            strict=strict,
+            default=int(default["max_images"]),
+            invalid_message="Invalid random.dedup.max_images",
+        )
 
     max_authors = int(default["max_authors"])
     if "max_authors" in value:
-        if strict:
-            max_authors = parse_int_in_range(
-                value.get("max_authors"),
-                field="max_authors",
-                min_value=1,
-                max_value=200_000,
-                invalid_message="Invalid random.dedup.max_authors",
-            )
-        else:
-            try:
-                n = int(value.get("max_authors"))
-                max_authors = int(max(1, min(n, 200_000)))
-            except Exception:
-                max_authors = int(default["max_authors"])
+        max_authors = parse_int_clamped(
+            value.get("max_authors"),
+            field="max_authors",
+            min_value=1,
+            max_value=200_000,
+            strict=strict,
+            default=int(default["max_authors"]),
+            invalid_message="Invalid random.dedup.max_authors",
+        )
 
     strict_mode = bool(default["strict"])
     v = parse_bool_optional(value.get("strict"))
     if v is not None:
         strict_mode = bool(v)
 
+    # Dedup penalties always raise on invalid (historical GET/PUT behavior).
     image_penalty = float(default["image_penalty"])
     if "image_penalty" in value:
-        v = _as_float(value.get("image_penalty"))
-        if v is None or not math.isfinite(float(v)):
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup.image_penalty", status_code=400)
-        image_penalty = float(max(0.0, min(float(v), 1000.0)))
+        image_penalty = parse_float_clamped(
+            value.get("image_penalty"),
+            field="image_penalty",
+            min_value=0.0,
+            max_value=1000.0,
+            strict=True,
+            require_finite=True,
+            invalid_message="Invalid random.dedup.image_penalty",
+        )
 
     author_penalty = float(default["author_penalty"])
     if "author_penalty" in value:
-        v = _as_float(value.get("author_penalty"))
-        if v is None or not math.isfinite(float(v)):
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup.author_penalty", status_code=400)
-        author_penalty = float(max(0.0, min(float(v), 1000.0)))
+        author_penalty = parse_float_clamped(
+            value.get("author_penalty"),
+            field="author_penalty",
+            min_value=0.0,
+            max_value=1000.0,
+            strict=True,
+            require_finite=True,
+            invalid_message="Invalid random.dedup.author_penalty",
+        )
 
     return {
         "enabled": bool(enabled),
@@ -219,46 +205,44 @@ def _normalize_recommendation(value: Any, *, strict: bool) -> dict[str, Any]:
     temperature_default = float(_DEFAULT_RECOMMENDATION["temperature"])
     temperature = temperature_default
     if "temperature" in value:
-        v = _as_float(value.get("temperature"))
-        if v is None:
-            if strict:
-                raise ApiError(
-                    code=ErrorCode.BAD_REQUEST,
-                    message="Invalid random.recommendation.temperature",
-                    status_code=400,
-                )
-        else:
-            temperature = float(max(0.05, min(float(v), 100.0)))
+        temperature = parse_float_clamped(
+            value.get("temperature"),
+            field="temperature",
+            min_value=0.05,
+            max_value=100.0,
+            strict=strict,
+            default=temperature_default,
+            invalid_message="Invalid random.recommendation.temperature",
+        )
 
     freshness_half_life_default = float(_DEFAULT_RECOMMENDATION["freshness_half_life_days"])
     freshness_half_life_days = freshness_half_life_default
     if "freshness_half_life_days" in value:
-        v = _as_float(value.get("freshness_half_life_days"))
-        if v is None or not math.isfinite(float(v)):
-            if strict:
-                raise ApiError(
-                    code=ErrorCode.BAD_REQUEST,
-                    message="Invalid random.recommendation.freshness_half_life_days",
-                    status_code=400,
-                )
-        else:
-            freshness_half_life_days = float(max(0.1, min(float(v), 3650.0)))
+        freshness_half_life_days = parse_float_clamped(
+            value.get("freshness_half_life_days"),
+            field="freshness_half_life_days",
+            min_value=0.1,
+            max_value=3650.0,
+            strict=strict,
+            default=freshness_half_life_default,
+            require_finite=True,
+            invalid_message="Invalid random.recommendation.freshness_half_life_days",
+        )
 
     velocity_smooth_default = float(_DEFAULT_RECOMMENDATION["velocity_smooth_days"])
     velocity_smooth_days = velocity_smooth_default
     if "velocity_smooth_days" in value:
-        v = _as_float(value.get("velocity_smooth_days"))
-        if v is None or not math.isfinite(float(v)):
-            if strict:
-                raise ApiError(
-                    code=ErrorCode.BAD_REQUEST,
-                    message="Invalid random.recommendation.velocity_smooth_days",
-                    status_code=400,
-                )
-        else:
-            velocity_smooth_days = float(max(0.0, min(float(v), 3650.0)))
+        velocity_smooth_days = parse_float_clamped(
+            value.get("velocity_smooth_days"),
+            field="velocity_smooth_days",
+            min_value=0.0,
+            max_value=3650.0,
+            strict=strict,
+            default=velocity_smooth_default,
+            require_finite=True,
+            invalid_message="Invalid random.recommendation.velocity_smooth_days",
+        )
 
-    score_weights_default = _DEFAULT_RECOMMENDATION["score_weights"]
     score_weights_raw = value.get("score_weights")
     if score_weights_raw is None:
         score_weights_obj: dict[str, Any] = {}
@@ -284,16 +268,15 @@ def _normalize_recommendation(value: Any, *, strict: bool) -> dict[str, Any]:
     score_weights: dict[str, float] = {}
     for key, default_value in _DEFAULT_SCORE_WEIGHTS.items():
         if key in score_weights_obj:
-            v = _as_float(score_weights_obj.get(key))
-            if v is None:
-                if strict:
-                    raise ApiError(
-                        code=ErrorCode.BAD_REQUEST,
-                        message="Invalid random.recommendation.score_weights",
-                        status_code=400,
-                    )
-                v = float(default_value)
-            score_weights[key] = float(max(-100.0, min(float(v), 100.0)))
+            score_weights[key] = parse_float_clamped(
+                score_weights_obj.get(key),
+                field="score_weights",
+                min_value=-100.0,
+                max_value=100.0,
+                strict=strict,
+                default=float(default_value),
+                invalid_message="Invalid random.recommendation.score_weights",
+            )
         else:
             score_weights[key] = float(default_value)
 
@@ -315,12 +298,15 @@ def _normalize_recommendation(value: Any, *, strict: bool) -> dict[str, Any]:
     multipliers: dict[str, float] = {}
     for key, default_value in multipliers_default.items():
         if key in multipliers_obj:
-            v = _as_float(multipliers_obj.get(key))
-            if v is None:
-                if strict:
-                    raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.recommendation.multipliers", status_code=400)
-                v = float(default_value)
-            multipliers[key] = float(max(0.0, min(float(v), 100.0)))
+            multipliers[key] = parse_float_clamped(
+                multipliers_obj.get(key),
+                field="multipliers",
+                min_value=0.0,
+                max_value=100.0,
+                strict=strict,
+                default=float(default_value),
+                invalid_message="Invalid random.recommendation.multipliers",
+            )
         else:
             multipliers[key] = float(default_value)
 

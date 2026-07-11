@@ -15,7 +15,7 @@ from starlette.datastructures import UploadFile
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import parse_bool
+from app.core.admin_request import load_json_object, parse_bool
 from app.core.data_files import get_sqlite_db_dir, make_file_ref
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -246,9 +246,7 @@ async def _load_import_request(request: Request) -> ImportUpload:
     max_bytes = _max_import_text_bytes()
 
     if content_type.startswith("application/json"):
-        data = await request.json()
-        if not isinstance(data, dict):
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+        data = await load_json_object(request)
         body = _validate_import_create(data)
         payload_bytes = body.text.encode("utf-8", errors="ignore")
         if len(payload_bytes) > max_bytes:

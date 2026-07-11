@@ -1,10 +1,10 @@
 ﻿import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Col, Row, Skeleton, Space, Typography } from "antd";
+import { Alert, Button, Card, Col, Row, Space, Typography } from "antd";
 import React from "react";
 import { useNavigate } from "react-router-dom";
 
 import { QueryState } from "../admin/QueryState";
-import { requestIdDescription, requestIdWithMessageDescription } from "../admin/errors";
+import { requestIdWithMessageDescription } from "../admin/errors";
 import { apiJson } from "../api/client";
 
 type SummaryResponse = {
@@ -221,23 +221,10 @@ export function DashboardPage() {
 
         <Col xs={24} md={12} xl={6}>
           <Card title="代理">
-            {settings.isLoading || summary.isLoading ? (
-              <Skeleton active />
-            ) : settings.isError ? (
-              <Alert
-                type="error"
-                showIcon
-                message="加载设置失败"
-                description={requestIdDescription(settings.error)}
-              />
-            ) : summary.isError ? (
-              <Alert
-                type="error"
-                showIcon
-                message="加载总览失败"
-                description={requestIdDescription(summary.error)}
-              />
-            ) : (
+            <QueryState
+              queries={[settings, summary]}
+              errorMessages={["加载设置失败", "加载总览失败"]}
+            >
               <Space direction="vertical">
                 <Typography.Text>代理总开关: {proxyEnabled ? "开启" : "关闭"}</Typography.Text>
                 <Typography.Text>默认代理池ID: {defaultPoolId || "（未设置）"}</Typography.Text>
@@ -248,7 +235,7 @@ export function DashboardPage() {
                   打开代理列表
                 </Button>
               </Space>
-            )}
+            </QueryState>
           </Card>
         </Col>
       </Row>

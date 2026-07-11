@@ -3,11 +3,14 @@ from __future__ import annotations
 import pytest
 
 from app.core.admin_request import (
+    coerce_float,
     load_json_object_optional,
     parse_bool,
     parse_bool_optional,
     parse_choice,
+    parse_float_clamped,
     parse_float_in_range,
+    parse_int_clamped,
     parse_int_in_range,
     parse_optional_str,
     parse_positive_int,
@@ -95,6 +98,56 @@ def test_parse_float_in_range() -> None:
     with pytest.raises(ApiError) as ei_bad:
         parse_float_in_range("x", field="weight", min_value=0.0, max_value=100.0)
     assert ei_bad.value.message == "Unsupported weight"
+
+
+def test_coerce_float() -> None:
+    assert coerce_float(None) is None
+    assert coerce_float(True) is None
+    assert coerce_float(False) is None
+    assert coerce_float("x") is None
+    assert coerce_float("2.5") == 2.5
+    assert coerce_float(3) == 3.0
+
+
+def test_parse_int_clamped() -> None:
+    assert parse_int_clamped(5, field="n", min_value=1, max_value=10, strict=True) == 5
+    assert parse_int_clamped(0, field="n", min_value=1, max_value=10, strict=False, default=3) == 1
+    assert parse_int_clamped(99, field="n", min_value=1, max_value=10, strict=False, default=3) == 10
+    assert parse_int_clamped("x", field="n", min_value=1, max_value=10, strict=False, default=3) == 3
+    with pytest.raises(ApiError) as ei:
+        parse_int_clamped("x", field="n", min_value=1, max_value=10, strict=True, invalid_message="bad n")
+    assert ei.value.message == "bad n"
+    with pytest.raises(ApiError) as ei_low:
+        parse_int_clamped(0, field="n", min_value=1, max_value=10, strict=True, invalid_message="bad n")
+    assert ei_low.value.message == "bad n"
+
+
+def test_parse_float_clamped() -> None:
+    assert parse_float_clamped(1.2, field="t", min_value=0.05, max_value=100.0, strict=True) == 1.2
+    assert parse_float_clamped(0.01, field="t", min_value=0.05, max_value=100.0, strict=False, default=1.0) == 0.05
+    assert parse_float_clamped("x", field="t", min_value=0.05, max_value=100.0, strict=False, default=1.0) == 1.0
+    assert parse_float_clamped(True, field="t", min_value=0.05, max_value=100.0, strict=False, default=1.0) == 1.0
+    with pytest.raises(ApiError) as ei:
+        parse_float_clamped(
+            "x",
+            field="t",
+            min_value=0.05,
+            max_value=100.0,
+            strict=True,
+            invalid_message="Invalid random.recommendation.temperature",
+        )
+    assert ei.value.message == "Invalid random.recommendation.temperature"
+    with pytest.raises(ApiError) as ei_inf:
+        parse_float_clamped(
+            float("inf"),
+            field="p",
+            min_value=0.0,
+            max_value=1000.0,
+            strict=True,
+            require_finite=True,
+            invalid_message="Invalid random.dedup.image_penalty",
+        )
+    assert ei_inf.value.message == "Invalid random.dedup.image_penalty"
 
 
 def test_parse_choice() -> None:

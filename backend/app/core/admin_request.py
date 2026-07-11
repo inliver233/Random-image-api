@@ -176,6 +176,91 @@ def parse_float_in_range(
     return f
 
 
+def coerce_float(value: Any) -> float | None:
+    """
+    Lenient float coercion used by soft settings normalizers.
+
+    None / bool / unparseable → None (bool is rejected so True/False never become 1.0/0.0).
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def parse_int_clamped(
+    value: Any,
+    *,
+    field: str,
+    min_value: int,
+    max_value: int,
+    strict: bool = True,
+    default: int | None = None,
+    invalid_message: str | None = None,
+) -> int:
+    """
+    Parse int and clamp to inclusive [min_value, max_value].
+
+    - strict: unparseable → BAD_REQUEST (same message style as parse_int_in_range)
+    - soft: unparseable → default (required when strict=False)
+    """
+    invalid = invalid_message or f"Unsupported {field}"
+    try:
+        n = int(value)
+    except Exception as exc:
+        if strict:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400) from exc
+        if default is None:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400) from exc
+        return int(default)
+    if n < min_value:
+        if strict:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+        n = min_value
+    if n > max_value:
+        if strict:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+        n = max_value
+    return int(n)
+
+
+def parse_float_clamped(
+    value: Any,
+    *,
+    field: str,
+    min_value: float,
+    max_value: float,
+    strict: bool = True,
+    default: float | None = None,
+    invalid_message: str | None = None,
+    require_finite: bool = False,
+) -> float:
+    """
+    Soft/strict float parse with clamp.
+
+    Uses coerce_float semantics (bool rejected). On invalid:
+    - strict → BAD_REQUEST
+    - soft → default (required when strict=False)
+    On success → clamp to [min_value, max_value].
+    """
+    invalid = invalid_message or f"Unsupported {field}"
+    v = coerce_float(value)
+    if v is None or (require_finite and not _is_finite(v)):
+        if strict:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+        if default is None:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+        return float(default)
+    return float(max(float(min_value), min(float(v), float(max_value))))
+
+
+def _is_finite(value: float) -> bool:
+    # Local helper avoids importing math at module top for a single check.
+    return value == value and value not in (float("inf"), float("-inf"))
+
+
 def parse_choice(
     value: Any,
     *,
