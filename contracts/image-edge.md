@@ -58,8 +58,13 @@ Reject: `..`, `\`, `://`, `@`, query string in path.
 2. On miss: `fetch https://{ORIGIN_HOST}{path}` with  
    `Referer: https://www.pixiv.net/`  
    browser-like `User-Agent`
-3. Optional `FALLBACK_MIRROR_HOST` ∈ `{i.pixiv.cat, i.pixiv.re, i.pixiv.nl}` or `*.workers.dev`
-4. Success response: `Cache-Control: public, max-age={CACHE_TTL_SECONDS}, immutable`
+3. Optional emergency mirrors (ordered, unique):
+   - `FALLBACK_MIRROR_HOSTS` CSV, then legacy single `FALLBACK_MIRROR_HOST`
+   - each host ∈ `{i.pixiv.cat, i.pixiv.re, i.pixiv.nl}` or `*.workers.dev`
+4. Success response: `Cache-Control: public, max-age={CACHE_TTL_SECONDS}, immutable`  
+   Headers: `X-Edge-Via` = host that returned 200 (origin or mirror)
+
+Backend note: pure edge **302** does **not** call `mark_image_ok` (bytes not verified). Local stream path still marks ok/fail.
 
 ## Security rules
 

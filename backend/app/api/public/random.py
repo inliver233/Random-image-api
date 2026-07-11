@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import random
 import time
 from typing import Any
@@ -9,17 +8,13 @@ from fastapi import APIRouter, BackgroundTasks, Query, Request
 from fastapi.responses import RedirectResponse
 
 from app.core.errors import ApiError, ErrorCode
-from app.core.http_stream import stream_url
 from app.core.image_edge import resolve_image_edge_redirect_url, resolve_public_proxy_url
 from app.core.imgproxy import build_signed_processing_url, load_imgproxy_config_from_settings
 from app.core.pximg_reverse_proxy import (
     normalize_pximg_proxy,
     pick_pximg_mirror_host_for_request,
-    rewrite_pximg_to_mirror,
 )
-from app.core.proxy_routing import select_proxy_uri_for_url
 from app.core.recent_dedup import get_recent_lists, record_recent
-from app.core.recommendation import quality_score
 from app.core.random_defaults import (
     resolve_attempts,
     resolve_dedup,
@@ -28,6 +23,12 @@ from app.core.random_defaults import (
     resolve_r18_strict,
     resolve_recommendation_config,
     resolve_strategy,
+)
+from app.core.random_delivery import (
+    attach_background,
+    best_effort,
+    build_edge_redirect_response,
+    deliver_random_image_stream,
 )
 from app.core.random_engine_pick import (
     build_engine_filters,
@@ -40,8 +41,6 @@ from app.core.random_request import local_i_query_string, parse_random_filters, 
 from app.core.random_response import build_json_body, build_simple_json_body
 from app.core.random_strategy import needs_opportunistic_hydrate, pick_by_quality, pick_by_random_key
 from app.core.runtime_config_cache import get_cached_runtime_config
-from app.core.time import iso_utc_ms
-from app.db.images_mark import mark_image_failure, mark_image_ok
 from app.db.tags_get import get_tag_names_for_image
 from app.db.session import create_sessionmaker
 from app.jobs.enqueue import enqueue_opportunistic_hydrate_metadata
@@ -50,9 +49,6 @@ router = APIRouter()
 
 # Cap NOT IN size for SQLite plan quality; remaining recent ids still apply logit penalties.
 _RECENT_EXCLUDE_SQL_CAP = 512
-
-# Compatibility alias for existing tests (prefer app.core.recommendation.quality_score going forward).
-_quality_score = quality_score
 
 
 @router.get("/random")
@@ -189,12 +185,6 @@ async def random_image(
         if use_pixiv_cat
         else runtime_mirror_host
     )
-
-    async def _best_effort(fn, *args, timeout_s: float = 1.5, **kwargs) -> None:  # type: ignore[no-untyped-def]
-        try:
-            await asyncio.wait_for(fn(*args, **kwargs), timeout=float(timeout_s))
-        except Exception:
-            pass
 
     random_defaults = runtime.random_defaults if isinstance(runtime.random_defaults, dict) else {}
 
@@ -458,7 +448,7 @@ async def random_image(
 
         if needs_opportunistic_hydrate(image):
             background_tasks.add_task(
-                _best_effort,
+                best_effort,
                 enqueue_opportunistic_hydrate_metadata,
                 engine,
                 illust_id=int(image.illust_id),
@@ -480,11 +470,8 @@ async def random_image(
                     original_url=str(image.original_url),
                 )
             if edge_url:
-                resp = RedirectResponse(
-                    url=edge_url,
-                    status_code=302,
-                    headers={"Cache-Control": "no-store", "X-Image-Edge": "1"},
-                )
+                # Edge 302 does not prove bytes; skip mark_image_ok (fail_cooldown stays honest).
+                resp = build_edge_redirect_response(edge_url=edge_url, cache_control="no-store")
             else:
                 qs = local_i_query_string(
                     proxy_override=proxy_override,
@@ -496,12 +483,7 @@ async def random_image(
                     status_code=302,
                     headers={"Cache-Control": "no-store"},
                 )
-            try:
-                if getattr(resp, "background", None) is None:
-                    resp.background = background_tasks
-            except Exception:
-                pass
-            return resp
+            return attach_background(resp, background_tasks)
 
         origin_url = None if runtime.hide_origin_url_in_public_json else image.original_url
 
@@ -547,10 +529,6 @@ async def random_image(
             debug=debug,
         )
 
-    tried_ids: set[int] = set()
-    last_error: ApiError | None = None
-    attempts_i = int(attempts)
-    runtime_stream = runtime
     # When edge is enabled and client did not force local mirror/proxy, hand bytes off to CF.
     force_local = str(request.query_params.get("local") or "").strip().lower() in {"1", "true", "yes"}
     prefer_edge_redirect = prefer_image_edge(
@@ -560,142 +538,26 @@ async def random_image(
         force_local=force_local,
     )
 
-    for _ in range(attempts_i):
-        async with Session() as session:
-            image, _debug = await _pick_with_strategy(session=session, exclude_image_ids=list(tried_ids))
-            if image is None:
-                break
-            image_id = int(image.id)
-            origin_url = str(image.original_url)
-            source_url = rewrite_pximg_to_mirror(origin_url, mirror_host=mirror_host) if use_pixiv_cat else origin_url
-            illust_id_for_hydrate = int(image.illust_id)
-            needs_hydrate = needs_opportunistic_hydrate(image)
-            should_mark_ok = image.last_ok_at is None or image.last_error_code is not None
-            user_id_for_recent = int(image.user_id) if getattr(image, "user_id", None) is not None else None
+    async def _pick_for_delivery(*, session: Any, exclude_image_ids: list[int] | None = None):
+        return await _pick_with_strategy(session=session, exclude_image_ids=exclude_image_ids)
 
-        if prefer_edge_redirect:
-            edge_url = resolve_image_edge_redirect_url(
-                settings=request.app.state.settings,
-                original_url=origin_url,
-            )
-            if edge_url:
-                if bool(anti_repeat_enabled):
-                    try:
-                        record_recent(
-                            now=time.monotonic(),
-                            image_id=int(image_id),
-                            user_id=user_id_for_recent,
-                            window_s=float(dedup_window_s),
-                            max_images=int(dedup_max_images),
-                            max_authors=int(dedup_max_authors),
-                        )
-                    except Exception:
-                        pass
-                if should_mark_ok:
-                    background_tasks.add_task(
-                        _best_effort, mark_image_ok, engine, image_id=image_id, now=iso_utc_ms(), timeout_s=1.5
-                    )
-                if needs_hydrate:
-                    background_tasks.add_task(
-                        _best_effort,
-                        enqueue_opportunistic_hydrate_metadata,
-                        engine,
-                        illust_id=illust_id_for_hydrate,
-                        reason="random",
-                        timeout_s=2.5,
-                    )
-                resp = RedirectResponse(
-                    url=edge_url,
-                    status_code=302,
-                    headers={"Cache-Control": "no-store", "X-Image-Edge": "1"},
-                )
-                try:
-                    if getattr(resp, "background", None) is None:
-                        resp.background = background_tasks
-                except Exception:
-                    pass
-                return resp
-
-        transport = getattr(request.app.state, "httpx_transport", None)
-        shared_client = getattr(request.app.state, "httpx_client", None)
-        proxy_uri = None
-        if not use_pixiv_cat:
-            picked = await select_proxy_uri_for_url(
-                engine,
-                request.app.state.settings,
-                runtime_stream,
-                url=origin_url,
-            )
-            if picked is not None:
-                proxy_uri = picked.uri
-        try:
-            resp = await stream_url(
-                source_url,
-                transport=transport,
-                client=shared_client if not proxy_uri else None,
-                proxy=proxy_uri,
-                cache_control="no-store",
-                range_header=request.headers.get("Range"),
-            )
-            if bool(anti_repeat_enabled):
-                try:
-                    record_recent(
-                        now=time.monotonic(),
-                        image_id=int(image_id),
-                        user_id=user_id_for_recent,
-                        window_s=float(dedup_window_s),
-                        max_images=int(dedup_max_images),
-                        max_authors=int(dedup_max_authors),
-                    )
-                except Exception:
-                    pass
-            if should_mark_ok:
-                background_tasks.add_task(_best_effort, mark_image_ok, engine, image_id=image_id, now=iso_utc_ms(), timeout_s=1.5)
-            if needs_hydrate:
-                background_tasks.add_task(
-                    _best_effort,
-                    enqueue_opportunistic_hydrate_metadata,
-                    engine,
-                    illust_id=illust_id_for_hydrate,
-                    reason="random",
-                    timeout_s=2.5,
-                )
-            try:
-                if getattr(resp, "background", None) is None:
-                    resp.background = background_tasks
-            except Exception:
-                pass
-            return resp
-        except ApiError as exc:
-            if exc.code in {
-                ErrorCode.UPSTREAM_STREAM_ERROR,
-                ErrorCode.UPSTREAM_403,
-                ErrorCode.UPSTREAM_404,
-                ErrorCode.UPSTREAM_RATE_LIMIT,
-            }:
-                await _best_effort(
-                    mark_image_failure,
-                    engine,
-                    image_id=image_id,
-                    now=iso_utc_ms(),
-                    error_code=exc.code.value,
-                    error_message=exc.message,
-                    timeout_s=1.5,
-                )
-                tried_ids.add(image_id)
-                last_error = exc
-                continue
-            raise
-
-    if last_error is None:
-        raise _no_match_error()
-
-    raise ApiError(
-        code=ErrorCode.UPSTREAM_STREAM_ERROR,
-        message="多次尝试后上游请求仍失败。",
-        status_code=502,
-        details={
-            "attempts_used": len(tried_ids),
-            "last_upstream_code": last_error.code.value,
-        },
+    return await deliver_random_image_stream(
+        pick=_pick_for_delivery,
+        Session=Session,
+        engine=engine,
+        settings=request.app.state.settings,
+        runtime=runtime,
+        httpx_transport=getattr(request.app.state, "httpx_transport", None),
+        httpx_client=getattr(request.app.state, "httpx_client", None),
+        range_header=request.headers.get("Range"),
+        attempts=int(attempts),
+        prefer_edge_redirect=prefer_edge_redirect,
+        use_pixiv_cat=use_pixiv_cat,
+        mirror_host=mirror_host,
+        anti_repeat_enabled=bool(anti_repeat_enabled),
+        dedup_window_s=float(dedup_window_s),
+        dedup_max_images=int(dedup_max_images),
+        dedup_max_authors=int(dedup_max_authors),
+        background_tasks=background_tasks,
+        no_match_error=_no_match_error,
     )

@@ -326,11 +326,8 @@ async def proxy_image(
             original_url=str(image.original_url),
         )
         if edge_url:
-            now = iso_utc_ms()
-            if should_mark_ok:
-                background_tasks.add_task(
-                    _best_effort, mark_image_ok, engine, image_id=int(image.id), now=now, timeout_s=1.5
-                )
+            # Edge 302 does not prove bytes were served; skip mark_image_ok to avoid
+            # false last_ok_at / cleared last_error that skews fail_cooldown health.
             if needs_hydrate:
                 background_tasks.add_task(
                     _best_effort,

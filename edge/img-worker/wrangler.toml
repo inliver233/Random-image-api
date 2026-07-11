@@ -6,7 +6,10 @@ compatibility_date = "2026-01-01"
 #   wrangler secret put IMAGE_EDGE_SECRET
 [vars]
 ORIGIN_HOST = "i.pximg.net"
+# Emergency mirrors only (path-compatible). Prefer multi-host CSV; single host still supported.
+# Example: "i.pixiv.re,i.pixiv.cat,i.pixiv.nl"
 FALLBACK_MIRROR_HOST = ""
+FALLBACK_MIRROR_HOSTS = ""
 CACHE_TTL_SECONDS = "604800"
 ERROR_CACHE_TTL_SECONDS = "30"
 

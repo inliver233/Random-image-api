@@ -96,10 +96,46 @@ describe("DashboardPage", () => {
           );
         }
         if (url.includes("/admin/api/jobs?status=failed")) {
-          return new Response(JSON.stringify({ ok: true, items: [{}, {}, {}], next_cursor: "", request_id: "req_jobs" }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              items: [
+                {
+                  id: "101",
+                  type: "hydrate_metadata",
+                  status: "failed",
+                  last_error: "upstream 403 on illust 1",
+                  updated_at: "2026-02-13T01:00:00Z",
+                  attempt: 3,
+                  max_attempts: 3,
+                },
+                {
+                  id: "99",
+                  type: "import_images",
+                  status: "failed",
+                  last_error: "sqlite busy",
+                  updated_at: "2026-02-13T00:30:00Z",
+                  attempt: 1,
+                  max_attempts: 5,
+                },
+                {
+                  id: "88",
+                  type: "proxy_probe",
+                  status: "failed",
+                  last_error: null,
+                  updated_at: "2026-02-12T23:00:00Z",
+                  attempt: 2,
+                  max_attempts: 3,
+                },
+              ],
+              next_cursor: "",
+              request_id: "req_jobs",
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
         }
         if (url.endsWith("/admin/api/hydration-runs")) {
           return new Response(JSON.stringify({ ok: true, hydration_run_id: "10", job_id: "99", request_id: "req_hyd" }), {
@@ -144,6 +180,9 @@ describe("DashboardPage", () => {
     expect(await screen.findByText("近 1 分钟成功率: 100.0%")).toBeInTheDocument();
     expect(await screen.findByText("代理节点: 1/1 启用")).toBeInTheDocument();
     expect(await screen.findByText(/提交:\s*abcdef1/)).toBeInTheDocument();
+    expect(await screen.findByText("数量: 3")).toBeInTheDocument();
+    expect(await screen.findByText(/#101\s*·\s*hydrate_metadata/)).toBeInTheDocument();
+    expect(await screen.findByText("upstream 403 on illust 1")).toBeInTheDocument();
   });
 
   it("navigates to import", async () => {

@@ -60,7 +60,16 @@ type RandomStatsResponse = {
   request_id: string;
 };
 
-type JobsResponse = { ok: true; items: unknown[]; next_cursor: string; request_id: string };
+type FailedJobItem = {
+  id: string;
+  type: string;
+  status: string;
+  last_error?: string | null;
+  updated_at?: string | null;
+  attempt?: number;
+  max_attempts?: number;
+};
+type JobsResponse = { ok: true; items: FailedJobItem[]; next_cursor: string; request_id: string };
 type CreateHydrationRunResponse = { ok: true; hydration_run_id: string; job_id: string; request_id: string };
 
 function asApiError(err: unknown): ApiError | null {
@@ -136,7 +145,8 @@ export function DashboardPage() {
   const failedJobsTotal = jobsCounts.failed ?? 0;
   const workerLastSeenAt = counts?.worker.last_seen_at ?? null;
 
-  const failedJobCount = failedJobs.data?.items.length ?? 0;
+  const failedJobItems = failedJobs.data?.items ?? [];
+  const failedJobCount = failedJobItems.length;
 
   const lastWindowRequests = randomStats.data?.stats.last_window_requests ?? 0;
   const lastWindowOk = randomStats.data?.stats.last_window_ok ?? 0;
@@ -355,8 +365,36 @@ export function DashboardPage() {
                 description={requestIdFromError(failedJobs.error) ? `请求ID: ${requestIdFromError(failedJobs.error)}` : ""}
               />
             ) : (
-              <Space direction="vertical">
+              <Space direction="vertical" style={{ width: "100%" }}>
                 <Typography.Text>数量: {failedJobCount}</Typography.Text>
+                {failedJobCount === 0 ? (
+                  <Typography.Text type="secondary">最近没有失败任务</Typography.Text>
+                ) : (
+                  failedJobItems.map((job) => {
+                    const err = String(job.last_error || "").trim();
+                    const errPreview = err.length > 80 ? `${err.slice(0, 80)}…` : err;
+                    return (
+                      <div key={job.id} style={{ borderTop: "1px solid rgba(0,0,0,0.06)", paddingTop: 8 }}>
+                        <Typography.Text>
+                          #{job.id} · {job.type || "unknown"}
+                        </Typography.Text>
+                        <br />
+                        <Typography.Text type="secondary">
+                          {job.updated_at || "（时间未知）"}
+                          {typeof job.attempt === "number" && typeof job.max_attempts === "number"
+                            ? ` · 尝试 ${job.attempt}/${job.max_attempts}`
+                            : ""}
+                        </Typography.Text>
+                        {errPreview ? (
+                          <>
+                            <br />
+                            <Typography.Text type="danger">{errPreview}</Typography.Text>
+                          </>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                )}
                 <Button size="small" onClick={() => navigate("/admin/jobs")}>
                   打开任务页
                 </Button>

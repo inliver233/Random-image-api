@@ -9,7 +9,7 @@
  *
  * Flow:
  *   verify HMAC + expiry → Cache API (path-keyed) → fetch i.pximg.net
- *   (optional FALLBACK_MIRROR_HOST) → stream response
+ *   → optional FALLBACK_MIRROR_HOST / FALLBACK_MIRROR_HOSTS chain → stream
  *
  * Design notes (ds2api + CF docs):
  * - Never accept raw target URLs (no open proxy).
@@ -24,6 +24,7 @@ const DEFAULT_ORIGIN = "i.pximg.net";
 const REFERER = "https://www.pixiv.net/";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+const BUILTIN_MIRRORS = new Set(["i.pixiv.cat", "i.pixiv.re", "i.pixiv.nl"]);
 
 function b64urlEncodeBytes(buf) {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
@@ -103,10 +104,32 @@ function jsonError(status, message, extraHeaders = {}) {
   });
 }
 
-async function fetchOrigin(path, env) {
-  const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
-  const url = `https://${originHost}${path}`;
-  const init = {
+function isAllowedMirrorHost(host) {
+  const h = String(host || "").trim().toLowerCase();
+  if (!h) return false;
+  if (BUILTIN_MIRRORS.has(h)) return true;
+  // Allow same-org worker emergency origins only (not open proxy).
+  if (h.endsWith(".workers.dev")) return true;
+  return false;
+}
+
+/** Ordered unique hosts from FALLBACK_MIRROR_HOSTS (csv) + legacy FALLBACK_MIRROR_HOST. */
+function resolveFallbackHosts(env) {
+  const out = [];
+  const seen = new Set();
+  const push = (raw) => {
+    const host = String(raw || "").trim().toLowerCase();
+    if (!host || seen.has(host) || !isAllowedMirrorHost(host)) return;
+    seen.add(host);
+    out.push(host);
+  };
+  for (const part of String(env.FALLBACK_MIRROR_HOSTS || "").split(",")) push(part);
+  push(env.FALLBACK_MIRROR_HOST);
+  return out;
+}
+
+function originFetchInit(env) {
+  return {
     method: "GET",
     headers: {
       Referer: REFERER,
@@ -124,6 +147,12 @@ async function fetchOrigin(path, env) {
       },
     },
   };
+}
+
+async function fetchOrigin(path, env) {
+  const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
+  const url = `https://${originHost}${path}`;
+  const init = originFetchInit(env);
   try {
     return await fetch(url, init);
   } catch {
@@ -132,12 +161,7 @@ async function fetchOrigin(path, env) {
   }
 }
 
-async function fetchFallbackMirror(path, env) {
-  const host = String(env.FALLBACK_MIRROR_HOST || "").trim().toLowerCase();
-  if (!host) return null;
-  // Built-in / allowlisted-style mirrors only (path-compatible with pximg).
-  const allowed = new Set(["i.pixiv.cat", "i.pixiv.re", "i.pixiv.nl"]);
-  if (!allowed.has(host) && !host.endsWith(".workers.dev")) return null;
+async function fetchMirrorHost(path, host) {
   const url = `https://${host}${path}`;
   return fetch(url, {
     method: "GET",
@@ -148,6 +172,36 @@ async function fetchFallbackMirror(path, env) {
     },
     redirect: "follow",
   });
+}
+
+/**
+ * Primary origin, then ordered emergency mirrors. Returns { response, via }.
+ * via is origin host or mirror host that produced HTTP 200.
+ */
+async function fetchUpstreamWithFallback(path, env) {
+  const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
+  let upstream;
+  try {
+    upstream = await fetchOrigin(path, env);
+  } catch {
+    upstream = null;
+  }
+  if (upstream && upstream.status === 200) {
+    return { response: upstream, via: originHost };
+  }
+
+  const primaryStatus = upstream ? upstream.status : 0;
+  for (const host of resolveFallbackHosts(env)) {
+    try {
+      const fb = await fetchMirrorHost(path, host);
+      if (fb && fb.status === 200) {
+        return { response: fb, via: host, primaryStatus };
+      }
+    } catch {
+      // try next host
+    }
+  }
+  return { response: upstream, via: null, primaryStatus };
 }
 
 export default {
@@ -212,32 +266,27 @@ export default {
       return new Response(cached.body, { status: cached.status, headers });
     }
 
-    let upstream;
-    try {
-      upstream = await fetchOrigin(path, env);
-    } catch {
+    const fetched = await fetchUpstreamWithFallback(path, env);
+    const upstream = fetched.response;
+    if (!upstream) {
       return jsonError(502, "Upstream fetch failed");
     }
 
     if (upstream.status !== 200) {
-      const fallback = await fetchFallbackMirror(path, env);
-      if (fallback && fallback.status === 200) {
-        upstream = fallback;
-      } else {
-        const errTtl = Number(env.ERROR_CACHE_TTL_SECONDS || 30);
-        return new Response(JSON.stringify({ ok: false, message: "Upstream error", status: upstream.status }), {
-          status: 502,
-          headers: {
-            "Content-Type": "application/json; charset=utf-8",
-            "Cache-Control": `public, max-age=${Math.max(0, errTtl)}`,
-            "X-Upstream-Status": String(upstream.status),
-            "X-Edge-Cache": "MISS",
-            ...corsHeaders(),
-          },
-        });
-      }
+      const errTtl = Number(env.ERROR_CACHE_TTL_SECONDS || 30);
+      return new Response(JSON.stringify({ ok: false, message: "Upstream error", status: upstream.status }), {
+        status: 502,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": `public, max-age=${Math.max(0, errTtl)}`,
+          "X-Upstream-Status": String(upstream.status),
+          "X-Edge-Cache": "MISS",
+          ...corsHeaders(),
+        },
+      });
     }
 
+    const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
     const ttl = Number(env.CACHE_TTL_SECONDS || 604800);
     const headers = new Headers();
     const contentType = upstream.headers.get("content-type") || "application/octet-stream";
@@ -253,7 +302,8 @@ export default {
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("Cross-Origin-Resource-Policy", "cross-origin");
     headers.set("X-Edge-Cache", "MISS");
-    headers.set("X-Edge-Origin", String(env.ORIGIN_HOST || DEFAULT_ORIGIN));
+    headers.set("X-Edge-Origin", originHost);
+    headers.set("X-Edge-Via", String(fetched.via || originHost));
     headers.set("X-Proxied-By", "random-image-edge");
 
     const body = request.method === "HEAD" ? null : upstream.body;

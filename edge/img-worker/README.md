@@ -40,7 +40,7 @@ IMAGE_EDGE_SIGN_TTL_SECONDS=604800
 - `/random?format=image` / `redirect=1` → 302 到签名边缘 URL
 - `/i/{id}.{ext}` → 302 到签名边缘 URL（`?local=1` 强制本地流）
 
-本地 `/i` 流式反代、垃圾代理池、第三方镜像仅作 **fallback / 应急**（`FALLBACK_MIRROR_HOST` 默认空）。
+本地 `/i` 流式反代、垃圾代理池、第三方镜像仅作 **fallback / 应急**（Worker 镜像链默认空）。
 
 ## 安全
 
@@ -53,5 +53,10 @@ IMAGE_EDGE_SIGN_TTL_SECONDS=604800
 
 若 CF 出口对 `i.pximg.net` 403 率过高：
 
-1. 设置 `FALLBACK_MIRROR_HOST=i.pixiv.re`（仅应急）
-2. 或切换 R2 预取模式（后续迭代）
+1. 设置多镜像应急链（推荐）：
+   ```
+   FALLBACK_MIRROR_HOSTS=i.pixiv.re,i.pixiv.cat,i.pixiv.nl
+   ```
+   或兼容单值：`FALLBACK_MIRROR_HOST=i.pixiv.re`
+2. 成功响应带 `X-Edge-Via` 标明实际出站 host
+3. 或切换 R2 预取模式（后续迭代）
