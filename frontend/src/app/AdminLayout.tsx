@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { apiJson } from "../api/client";
-import { clearAdminToken } from "../auth/tokenStorage";
+import { clearAdminToken, getAdminToken } from "../auth/tokenStorage";
 
 type NavItem = { key: string; label: string; external?: boolean; href?: string };
 
@@ -73,13 +73,30 @@ export function AdminLayout() {
   })();
 
   const handleLogout = () => {
-    try {
-      clearAdminToken();
-    } catch {
-      // ignore
-    }
-    void apiJson("/admin/api/logout", { method: "POST" }).catch(() => null);
-    navigate("/admin/login?reason=logout", { replace: true });
+    // Call logout WHILE token is still present so the server can audit the session.
+    // Then clear local token and navigate. Failures are best-effort.
+    const token = (() => {
+      try {
+        return getAdminToken();
+      } catch {
+        return null;
+      }
+    })();
+    void (async () => {
+      if (token) {
+        try {
+          await apiJson("/admin/api/logout", { method: "POST" });
+        } catch {
+          // ignore network / already-expired token
+        }
+      }
+      try {
+        clearAdminToken();
+      } catch {
+        // ignore
+      }
+      navigate("/admin/login?reason=logout", { replace: true });
+    })();
   };
 
   return (

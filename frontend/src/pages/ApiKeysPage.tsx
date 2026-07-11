@@ -1,9 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Form, Input, Modal, Skeleton, Space, Switch, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 
 import { ApiError, apiJson } from "../api/client";
+import { useCursorList } from "../hooks/useCursorList";
 
 type ApiKeyItem = {
   id: string;
@@ -56,9 +57,6 @@ function messageFromError(err: unknown): string {
 
 export function ApiKeysPage() {
   const queryClient = useQueryClient();
-  const [items, setItems] = React.useState<ApiKeyItem[]>([]);
-  const [nextCursor, setNextCursor] = React.useState("");
-  const [requestId, setRequestId] = React.useState<string | null>(null);
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createForm] = Form.useForm<CreateApiKeyFormValues>();
   const [actionMessage, setActionMessage] = React.useState<string | null>(null);
@@ -66,40 +64,30 @@ export function ApiKeysPage() {
   const [actionErrorMessage, setActionErrorMessage] = React.useState<string | null>(null);
   const [actionErrorRequestId, setActionErrorRequestId] = React.useState<string | null>(null);
 
-  const listQuery = useQuery({
+  const {
+    query: listQuery,
+    items,
+    nextCursor,
+    listRequestId: requestId,
+    loadMore,
+    setItems,
+  } = useCursorList<ApiKeyItem, ApiKeysListResponse>({
     queryKey: ["admin", "api-keys", { limit: 50 }],
-    queryFn: () => apiJson<ApiKeysListResponse>("/admin/api/api-keys?limit=50"),
+    getItemId: (item) => item.id,
+    fetchPage: (cursor) => {
+      const sp = new URLSearchParams({ limit: "50" });
+      if (cursor) sp.set("cursor", cursor);
+      return apiJson<ApiKeysListResponse>(`/admin/api/api-keys?${sp.toString()}`);
+    },
   });
 
   React.useEffect(() => {
-    if (!listQuery.data) return;
-    setItems(listQuery.data.items);
-    setNextCursor(listQuery.data.next_cursor || "");
-    setRequestId(listQuery.data.request_id);
-  }, [listQuery.data]);
-
-  const loadMore = useMutation({
-    mutationFn: (cursor: string) => {
-      const sp = new URLSearchParams({ limit: "50", cursor });
-      return apiJson<ApiKeysListResponse>(`/admin/api/api-keys?${sp.toString()}`);
-    },
-    onSuccess: (data) => {
-      setItems((prev) => {
-        const seen = new Set(prev.map((x) => x.id));
-        const merged = [...prev];
-        for (const item of data.items) {
-          if (!seen.has(item.id)) merged.push(item);
-        }
-        return merged;
-      });
-      setNextCursor(data.next_cursor || "");
-      setRequestId(data.request_id);
-    },
-    onError: (err) => {
+    if (loadMore.isError) {
+      const err = loadMore.error;
       setActionErrorMessage(messageFromError(err));
       setActionErrorRequestId(requestIdFromError(err));
-    },
-  });
+    }
+  }, [loadMore.isError, loadMore.error]);
 
   const createKey = useMutation({
     mutationFn: (values: CreateApiKeyFormValues) =>

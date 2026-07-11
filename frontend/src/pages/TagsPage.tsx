@@ -1,10 +1,10 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, Button, Card, Skeleton, Space, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ApiError, apiJson } from "../api/client";
+import { useCursorList } from "../hooks/useCursorList";
 
 type TagItem = {
   name: string;
@@ -32,44 +32,20 @@ const baseColumns: ColumnsType<TagItem> = [
 
 export function TagsPage() {
   const navigate = useNavigate();
-  const [items, setItems] = React.useState<TagItem[]>([]);
-  const [nextCursor, setNextCursor] = React.useState("");
-  const [requestId, setRequestId] = React.useState<string | null>(null);
-  const [loadMoreError, setLoadMoreError] = React.useState<string | null>(null);
 
-  const query = useQuery({
+  const {
+    query,
+    items,
+    nextCursor,
+    listRequestId: requestId,
+    loadMore,
+  } = useCursorList<TagItem, TagsListResponse>({
     queryKey: ["public", "tags", { limit: 50 }],
-    queryFn: () => apiJson<TagsListResponse>("/tags?limit=50"),
-  });
-
-  React.useEffect(() => {
-    if (!query.data) return;
-    setItems(query.data.items);
-    setNextCursor(query.data.next_cursor || "");
-    setRequestId(query.data.request_id);
-    setLoadMoreError(null);
-  }, [query.data]);
-
-  const loadMore = useMutation({
-    mutationFn: (cursor: string) => {
-      const sp = new URLSearchParams({ limit: "50", cursor });
+    getItemId: (item) => item.name,
+    fetchPage: (cursor) => {
+      const sp = new URLSearchParams({ limit: "50" });
+      if (cursor) sp.set("cursor", cursor);
       return apiJson<TagsListResponse>(`/tags?${sp.toString()}`);
-    },
-    onSuccess: (data) => {
-      setItems((prev) => {
-        const seen = new Set(prev.map((x) => x.name));
-        const merged = [...prev];
-        for (const item of data.items) {
-          if (!seen.has(item.name)) merged.push(item);
-        }
-        return merged;
-      });
-      setNextCursor(data.next_cursor || "");
-      setRequestId(data.request_id);
-      setLoadMoreError(null);
-    },
-    onError: (err) => {
-      setLoadMoreError(err instanceof Error ? err.message : "加载更多失败");
     },
   });
 
@@ -95,7 +71,9 @@ export function TagsPage() {
         标签列表
       </Typography.Title>
 
-      {loadMoreError ? <Alert type="error" showIcon message={loadMoreError} /> : null}
+      {loadMore.isError ? (
+        <Alert type="error" showIcon message={loadMore.error instanceof Error ? loadMore.error.message : "加载更多失败"} />
+      ) : null}
 
       {query.isLoading ? (
         <Skeleton active />

@@ -20,6 +20,7 @@ import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ApiError, apiJson } from "../api/client";
+import { useCursorList } from "../hooks/useCursorList";
 
 type SummaryResponse = {
   ok: true;
@@ -221,49 +222,38 @@ export function HydrationPage() {
     });
   }, [enabledImagesTotal, missingCounts]);
 
-  const [runItems, setRunItems] = useState<HydrationRunItem[]>([]);
-  const [runsNextCursor, setRunsNextCursor] = useState("");
-  const [runsRequestId, setRunsRequestId] = useState<string | null>(null);
-
-  const runs = useQuery({
+  const {
+    query: runs,
+    items: runItems,
+    nextCursor: runsNextCursor,
+    listRequestId: runsRequestId,
+    loadMore: loadMoreRuns,
+  } = useCursorList<HydrationRunItem, HydrationRunsResponse>({
     queryKey: ["admin", "hydration-runs", { statusFilter }],
-    queryFn: () => {
+    getItemId: (item) => item.id,
+    fetchPage: (cursor) => {
       const query = new URLSearchParams({ limit: "30" });
       if (statusFilter !== "all") {
         query.set("status", statusFilter);
       }
+      if (cursor) query.set("cursor", cursor);
       return apiJson<HydrationRunsResponse>(`/admin/api/hydration-runs?${query.toString()}`);
     },
   });
 
+  // Auto-refresh while any run is active so operators do not mash refresh.
   React.useEffect(() => {
-    if (!runs.data) return;
-    setRunItems(runs.data.items);
-    setRunsNextCursor(runs.data.next_cursor || "");
-    setRunsRequestId(runs.data.request_id);
-  }, [runs.data]);
-
-  const loadMoreRuns = useMutation({
-    mutationFn: (cursor: string) => {
-      const query = new URLSearchParams({ limit: "30", cursor });
-      if (statusFilter !== "all") {
-        query.set("status", statusFilter);
-      }
-      return apiJson<HydrationRunsResponse>(`/admin/api/hydration-runs?${query.toString()}`);
-    },
-    onSuccess: (data) => {
-      setRunItems((prev) => {
-        const seen = new Set(prev.map((x) => x.id));
-        const merged = [...prev];
-        for (const item of data.items) {
-          if (!seen.has(item.id)) merged.push(item);
-        }
-        return merged;
-      });
-      setRunsNextCursor(data.next_cursor || "");
-      setRunsRequestId(data.request_id);
-    },
-  });
+    const hasActive = runItems.some((r) => {
+      const s = String(r.status || "");
+      return s === "pending" || s === "running" || s === "paused";
+    });
+    if (!hasActive) return;
+    const t = window.setInterval(() => {
+      void runs.refetch();
+      void summary.refetch();
+    }, 3000);
+    return () => window.clearInterval(t);
+  }, [runItems, runs, summary]);
 
   const createBackfill = useMutation({
     mutationFn: (values: BackfillFormValues) => {

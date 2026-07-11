@@ -1,10 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Alert, Button, Card, Popconfirm, Select, Skeleton, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 import { useMemo, useState } from "react";
 
 import { ApiError, apiJson } from "../api/client";
+import { useCursorList } from "../hooks/useCursorList";
 
 type ImageItem = {
   id: string;
@@ -94,50 +95,36 @@ export function ImagesPage() {
   const qc = useQueryClient();
   const [missing, setMissing] = useState<string[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const [items, setItems] = useState<ImageItem[]>([]);
-  const [nextCursor, setNextCursor] = useState("");
-  const [listRequestId, setListRequestId] = useState<string | null>(null);
   const [actionAlert, setActionAlert] = useState<{ type: "success" | "error"; message: string; requestId: string | null } | null>(null);
 
-  const query = useQuery({
+  const {
+    query,
+    items,
+    nextCursor,
+    listRequestId,
+    loadMore,
+  } = useCursorList<ImageItem, ImagesListResponse>({
     queryKey: ["admin", "images", { limit: 50, missing }],
-    queryFn: () => {
+    getItemId: (item) => item.id,
+    fetchPage: (cursor) => {
       const sp = new URLSearchParams({ limit: "50" });
       for (const key of missing) sp.append("missing", key);
+      if (cursor) sp.set("cursor", cursor);
       return apiJson<ImagesListResponse>(`/admin/api/images?${sp.toString()}`);
     },
   });
 
   React.useEffect(() => {
-    if (!query.data) return;
-    setItems(query.data.items);
-    setNextCursor(query.data.next_cursor || "");
-    setListRequestId(query.data.request_id);
+    // Clear selection when the first page reloads (filter change or invalidate).
     setSelectedRowKeys([]);
   }, [query.data]);
 
-  const loadMore = useMutation({
-    mutationFn: (cursor: string) => {
-      const sp = new URLSearchParams({ limit: "50", cursor });
-      for (const key of missing) sp.append("missing", key);
-      return apiJson<ImagesListResponse>(`/admin/api/images?${sp.toString()}`);
-    },
-    onSuccess: (data) => {
-      setItems((prev) => {
-        const seen = new Set(prev.map((x) => x.id));
-        const merged = [...prev];
-        for (const item of data.items) {
-          if (!seen.has(item.id)) merged.push(item);
-        }
-        return merged;
-      });
-      setNextCursor(data.next_cursor || "");
-      setListRequestId(data.request_id);
-    },
-    onError: (err) => {
+  React.useEffect(() => {
+    if (loadMore.isError) {
+      const err = loadMore.error;
       setActionAlert({ type: "error", message: messageFromError(err), requestId: requestIdFromError(err) });
-    },
-  });
+    }
+  }, [loadMore.isError, loadMore.error]);
 
   const deleteImage = useMutation({
     mutationFn: (imageId: string) =>
