@@ -160,7 +160,11 @@ async def delete_admin_image(
         return admin_ok(request, payload={"image_id": str(int(image_id))}, request_id=rid)
 
     result = await with_sqlite_busy_retry(_op)
-    await maybe_publish_engine_deletes(image_ids=[int(image_id)], client=getattr(request.app.state, "httpx_client", None))
+    await maybe_publish_engine_deletes(
+        image_ids=[int(image_id)],
+        settings=getattr(request.app.state, "settings", None),
+        client=getattr(request.app.state, "httpx_client", None),
+    )
     return result
 
 
@@ -205,6 +209,7 @@ async def bulk_delete_admin_images(
     if deleted_ids:
         await maybe_publish_engine_deletes(
             image_ids=deleted_ids,
+            settings=getattr(request.app.state, "settings", None),
             client=getattr(request.app.state, "httpx_client", None),
         )
     return out["response"]
@@ -258,6 +263,7 @@ async def clear_admin_images(
     result = await with_sqlite_busy_retry(_op)
     # Full catalog wipe → empty engine snapshot (best-effort).
     await maybe_publish_engine_empty_snapshot(
+        settings=getattr(request.app.state, "settings", None),
         client=getattr(request.app.state, "httpx_client", None),
         revision="cleared",
     )
