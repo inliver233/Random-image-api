@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import time
@@ -8,6 +7,7 @@ from dataclasses import dataclass
 from typing import Mapping
 from urllib.parse import urlparse
 
+from app.core.b64url import b64url_encode
 from app.core.config import Settings
 
 # Keep aligned with edge/img-worker path allowlist (contract: contracts/image-edge.md).
@@ -39,10 +39,6 @@ class ImageEdgeConfig:
         if prev and prev != primary:
             out.append(prev)
         return out
-
-
-def _urlsafe_b64(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
 def _parse_base_urls(raw: str) -> list[str]:
@@ -118,7 +114,7 @@ def verify_image_edge_signature(
     msg = f"{int(exp)}\n{path}".encode("utf-8")
     for secret in cfg.verify_secrets:
         dig = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).digest()
-        expect = _urlsafe_b64(dig)
+        expect = b64url_encode(dig)
         if hmac.compare_digest(expect, sig):
             return True
     return False
@@ -187,8 +183,8 @@ def sign_image_edge_path(cfg: ImageEdgeConfig, path: str, *, now: int | None = N
     exp = int(now if now is not None else time.time()) + int(cfg.sign_ttl_seconds)
     msg = f"{exp}\n{path}".encode("utf-8")
     dig = hmac.new(cfg.secret.encode("utf-8"), msg, hashlib.sha256).digest()
-    sig = _urlsafe_b64(dig)
-    b64path = _urlsafe_b64(path.encode("utf-8"))
+    sig = b64url_encode(dig)
+    b64path = b64url_encode(path.encode("utf-8"))
     return f"{base}/u/{exp}/{sig}/{b64path}"
 
 

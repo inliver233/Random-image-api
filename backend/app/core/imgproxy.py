@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 from dataclasses import dataclass
 from typing import Mapping
 
+from app.core.b64url import b64url_encode
 from app.core.config import Settings
 
 
@@ -52,7 +52,8 @@ def load_imgproxy_config_from_settings(settings: Settings) -> ImgproxyConfig | N
 
 
 def urlsafe_b64_no_pad(raw: bytes) -> str:
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+    """Backward-compatible alias for shared b64url_encode."""
+    return b64url_encode(raw)
 
 
 def encode_source_url(source_url: str, *, chunk_size: int) -> str:
@@ -60,7 +61,7 @@ def encode_source_url(source_url: str, *, chunk_size: int) -> str:
     if not source_url:
         raise ValueError("source_url is required")
 
-    encoded = urlsafe_b64_no_pad(source_url.encode("utf-8"))
+    encoded = b64url_encode(source_url.encode("utf-8"))
     if chunk_size <= 0 or len(encoded) <= chunk_size:
         return encoded
     return "/".join(encoded[i : i + chunk_size] for i in range(0, len(encoded), chunk_size))
@@ -74,7 +75,7 @@ def sign_path(cfg: ImgproxyConfig, path_after_signature: str) -> str:
     mac = hmac.new(cfg.key, digestmod=hashlib.sha256)
     mac.update(cfg.salt)
     mac.update(path.encode("utf-8"))
-    return urlsafe_b64_no_pad(mac.digest())
+    return b64url_encode(mac.digest())
 
 
 def build_processing_path(
