@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
-
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.coerce import as_nonneg_int
 from app.core.logging import get_logger
 from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
@@ -13,14 +12,6 @@ from app.db.session import with_sqlite_busy_retry
 log = get_logger(__name__)
 
 RANDOM_TOTALS_KEY = "stats.random.total"
-
-
-def _as_nonneg_int(value: Any) -> int:
-    try:
-        i = int(value)
-    except Exception:
-        return 0
-    return i if i > 0 else 0
 
 
 async def load_persisted_random_totals(engine: AsyncEngine) -> dict[str, int]:
@@ -39,12 +30,12 @@ async def load_persisted_random_totals(engine: AsyncEngine) -> dict[str, int]:
     if raw is None:
         return {"total_requests": 0, "total_ok": 0, "total_error": 0}
 
-    # soft_json_object: invalid/non-object → {}; missing keys → 0 via _as_nonneg_int.
+    # soft_json_object: invalid/non-object → {}; missing keys → 0 via as_nonneg_int.
     data = soft_json_object(str(raw))
     return {
-        "total_requests": _as_nonneg_int(data.get("total_requests")),
-        "total_ok": _as_nonneg_int(data.get("total_ok")),
-        "total_error": _as_nonneg_int(data.get("total_error")),
+        "total_requests": as_nonneg_int(data.get("total_requests")),
+        "total_ok": as_nonneg_int(data.get("total_ok")),
+        "total_error": as_nonneg_int(data.get("total_error")),
     }
 
 

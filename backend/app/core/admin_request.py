@@ -4,7 +4,7 @@ from typing import Any
 
 from fastapi import Request
 
-from app.core.coerce import clamp_float, clamp_int
+from app.core.coerce import as_bool, as_optional_float, clamp_float, clamp_int
 from app.core.errors import ApiError, ErrorCode
 
 
@@ -39,36 +39,13 @@ async def load_json_object_optional(request: Request) -> dict[str, Any]:
 
 def parse_bool(value: Any, *, default: bool) -> bool:
     """Lenient bool parse used by admin forms (missing/unknown → default)."""
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"1", "true", "yes", "y", "on"}:
-            return True
-        if v in {"0", "false", "no", "n", "off"}:
-            return False
-    return default
+    v = as_bool(value)
+    return default if v is None else v
 
 
 def parse_bool_optional(value: Any) -> bool | None:
     """Strict-ish bool parse: returns None when value is missing/unrecognized."""
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"1", "true", "yes", "y", "on"}:
-            return True
-        if v in {"0", "false", "no", "n", "off"}:
-            return False
-    return None
+    return as_bool(value)
 
 
 def parse_required_bool(
@@ -78,7 +55,7 @@ def parse_required_bool(
     invalid_message: str | None = None,
 ) -> bool:
     """Require a recognized bool; missing/unrecognized → BAD_REQUEST."""
-    v = parse_bool_optional(value)
+    v = as_bool(value)
     if v is None:
         raise ApiError(
             code=ErrorCode.BAD_REQUEST,
@@ -161,14 +138,9 @@ def require_positive_id(
     Validate a path/query id that FastAPI already typed as int.
 
     Prefer this over hand-rolled `if id <= 0` so messages stay stable per endpoint.
+    Thin wrapper over parse_positive_int with a fixed invalid message.
     """
-    try:
-        i = int(value)
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid_message, status_code=400) from exc
-    if i <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid_message, status_code=400)
-    return i
+    return parse_positive_int(value, field="id", invalid_message=invalid_message)
 
 
 def parse_int_in_range(
@@ -218,13 +190,9 @@ def coerce_float(value: Any) -> float | None:
     Lenient float coercion used by soft settings normalizers.
 
     None / bool / unparseable → None (bool is rejected so True/False never become 1.0/0.0).
+    Thin alias of as_optional_float for stable admin_request import surface.
     """
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return float(value)
-    except Exception:
-        return None
+    return as_optional_float(value)
 
 
 def parse_int_clamped(
@@ -271,13 +239,13 @@ def parse_float_clamped(
     """
     Soft/strict float parse with clamp.
 
-    Uses coerce_float semantics (bool rejected). On invalid:
+    Uses as_optional_float semantics (bool rejected). On invalid:
     - strict → BAD_REQUEST
     - soft → default (required when strict=False)
     On success → clamp to [min_value, max_value].
     """
     invalid = invalid_message or f"Unsupported {field}"
-    v = coerce_float(value)
+    v = as_optional_float(value)
     if v is None or (require_finite and not _is_finite(v)):
         if strict:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)

@@ -33,6 +33,68 @@ def as_int(value: Any, *, default: int = 0) -> int:
         return default
 
 
+def as_nonneg_int(value: Any) -> int:
+    """
+    Soft non-negative int for stats/scoring counters.
+
+    None / bool / unparseable / non-positive → 0 (bool rejected so True never becomes 1).
+    """
+    if value is None or isinstance(value, bool):
+        return 0
+    try:
+        i = int(value)
+    except Exception:
+        return 0
+    return i if i > 0 else 0
+
+
+def as_float(value: Any, *, default: float) -> float:
+    """
+    Soft float with default.
+
+    None / bool / unparseable → default (bool rejected so True never becomes 1.0).
+    """
+    if value is None or isinstance(value, bool):
+        return float(default)
+    try:
+        return float(value)
+    except Exception:
+        return float(default)
+
+
+def as_optional_float(value: Any) -> float | None:
+    """
+    Lenient optional float for soft settings normalizers.
+
+    None / bool / unparseable → None (bool rejected so True never becomes 1.0).
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def as_bool(value: Any) -> bool | None:
+    """
+    Soft optional bool for settings/recommendation payloads.
+
+    Recognized true/false tokens (incl. 0/1 int); missing/unrecognized → None.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in {"true", "1", "yes", "y", "on"}:
+            return True
+        if v in {"false", "0", "no", "n", "off"}:
+            return False
+    return None
+
+
 def clamp_int(value: int, *, min_v: int, max_v: int) -> int:
     """Inclusive clamp for already-parsed ints (not env/request parsers)."""
     return max(int(min_v), min(int(value), int(max_v)))

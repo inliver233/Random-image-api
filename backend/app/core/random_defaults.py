@@ -5,14 +5,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from app.core.coerce import clamp_float, clamp_int
+from app.core.coerce import as_bool, as_float, clamp_float, clamp_int
 from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
 from app.core.recommendation import (
     DEFAULT_RECOMMENDATION,
     DEFAULT_SCORE_WEIGHTS,
-    as_bool,
-    as_float,
     parse_recommendation_overrides_from_query,
 )
 from app.core.time import iso_utc_ms

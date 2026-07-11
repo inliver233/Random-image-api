@@ -4,6 +4,7 @@ import React from "react";
 import { useParams } from "react-router-dom";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { PendingAlert } from "../admin/PendingAlert";
 import { QueryState } from "../admin/QueryState";
 import { jobStatusLabel } from "../admin/jobStatus";
 import { useActionAlerts } from "../admin/useActionAlerts";
@@ -106,9 +107,13 @@ export function ImportDetailPage() {
         <>
           <Typography.Text type="secondary">请求ID: {query.data?.request_id}</Typography.Text>
 
-          {query.data?.item.job && (query.data.item.job.status === "pending" || query.data.item.job.status === "running") ? (
-            <Alert type="info" showIcon message="导入进行中（每1秒自动刷新）" />
-          ) : null}
+          <PendingAlert
+            pending={Boolean(
+              query.data?.item.job &&
+                (query.data.item.job.status === "pending" || query.data.item.job.status === "running"),
+            )}
+            message="导入进行中（每1秒自动刷新）"
+          />
 
           {query.data?.item.job && query.data.item.job.status === "pending" ? (
             <Alert

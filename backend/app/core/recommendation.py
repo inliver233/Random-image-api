@@ -4,9 +4,23 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
-from app.core.coerce import clamp_float
+from app.core.coerce import as_bool, as_float, as_nonneg_int, clamp_float
 from app.core.errors import ApiError, ErrorCode
 from app.core.time import parse_iso_dt
+
+# Re-export soft parsers so existing recommendation-oriented imports keep working.
+__all__ = (
+    "DEFAULT_RECOMMENDATION",
+    "DEFAULT_SCORE_WEIGHTS",
+    "age_days",
+    "as_bool",
+    "as_float",
+    "as_nonneg_int",
+    "multiplier_for_image",
+    "parse_recommendation_overrides_from_query",
+    "quality_score",
+    "score_image_with_time_boosts",
+)
 
 DEFAULT_SCORE_WEIGHTS: dict[str, float] = {
     "bookmark": 4.0,
@@ -40,43 +54,6 @@ DEFAULT_RECOMMENDATION: dict[str, Any] = {
         "unknown_illust_type": 1.0,
     },
 }
-
-
-def as_bool(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"true", "1", "yes", "y", "on"}:
-            return True
-        if v in {"false", "0", "no", "n", "off"}:
-            return False
-    return None
-
-
-def as_nonneg_int(value: Any) -> int:
-    if value is None:
-        return 0
-    if isinstance(value, bool):
-        return 0
-    try:
-        i = int(value)
-    except Exception:
-        return 0
-    return i if i > 0 else 0
-
-
-def as_float(value: Any, *, default: float) -> float:
-    if value is None:
-        return float(default)
-    if isinstance(value, bool):
-        return float(default)
-    try:
-        return float(value)
-    except Exception:
-        return float(default)
 
 
 def age_days(dt: datetime | None, *, now: datetime | None = None) -> float | None:
