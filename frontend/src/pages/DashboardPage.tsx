@@ -3,7 +3,8 @@ import { Alert, Button, Card, Col, Row, Skeleton, Space, Typography } from "antd
 import React from "react";
 import { useNavigate } from "react-router-dom";
 
-import { ApiError, apiJson } from "../api/client";
+import { messageFromError, requestIdFromError } from "../admin/errors";
+import { apiJson } from "../api/client";
 
 type SummaryResponse = {
   ok: true;
@@ -71,22 +72,6 @@ type FailedJobItem = {
 };
 type JobsResponse = { ok: true; items: FailedJobItem[]; next_cursor: string; request_id: string };
 type CreateHydrationRunResponse = { ok: true; hydration_run_id: string; job_id: string; request_id: string };
-
-function asApiError(err: unknown): ApiError | null {
-  return err instanceof ApiError ? err : null;
-}
-
-function requestIdFromError(err: unknown): string | null {
-  const apiErr = asApiError(err);
-  if (!apiErr?.body?.request_id) return null;
-  return String(apiErr.body.request_id);
-}
-
-function messageFromError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return "未知错误";
-}
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -406,5 +391,4 @@ export function DashboardPage() {
     </>
   );
 }
-
 

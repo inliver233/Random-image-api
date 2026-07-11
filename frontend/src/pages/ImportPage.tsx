@@ -4,7 +4,8 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { ApiError, apiJson } from "../api/client";
+import { apiJson } from "../api/client";
+import { requestIdFromError, messageFromError } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ImportFormValues = {
@@ -50,17 +51,6 @@ type ImportsListResponse = {
   next_cursor: string;
   request_id: string;
 };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
-
-function messageFromError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return "未知错误";
-}
 
 function jobStatusLabel(status: string): string {
   switch (status) {

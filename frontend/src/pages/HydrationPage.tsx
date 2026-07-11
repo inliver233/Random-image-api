@@ -19,7 +19,8 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { ApiError, apiJson } from "../api/client";
+import { apiJson } from "../api/client";
+import { requestIdFromError, messageFromError } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type SummaryResponse = {
@@ -129,17 +130,6 @@ const MISSING_LABELS: Record<string, string> = {
   created_at: "发布时间",
   popularity: "热度（收藏/浏览/评论）",
 };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
-
-function messageFromError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return "未知错误";
-}
 
 function statusColor(status: string): string {
   switch (status) {

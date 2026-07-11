@@ -3,7 +3,8 @@ import { Alert, Button, Card, Descriptions, Drawer, Select, Skeleton, Space, Tab
 import type { ColumnsType } from "antd/es/table";
 import React, { useState } from "react";
 
-import { ApiError, apiJson } from "../api/client";
+import { apiJson } from "../api/client";
+import { requestIdFromError } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type JobItem = {
@@ -37,11 +38,6 @@ type JobDetailResponse = {
 };
 
 type JobActionResponse = { ok: true; job_id: string; status: string; request_id: string };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
 
 function statusLabel(status: string): string {
   switch (status) {

@@ -3,7 +3,8 @@ import { Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Skele
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 
-import { ApiError, apiJson } from "../api/client";
+import { apiJson } from "../api/client";
+import { requestIdFromError, messageFromError } from "../admin/errors";
 
 type TokenItem = {
   id: string;
@@ -61,17 +62,6 @@ type ResetFailuresResponse = {
   token_id: string;
   request_id: string;
 };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
-
-function messageFromError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return "未知错误";
-}
 
 const columns = (actions: {
   onEdit: (row: TokenItem) => void;

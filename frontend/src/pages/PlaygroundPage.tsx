@@ -4,6 +4,7 @@ import React, { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 
 import { ApiError, type ApiErrorBody, apiFetch, apiJson, formatApiErrorMessage } from "../api/client";
+import { requestIdFromError } from "../admin/errors";
 
 type PlaygroundFormValues = {
   format: "image" | "json" | "redirect";
@@ -41,11 +42,6 @@ type PlaygroundResult =
   | { kind: "json"; url: string; request_id: string; payload: RandomJsonResponse }
   | { kind: "image"; url: string; request_id: string | null; src: string; headers: Record<string, string> }
   | { kind: "redirect"; url: string; request_id: string | null; location: string | null; note: string | null };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
 
 function buildRandomUrl(values: PlaygroundFormValues): string {
   const sp = new URLSearchParams();

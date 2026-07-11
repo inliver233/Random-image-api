@@ -2,7 +2,8 @@ import { useMutation } from "@tanstack/react-query";
 import { Alert, Button, Card, Form, InputNumber, Skeleton, Space, Switch, Typography } from "antd";
 import React from "react";
 
-import { ApiError, apiJson } from "../api/client";
+import { apiJson } from "../api/client";
+import { requestIdFromError, messageFromError } from "../admin/errors";
 
 type CleanupFormValues = {
   keep_days: number;
@@ -20,17 +21,6 @@ type CleanupResponse = {
   has_more: boolean;
   request_id: string;
 };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
-
-function messageFromError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return "未知错误";
-}
 
 export function MaintenancePage() {
   const [form] = Form.useForm<CleanupFormValues>();

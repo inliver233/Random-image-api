@@ -4,7 +4,8 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { ApiError, apiJson } from "../api/client";
+import { apiJson } from "../api/client";
+import { requestIdFromError, messageFromError } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ProxyPoolItem = {
@@ -74,17 +75,6 @@ type EditPoolFormValues = {
 };
 
 type MemberConfig = { enabled: boolean; weight: number };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
-
-function messageFromError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return "未知错误";
-}
 
 export function ProxyPoolsPage() {
   const navigate = useNavigate();

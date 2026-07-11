@@ -3,7 +3,8 @@ import { Alert, Button, Card, Descriptions, Popconfirm, Progress, Skeleton, Spac
 import React from "react";
 import { useParams } from "react-router-dom";
 
-import { ApiError, apiJson } from "../api/client";
+import { apiJson } from "../api/client";
+import { requestIdFromError, messageFromError } from "../admin/errors";
 
 type ImportDetailResponse = {
   ok: true;
@@ -39,17 +40,6 @@ type ImportRollbackResponse = {
   updated: number;
   request_id: string;
 };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
-
-function messageFromError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return "未知错误";
-}
 
 function statusLabel(status: string): string {
   switch (status) {

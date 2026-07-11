@@ -3,6 +3,7 @@ import { Alert, Button, Card, Form, InputNumber, Select, Skeleton, Space, Switch
 import React, { useEffect, useState } from "react";
 
 import { ApiError, apiJson } from "../api/client";
+import { requestIdFromError } from "../admin/errors";
 
 type ProxyPoolItem = {
   id: string;
@@ -45,11 +46,6 @@ type SettingsFormValues = {
   pixiv_hydrate_min_interval_ms: number;
   pixiv_hydrate_jitter_ms: number;
 };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
 
 function asObject(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
