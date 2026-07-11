@@ -55,3 +55,36 @@ async def mark_image_ok(engine: AsyncEngine, *, image_id: int, now: str) -> None
 
     await with_sqlite_busy_retry(_op)
 
+
+async def heal_broken_images_for_illust(
+    session,
+    *,
+    illust_id: int,
+    now: str,
+) -> list[int]:
+    """Set status 3 → 1 for all pages of an illust after successful hydrate heal.
+
+    Caller owns commit. Returns healed image ids (for engine re-index / R2 prewarm).
+    """
+    from sqlalchemy import select
+
+    rows = (
+        await session.execute(
+            select(Image.id).where(Image.illust_id == int(illust_id)).where(Image.status == 3)
+        )
+    ).scalars().all()
+    healed_ids = [int(x) for x in rows]
+    if healed_ids:
+        await session.execute(
+            update(Image)
+            .where(Image.id.in_(healed_ids))
+            .values(
+                status=1,
+                last_ok_at=str(now),
+                last_error_code=None,
+                last_error_msg=None,
+                updated_at=str(now),
+            )
+        )
+    return healed_ids
+

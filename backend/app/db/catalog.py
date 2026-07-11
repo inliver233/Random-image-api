@@ -6,7 +6,7 @@ from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.images_get import get_image_by_id, get_images_by_ids
-from app.db.images_mark import mark_image_failure, mark_image_ok
+from app.db.images_mark import heal_broken_images_for_illust, mark_image_failure, mark_image_ok
 from app.db.images_upsert import (
     bulk_upsert_import_rows,
     upsert_hydrated_image_page,
@@ -88,6 +88,14 @@ class CatalogStore(Protocol):
         error_code: str,
         error_message: str,
     ) -> None: ...
+
+    async def heal_broken_images_for_illust(
+        self,
+        session: AsyncSession,
+        *,
+        illust_id: int,
+        now: str,
+    ) -> list[int]: ...
 
 
 class SqliteCatalogStore:
@@ -207,6 +215,15 @@ class SqliteCatalogStore:
             error_code=error_code,
             error_message=error_message,
         )
+
+    async def heal_broken_images_for_illust(
+        self,
+        session: AsyncSession,
+        *,
+        illust_id: int,
+        now: str,
+    ) -> list[int]:
+        return await heal_broken_images_for_illust(session, illust_id=illust_id, now=now)
 
 
 # Postgres dialect uses the same SQLAlchemy helpers for now (dialect-neutral where possible).

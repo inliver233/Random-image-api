@@ -162,6 +162,80 @@ def test_sqlite_catalog_store_upsert_hydrated(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_sqlite_catalog_store_heal_broken_images(tmp_path: Path) -> None:
+    engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_heal.db").as_posix())
+
+    async def _run() -> None:
+        import sqlalchemy as sa
+
+        from app.db.models.images import Image
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        store = build_catalog_store(database_url=str(engine.url))
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            broken = Image(
+                illust_id=55,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/55.jpg",
+                proxy_path="/i/1.jpg",
+                random_key=0.5,
+                status=3,
+                last_error_code="UPSTREAM_404",
+                last_error_msg="gone",
+            )
+            ok = Image(
+                illust_id=55,
+                page_index=1,
+                ext="jpg",
+                original_url="https://example.test/55_p1.jpg",
+                proxy_path="/i/2.jpg",
+                random_key=0.6,
+                status=1,
+            )
+            other = Image(
+                illust_id=99,
+                page_index=0,
+                ext="png",
+                original_url="https://example.test/99.png",
+                proxy_path="/i/3.png",
+                random_key=0.7,
+                status=3,
+            )
+            session.add_all([broken, ok, other])
+            await session.commit()
+            await session.refresh(broken)
+            await session.refresh(ok)
+            await session.refresh(other)
+
+            healed = await store.heal_broken_images_for_illust(
+                session,
+                illust_id=55,
+                now="2020-01-01T00:00:00.000Z",
+            )
+            await session.commit()
+            assert healed == [int(broken.id)]
+
+            statuses = (
+                await session.execute(
+                    sa.select(Image.id, Image.status, Image.last_error_code, Image.last_ok_at)
+                    .where(Image.id.in_([int(broken.id), int(ok.id), int(other.id)]))
+                    .order_by(Image.id)
+                )
+            ).all()
+            by_id = {int(r.id): r for r in statuses}
+            assert int(by_id[int(broken.id)].status) == 1
+            assert by_id[int(broken.id)].last_error_code is None
+            assert str(by_id[int(broken.id)].last_ok_at) == "2020-01-01T00:00:00.000Z"
+            assert int(by_id[int(ok.id)].status) == 1
+            assert int(by_id[int(other.id)].status) == 3  # different illust untouched
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_sqlite_catalog_store_bulk_upsert_import(tmp_path: Path) -> None:
     engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_import.db").as_posix())
 

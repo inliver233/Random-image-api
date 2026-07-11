@@ -18,6 +18,7 @@ Implementation:
 | `bulk_upsert_import_rows` | Bulk import chunk: CASE-merge nullable metadata + fill empty `proxy_path`; returns ids (tags / Import counters stay in handler) |
 | `get_image_by_id` / `get_images_by_ids` | Public delivery + engine hydrate DTO |
 | `mark_image_ok` / `mark_image_failure` | Delivery quality feedback |
+| `heal_broken_images_for_illust` | After heal hydrate: status `3` → `1` for all pages of an illust; returns healed ids |
 
 Public delivery/get paths adopt the port progressively:
 
@@ -26,6 +27,7 @@ Public delivery/get paths adopt the port progressively:
 - Go engine hydrate after pick → `catalog.get_image_by_id` / `get_images_by_ids`
 - `hydrate_metadata` page upsert → `catalog.upsert_hydrated_image_page`
 - `import_images` chunk image upsert → `catalog.bulk_upsert_import_rows` (tags + Import progress counters remain in handler)
+- `heal_url` status recovery → `catalog.heal_broken_images_for_illust`
 
 Helpers remain available for non-public paths; injected store is preferred via `app.state.catalog_store`.
 
