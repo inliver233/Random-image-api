@@ -79,8 +79,22 @@ Backend note: pure edge **302** does **not** call `mark_image_ok` (bytes not ver
 | --- | --- |
 | `IMAGE_EDGE_ENABLED` | `true` to prefer edge for public image delivery |
 | `IMAGE_EDGE_BASE_URLS` | CSV of edge bases (sticky hash pick; multi-deploy pool) |
-| `IMAGE_EDGE_SECRET` | HMAC secret (must match Worker) |
+| `IMAGE_EDGE_SECRET` | HMAC secret (must match Worker; **sign + verify**) |
+| `IMAGE_EDGE_SECRET_PREVIOUS` | Optional previous secret for zero-downtime rotation (**verify only** on Worker; backend never signs with it) |
 | `IMAGE_EDGE_SIGN_TTL_SECONDS` | default `604800` |
+
+### Secret rotation (zero-downtime)
+
+1. Deploy Worker with `IMAGE_EDGE_SECRET=<new>` and `IMAGE_EDGE_SECRET_PREVIOUS=<old>` (both secrets via `wrangler secret put`).
+2. Flip backend `IMAGE_EDGE_SECRET` to `<new>`; keep `IMAGE_EDGE_SECRET_PREVIOUS=<old>` optional (backend still signs only with primary).
+3. Wait ≥ max URL TTL (`IMAGE_EDGE_SIGN_TTL_SECONDS`) so old signed URLs expire.
+4. Remove `IMAGE_EDGE_SECRET_PREVIOUS` from Worker (and backend).
+
+Worker verify order: primary, then previous (if distinct). `/healthz` reports `dual_secret`.
+
+### Origin soft circuit breaker (Worker)
+
+Isolate-local counter: after `ORIGIN_403_CIRCUIT_THRESHOLD` origin `403`s within `ORIGIN_403_CIRCUIT_WINDOW_MS`, skip origin for `ORIGIN_403_CIRCUIT_OPEN_MS` and try `FALLBACK_MIRROR_HOSTS` only. Response may include `X-Edge-Circuit: origin-open`. `/healthz` reports `origin_circuit_open`.
 
 When disabled or non-pximg `original_url`, public API falls back to local `/i/{id}.{ext}` stream (proxy pool / mirrors).
 

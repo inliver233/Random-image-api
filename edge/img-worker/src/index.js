@@ -26,6 +26,15 @@ const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 const BUILTIN_MIRRORS = new Set(["i.pixiv.cat", "i.pixiv.re", "i.pixiv.nl"]);
 
+// Soft circuit breaker for origin 403 storms (isolate per isolate; best-effort).
+// When open, skip origin and go straight to emergency mirrors if configured.
+const ORIGIN_CB = {
+  windowStartMs: 0,
+  samples: 0,
+  forbidden: 0,
+  openUntilMs: 0,
+};
+
 function b64urlEncodeBytes(buf) {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   let binary = "";
@@ -63,6 +72,62 @@ async function hmacSign(secret, msg) {
   );
   const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg));
   return b64urlEncodeBytes(sig);
+}
+
+/** Primary secret first, then IMAGE_EDGE_SECRET_PREVIOUS for rotation window. */
+function resolveVerifySecrets(env) {
+  const primary = String(env.IMAGE_EDGE_SECRET || "").trim();
+  const previous = String(env.IMAGE_EDGE_SECRET_PREVIOUS || "").trim();
+  const out = [];
+  if (primary) out.push(primary);
+  if (previous && previous !== primary) out.push(previous);
+  return out;
+}
+
+async function verifySignature(secrets, exp, path, sig) {
+  if (!Array.isArray(secrets) || secrets.length === 0) return false;
+  const msg = `${exp}\n${path}`;
+  for (const secret of secrets) {
+    try {
+      const expect = await hmacSign(secret, msg);
+      if (timingSafeEqual(expect, sig)) return true;
+    } catch {
+      // try next secret
+    }
+  }
+  return false;
+}
+
+function originCircuitConfig(env) {
+  const threshold = Math.max(1, Number(env.ORIGIN_403_CIRCUIT_THRESHOLD || 8) || 8);
+  const windowMs = Math.max(1000, Number(env.ORIGIN_403_CIRCUIT_WINDOW_MS || 60000) || 60000);
+  const openMs = Math.max(1000, Number(env.ORIGIN_403_CIRCUIT_OPEN_MS || 30000) || 30000);
+  return { threshold, windowMs, openMs };
+}
+
+function isOriginCircuitOpen(nowMs) {
+  return Number(ORIGIN_CB.openUntilMs || 0) > nowMs;
+}
+
+function noteOriginSample(status, env, nowMs = Date.now()) {
+  const { threshold, windowMs, openMs } = originCircuitConfig(env);
+  if (!ORIGIN_CB.windowStartMs || nowMs - ORIGIN_CB.windowStartMs > windowMs) {
+    ORIGIN_CB.windowStartMs = nowMs;
+    ORIGIN_CB.samples = 0;
+    ORIGIN_CB.forbidden = 0;
+  }
+  ORIGIN_CB.samples += 1;
+  if (Number(status) === 403) {
+    ORIGIN_CB.forbidden += 1;
+  }
+  // Soft-open only when we have enough samples and 403 rate is high.
+  if (ORIGIN_CB.samples >= threshold && ORIGIN_CB.forbidden >= threshold) {
+    ORIGIN_CB.openUntilMs = nowMs + openMs;
+  }
+  // Success slowly cools the breaker.
+  if (Number(status) === 200 && ORIGIN_CB.forbidden > 0) {
+    ORIGIN_CB.forbidden = Math.max(0, ORIGIN_CB.forbidden - 1);
+  }
 }
 
 function parseSignedPath(pathname) {
@@ -177,31 +242,48 @@ async function fetchMirrorHost(path, host) {
 /**
  * Primary origin, then ordered emergency mirrors. Returns { response, via }.
  * via is origin host or mirror host that produced HTTP 200.
+ * Soft circuit: after repeated origin 403s, skip origin for ORIGIN_403_CIRCUIT_OPEN_MS.
  */
 async function fetchUpstreamWithFallback(path, env) {
   const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
-  let upstream;
-  try {
-    upstream = await fetchOrigin(path, env);
-  } catch {
-    upstream = null;
-  }
-  if (upstream && upstream.status === 200) {
-    return { response: upstream, via: originHost };
+  const nowMs = Date.now();
+  const skipOrigin = isOriginCircuitOpen(nowMs);
+  let upstream = null;
+  let primaryStatus = 0;
+
+  if (!skipOrigin) {
+    try {
+      upstream = await fetchOrigin(path, env);
+    } catch {
+      upstream = null;
+    }
+    if (upstream) {
+      primaryStatus = upstream.status;
+      noteOriginSample(upstream.status, env, nowMs);
+    }
+    if (upstream && upstream.status === 200) {
+      return { response: upstream, via: originHost, circuitOpen: false };
+    }
+  } else {
+    primaryStatus = 403;
   }
 
-  const primaryStatus = upstream ? upstream.status : 0;
   for (const host of resolveFallbackHosts(env)) {
     try {
       const fb = await fetchMirrorHost(path, host);
       if (fb && fb.status === 200) {
-        return { response: fb, via: host, primaryStatus };
+        return {
+          response: fb,
+          via: host,
+          primaryStatus,
+          circuitOpen: skipOrigin,
+        };
       }
     } catch {
       // try next host
     }
   }
-  return { response: upstream, via: null, primaryStatus };
+  return { response: upstream, via: null, primaryStatus, circuitOpen: skipOrigin };
 }
 
 export default {
@@ -213,17 +295,26 @@ export default {
       return jsonError(405, "Method Not Allowed");
     }
 
-    const secret = String(env.IMAGE_EDGE_SECRET || "").trim();
-    if (!secret) {
+    const secrets = resolveVerifySecrets(env);
+    if (!secrets.length) {
       return jsonError(500, "IMAGE_EDGE_SECRET not configured");
     }
 
     const url = new URL(request.url);
     if (url.pathname === "/healthz" || url.pathname === "/") {
-      return new Response(JSON.stringify({ ok: true, service: "random-image-edge" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json; charset=utf-8", ...corsHeaders() },
-      });
+      const circuitOpen = isOriginCircuitOpen(Date.now());
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          service: "random-image-edge",
+          dual_secret: secrets.length > 1,
+          origin_circuit_open: circuitOpen,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json; charset=utf-8", ...corsHeaders() },
+        },
+      );
     }
 
     const parsed = parseSignedPath(url.pathname);
@@ -247,8 +338,8 @@ export default {
       return jsonError(400, "Path not allowed");
     }
 
-    const expect = await hmacSign(secret, `${parsed.exp}\n${path}`);
-    if (!timingSafeEqual(expect, parsed.sig)) {
+    const okSig = await verifySignature(secrets, parsed.exp, path, parsed.sig);
+    if (!okSig) {
       return jsonError(403, "Invalid signature");
     }
 
@@ -304,6 +395,7 @@ export default {
     headers.set("X-Edge-Cache", "MISS");
     headers.set("X-Edge-Origin", originHost);
     headers.set("X-Edge-Via", String(fetched.via || originHost));
+    if (fetched.circuitOpen) headers.set("X-Edge-Circuit", "origin-open");
     headers.set("X-Proxied-By", "random-image-edge");
 
     const body = request.method === "HEAD" ? null : upstream.body;

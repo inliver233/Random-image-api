@@ -17,6 +17,7 @@ from app.core.image_edge import (
     pximg_path_from_original_url,
     resolve_public_proxy_url,
     sign_image_edge_path,
+    verify_image_edge_signature,
 )
 from app.core.config import load_settings
 from app.db.models.base import Base
@@ -70,6 +71,62 @@ def test_load_image_edge_config_requires_all_fields() -> None:
     assert cfg.primary_base_url == "https://img.example.com"
     assert cfg.base_urls == ["https://img.example.com", "https://img2.example.com"]
     assert cfg.sign_ttl_seconds == 120
+    assert cfg.secret_previous == ""
+    assert cfg.verify_secrets == ["s"]
+
+
+def test_dual_secret_verify_accepts_previous_but_signs_primary_only() -> None:
+    cfg = load_image_edge_config(
+        {
+            "IMAGE_EDGE_ENABLED": "true",
+            "IMAGE_EDGE_SECRET": "new-secret",
+            "IMAGE_EDGE_SECRET_PREVIOUS": "old-secret",
+            "IMAGE_EDGE_BASE_URLS": "https://img.example.com",
+            "IMAGE_EDGE_SIGN_TTL_SECONDS": "600",
+        }
+    )
+    assert cfg is not None
+    assert cfg.secret == "new-secret"
+    assert cfg.secret_previous == "old-secret"
+    assert cfg.verify_secrets == ["new-secret", "old-secret"]
+
+    path = "/img-original/img/2020/01/01/00/00/00/1_p0.jpg"
+    now = 1_700_000_000
+    url = sign_image_edge_path(cfg, path, now=now)
+    exp = now + 600
+    # Signed with primary only.
+    primary_sig = _b64url(hmac.new(b"new-secret", f"{exp}\n{path}".encode("utf-8"), hashlib.sha256).digest())
+    assert f"/{primary_sig}/" in url
+    assert verify_image_edge_signature(cfg, path=path, exp=exp, sig=primary_sig) is True
+
+    old_sig = _b64url(hmac.new(b"old-secret", f"{exp}\n{path}".encode("utf-8"), hashlib.sha256).digest())
+    assert verify_image_edge_signature(cfg, path=path, exp=exp, sig=old_sig) is True
+    assert verify_image_edge_signature(cfg, path=path, exp=exp, sig="not-a-real-sig") is False
+
+
+def test_dual_secret_dedupes_identical_previous() -> None:
+    cfg = load_image_edge_config(
+        {
+            "IMAGE_EDGE_ENABLED": "true",
+            "IMAGE_EDGE_SECRET": "same",
+            "IMAGE_EDGE_SECRET_PREVIOUS": "same",
+            "IMAGE_EDGE_BASE_URLS": "https://img.example.com",
+        }
+    )
+    assert cfg is not None
+    assert cfg.secret_previous == ""
+    assert cfg.verify_secrets == ["same"]
+
+    s = load_settings(
+        {
+            "APP_ENV": "dev",
+            "IMAGE_EDGE_ENABLED": "true",
+            "IMAGE_EDGE_SECRET": "same",
+            "IMAGE_EDGE_SECRET_PREVIOUS": "same",
+            "IMAGE_EDGE_BASE_URLS": "https://img.example.com",
+        }
+    )
+    assert s.image_edge_secret_previous == ""
 
 
 def test_resolve_public_proxy_url_falls_back_when_disabled() -> None:

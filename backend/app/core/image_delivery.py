@@ -7,11 +7,9 @@ from fastapi.responses import RedirectResponse
 
 from app.core.http_stream import stream_url
 from app.core.image_edge import resolve_image_edge_redirect_url
+from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.proxy_routing import select_proxy_uri_for_url
-from app.core.pximg_reverse_proxy import (
-    pick_pximg_mirror_host_for_request,
-    rewrite_pximg_to_mirror,
-)
+from app.core.pximg_reverse_proxy import rewrite_pximg_to_mirror
 from app.core.random_delivery import attach_background, best_effort, build_edge_redirect_response
 from app.core.random_request import prefer_image_edge
 from app.core.random_strategy import needs_opportunistic_hydrate
@@ -84,20 +82,24 @@ async def deliver_known_image(
                 return attach_background(resp, background_tasks)
             return resp
 
-    mirror_host_override = proxy_override or pximg_mirror_host_override
-    runtime_mirror_host = str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
-    mirror_host = mirror_host_override or (
-        pick_pximg_mirror_host_for_request(headers=request.headers, fallback_host=runtime_mirror_host)
-        if use_pixiv_cat
-        else runtime_mirror_host
+    resolved = resolve_proxy_mirror(
+        runtime=runtime,
+        headers=request.headers,
+        pixiv_cat=1 if use_pixiv_cat else int(pixiv_cat),
+        pximg_mirror_host=pximg_mirror_host_override or proxy_override,
+        proxy=proxy_override,
+        raise_on_invalid=False,
     )
+    # Caller already decided use_pixiv_cat; keep it authoritative for stream source.
+    mirror_host = proxy_override or pximg_mirror_host_override or resolved.mirror_host
+    use_mirror = bool(use_pixiv_cat) or bool(proxy_override)
     proxy_uri = None
     source_url = (
         rewrite_pximg_to_mirror(str(image.original_url), mirror_host=mirror_host)
-        if use_pixiv_cat
+        if use_mirror
         else str(image.original_url)
     )
-    if not use_pixiv_cat:
+    if not use_mirror:
         picked = await select_proxy_uri_for_url(
             engine,
             settings,

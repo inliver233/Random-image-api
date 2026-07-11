@@ -21,10 +21,24 @@ class ImageEdgeConfig:
     base_urls: list[str]
     secret: str
     sign_ttl_seconds: int
+    # Optional previous secret: backend never signs with it; Worker may still verify.
+    secret_previous: str = ""
 
     @property
     def primary_base_url(self) -> str | None:
         return self.base_urls[0] if self.base_urls else None
+
+    @property
+    def verify_secrets(self) -> list[str]:
+        """Ordered secrets for verify (primary first, then previous if distinct)."""
+        out: list[str] = []
+        primary = (self.secret or "").strip()
+        if primary:
+            out.append(primary)
+        prev = (self.secret_previous or "").strip()
+        if prev and prev != primary:
+            out.append(prev)
+        return out
 
 
 def _urlsafe_b64(raw: bytes) -> str:
@@ -48,18 +62,30 @@ def _parse_base_urls(raw: str) -> list[str]:
 def load_image_edge_config_from_settings(settings: Settings) -> ImageEdgeConfig | None:
     enabled = bool(getattr(settings, "image_edge_enabled", False))
     secret = str(getattr(settings, "image_edge_secret", "") or "").strip()
+    secret_previous = str(getattr(settings, "image_edge_secret_previous", "") or "").strip()
+    if secret_previous and secret_previous == secret:
+        secret_previous = ""
     base_urls = list(getattr(settings, "image_edge_base_urls", None) or [])
     ttl = int(getattr(settings, "image_edge_sign_ttl_seconds", 604800) or 604800)
     ttl = max(60, min(ttl, 31_536_000))
     if not enabled or not secret or not base_urls:
         return None
-    return ImageEdgeConfig(enabled=True, base_urls=base_urls, secret=secret, sign_ttl_seconds=ttl)
+    return ImageEdgeConfig(
+        enabled=True,
+        base_urls=base_urls,
+        secret=secret,
+        sign_ttl_seconds=ttl,
+        secret_previous=secret_previous,
+    )
 
 
 def load_image_edge_config(env: Mapping[str, str]) -> ImageEdgeConfig | None:
     raw_enabled = (env.get("IMAGE_EDGE_ENABLED") or "").strip().lower()
     enabled = raw_enabled in {"1", "true", "yes", "y", "on"}
     secret = (env.get("IMAGE_EDGE_SECRET") or "").strip()
+    secret_previous = (env.get("IMAGE_EDGE_SECRET_PREVIOUS") or "").strip()
+    if secret_previous and secret_previous == secret:
+        secret_previous = ""
     base_urls = _parse_base_urls(env.get("IMAGE_EDGE_BASE_URLS") or env.get("IMAGE_EDGE_BASE_URL") or "")
     try:
         ttl = int((env.get("IMAGE_EDGE_SIGN_TTL_SECONDS") or "604800").strip() or "604800")
@@ -68,7 +94,34 @@ def load_image_edge_config(env: Mapping[str, str]) -> ImageEdgeConfig | None:
     ttl = max(60, min(ttl, 31_536_000))
     if not enabled or not secret or not base_urls:
         return None
-    return ImageEdgeConfig(enabled=True, base_urls=base_urls, secret=secret, sign_ttl_seconds=ttl)
+    return ImageEdgeConfig(
+        enabled=True,
+        base_urls=base_urls,
+        secret=secret,
+        sign_ttl_seconds=ttl,
+        secret_previous=secret_previous,
+    )
+
+
+def verify_image_edge_signature(
+    cfg: ImageEdgeConfig,
+    *,
+    path: str,
+    exp: int,
+    sig: str,
+) -> bool:
+    """Verify sig against primary then previous secret (rotation window)."""
+    path = (path or "").strip()
+    sig = (sig or "").strip()
+    if not path or not sig:
+        return False
+    msg = f"{int(exp)}\n{path}".encode("utf-8")
+    for secret in cfg.verify_secrets:
+        dig = hmac.new(secret.encode("utf-8"), msg, hashlib.sha256).digest()
+        expect = _urlsafe_b64(dig)
+        if hmac.compare_digest(expect, sig):
+            return True
+    return False
 
 
 def pximg_path_from_original_url(original_url: str) -> str | None:

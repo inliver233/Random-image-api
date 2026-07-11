@@ -37,6 +37,8 @@ class Settings:
     image_edge_enabled: bool
     image_edge_base_urls: list[str]
     image_edge_secret: str
+    # Optional previous HMAC secret for zero-downtime rotation (verify-only on edge).
+    image_edge_secret_previous: str
     image_edge_sign_ttl_seconds: int
     public_api_key_required: bool
     public_api_key_rpm: int
@@ -181,6 +183,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
 
     image_edge_enabled = _get_bool(env, "IMAGE_EDGE_ENABLED", False)
     image_edge_secret = _get(env, "IMAGE_EDGE_SECRET", "")
+    image_edge_secret_previous = _get(env, "IMAGE_EDGE_SECRET_PREVIOUS", "")
+    # Never keep a previous secret that equals the active one (no dual-check noise).
+    if image_edge_secret_previous and image_edge_secret_previous == image_edge_secret:
+        image_edge_secret_previous = ""
     image_edge_base_urls = _parse_csv_urls(
         _get(env, "IMAGE_EDGE_BASE_URLS", "") or _get(env, "IMAGE_EDGE_BASE_URL", "")
     )
@@ -237,6 +243,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         image_edge_enabled=image_edge_enabled,
         image_edge_base_urls=image_edge_base_urls,
         image_edge_secret=image_edge_secret,
+        image_edge_secret_previous=image_edge_secret_previous,
         image_edge_sign_ttl_seconds=image_edge_sign_ttl_seconds,
         public_api_key_required=public_api_key_required,
         public_api_key_rpm=public_api_key_rpm,

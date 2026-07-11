@@ -12,6 +12,12 @@ FALLBACK_MIRROR_HOST = ""
 FALLBACK_MIRROR_HOSTS = ""
 CACHE_TTL_SECONDS = "604800"
 ERROR_CACHE_TTL_SECONDS = "30"
+# Soft-open origin circuit after this many 403s in the window (isolate-local).
+ORIGIN_403_CIRCUIT_THRESHOLD = "8"
+ORIGIN_403_CIRCUIT_WINDOW_MS = "60000"
+ORIGIN_403_CIRCUIT_OPEN_MS = "30000"
+# Rotation: put previous secret via `wrangler secret put IMAGE_EDGE_SECRET_PREVIOUS`
+# (not in [vars]; never commit secrets).
 
 # Optional custom domain (configure in dashboard or routes):
 # routes = [{ pattern = "img.example.com/*", zone_name = "example.com" }]

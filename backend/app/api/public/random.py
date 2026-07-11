@@ -10,10 +10,7 @@ from fastapi.responses import RedirectResponse
 from app.core.errors import ApiError, ErrorCode
 from app.core.image_edge import resolve_image_edge_redirect_url, resolve_public_proxy_url
 from app.core.imgproxy import build_signed_processing_url, load_imgproxy_config_from_settings
-from app.core.pximg_reverse_proxy import (
-    normalize_pximg_proxy,
-    pick_pximg_mirror_host_for_request,
-)
+from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.recent_dedup import get_recent_lists, record_recent
 from app.core.random_defaults import (
     build_pick_kwargs,
@@ -166,22 +163,20 @@ async def random_image(
     else:
         runtime = await get_cached_runtime_config(engine)
 
-    proxy_override: str | None = None
-    if proxy is not None:
-        raw = str(proxy or "").strip()
-        if raw:
-            proxy_override = normalize_pximg_proxy(raw, extra_hosts=runtime.image_proxy_extra_pximg_mirror_hosts)
-            if proxy_override is None:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported proxy", status_code=400)
-
-    mirror_host_override = proxy_override or pximg_mirror_host_override
-    use_pixiv_cat = bool(runtime.image_proxy_use_pixiv_cat) or int(pixiv_cat) == 1 or proxy_override is not None
-    runtime_mirror_host = str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
-    mirror_host = mirror_host_override or (
-        pick_pximg_mirror_host_for_request(headers=request.headers, fallback_host=runtime_mirror_host)
-        if use_pixiv_cat
-        else runtime_mirror_host
+    resolved_proxy = resolve_proxy_mirror(
+        runtime=runtime,
+        headers=request.headers,
+        pixiv_cat=int(pixiv_cat),
+        pximg_mirror_host=pximg_mirror_host_override,
+        proxy=proxy,
     )
+    proxy_override = resolved_proxy.proxy_override
+    # Prefer explicit query override; fall back to shared resolver (proxy= may imply mirror).
+    pximg_mirror_host_override = (
+        resolved_proxy.pximg_mirror_host_override or pximg_mirror_host_override
+    )
+    use_pixiv_cat = resolved_proxy.use_pixiv_cat
+    mirror_host = resolved_proxy.mirror_host
 
     random_defaults = runtime.random_defaults if isinstance(runtime.random_defaults, dict) else {}
 

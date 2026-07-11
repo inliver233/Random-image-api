@@ -48,6 +48,17 @@ IMAGE_EDGE_SIGN_TTL_SECONDS=604800
 - 路径前缀白名单 + 扩展名白名单
 - 剥离客户端 Cookie / Authorization / CF-* 转发
 - 出站固定 `Referer: https://www.pixiv.net/`
+- 双密钥轮换：`IMAGE_EDGE_SECRET` + `IMAGE_EDGE_SECRET_PREVIOUS`（仅校验旧签）
+
+## 密钥轮换
+
+```bash
+# 1) Worker 同时持有新旧密钥
+npx wrangler secret put IMAGE_EDGE_SECRET          # 新
+npx wrangler secret put IMAGE_EDGE_SECRET_PREVIOUS # 旧
+# 2) 后端 IMAGE_EDGE_SECRET 改为新密钥（仍只签发新密钥）
+# 3) 等待 ≥ IMAGE_EDGE_SIGN_TTL_SECONDS 后删除 PREVIOUS
+```
 
 ## 回退
 
@@ -59,4 +70,5 @@ IMAGE_EDGE_SIGN_TTL_SECONDS=604800
    ```
    或兼容单值：`FALLBACK_MIRROR_HOST=i.pixiv.re`
 2. 成功响应带 `X-Edge-Via` 标明实际出站 host
-3. 或切换 R2 预取模式（后续迭代）
+3. 软熔断：连续 origin 403 达阈值后短时跳过 origin，直连镜像链（`X-Edge-Circuit: origin-open`）
+4. 或切换 R2 预取模式（后续迭代）
