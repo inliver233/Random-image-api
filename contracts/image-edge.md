@@ -157,6 +157,9 @@ Escape hatches:
 
 POC checklist:
 
+Offline pure helpers in `scripts/edge/probe-img-edge.py` (`sign_url`, `summarize_matrix`) are covered by
+`backend/tests/test_probe_img_edge_script.py` (no network; HMAC vs frozen vectors).
+
 1. `scripts/edge/deploy-img-worker.ps1` (or `npx wrangler deploy` in `edge/img-worker`)
 2. Single base probe:
    ```
