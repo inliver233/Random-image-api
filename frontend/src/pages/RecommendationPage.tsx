@@ -3,9 +3,9 @@ import { Alert, Button, Card, Form, Input, InputNumber, Select, Skeleton, Space,
 import React, { useEffect, useMemo, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
-import { requestIdDescription, requestIdFromError } from "../admin/errors";
+import { requestIdDescription } from "../admin/errors";
 import { useActionAlerts } from "../admin/useActionAlerts";
-import { ApiError, apiJson } from "../api/client";
+import { apiJson } from "../api/client";
 
 type SettingsResponse = {
   ok: true;
@@ -153,9 +153,8 @@ export function RecommendationPage() {
   });
 
   const saveAlerts = useActionAlerts();
+  const previewAlerts = useActionAlerts();
 
-  const [previewErrorMessage, setPreviewErrorMessage] = useState<string | null>(null);
-  const [previewRequestId, setPreviewRequestId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewBody, setPreviewBody] = useState<RandomPreviewResponse | null>(null);
 
@@ -283,27 +282,17 @@ export function RecommendationPage() {
       return { url, data };
     },
     onMutate: () => {
-      setPreviewErrorMessage(null);
-      setPreviewRequestId(null);
+      previewAlerts.clear();
       setPreviewBody(null);
       setPreviewUrl(null);
     },
     onSuccess: ({ url, data }) => {
       setPreviewUrl(url);
       setPreviewBody(data);
-      setPreviewRequestId(data.request_id);
+      previewAlerts.setSuccess("预览成功", data.request_id);
     },
     onError: (err) => {
-      if (err instanceof ApiError) {
-        setPreviewErrorMessage(err.message);
-        setPreviewRequestId(requestIdFromError(err));
-        return;
-      }
-      if (err instanceof Error) {
-        setPreviewErrorMessage(err.message);
-        return;
-      }
-      setPreviewErrorMessage("预览失败");
+      previewAlerts.setError(err, "预览失败");
     },
   });
 
@@ -527,8 +516,13 @@ export function RecommendationPage() {
             </Space>
 
             {preview.isPending ? <Alert type="info" showIcon message="正在预览..." /> : null}
-            {previewErrorMessage ? <Alert type="error" showIcon message={previewErrorMessage} /> : null}
-            {previewRequestId ? <Typography.Text type="secondary">请求ID: {previewRequestId}</Typography.Text> : null}
+            <ActionAlerts
+              message={previewAlerts.message}
+              requestId={previewAlerts.requestId}
+              errorMessage={previewAlerts.errorMessage}
+              errorRequestId={previewAlerts.errorRequestId}
+              requestIdPlacement="secondary"
+            />
             {previewUrl ? <Typography.Text type="secondary">请求链接: {previewUrl}</Typography.Text> : null}
             {previewBody ? (
               <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>

@@ -11,7 +11,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object, parse_bool_optional
+from app.core.admin_request import load_json_object, parse_bool_optional, parse_optional_str, parse_positive_int
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.crypto import FieldEncryptor
 from app.core.errors import ApiError, ErrorCode
@@ -255,24 +255,20 @@ async def _load_easy_import_json(request: Request) -> dict[str, Any]:
     if not base_url:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing base_url", status_code=400)
 
-    host_override_raw = data.get("host_override")
-    host_override = str(host_override_raw).strip() if host_override_raw is not None else ""
-    host_override = host_override if host_override else None
-    if host_override is not None and len(host_override) > 200:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid host_override", status_code=400)
+    host_override = parse_optional_str(
+        data.get("host_override"),
+        max_len=200,
+        field="host_override",
+        invalid_message="Invalid host_override",
+    )
 
     attach_pool_id: int | None = None
     if "attach_pool_id" in data:
         raw = data.get("attach_pool_id")
-        if raw is None or (isinstance(raw, str) and not raw.strip()):
+        if raw is None or (isinstance(raw, str) and not str(raw).strip()):
             attach_pool_id = None
         else:
-            try:
-                attach_pool_id = int(raw)
-            except Exception as exc:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid attach_pool_id", status_code=400) from exc
-            if attach_pool_id <= 0:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid attach_pool_id", status_code=400)
+            attach_pool_id = parse_positive_int(raw, field="attach_pool_id")
 
     attach_weight = 1
     if "attach_weight" in data:
@@ -292,11 +288,8 @@ async def _load_easy_import_json(request: Request) -> dict[str, Any]:
 
     max_tokens_per_proxy = 2
     if "max_tokens_per_proxy" in data:
-        try:
-            max_tokens_per_proxy = int(data.get("max_tokens_per_proxy"))
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid max_tokens_per_proxy", status_code=400) from exc
-        if max_tokens_per_proxy <= 0 or max_tokens_per_proxy > 1000:
+        max_tokens_per_proxy = parse_positive_int(data.get("max_tokens_per_proxy"), field="max_tokens_per_proxy")
+        if max_tokens_per_proxy > 1000:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid max_tokens_per_proxy", status_code=400)
 
     strict = True
@@ -345,22 +338,14 @@ async def _load_probe_json(request: Request) -> dict[str, Any]:
             out["probe_url"] = probe_url
 
     if "timeout_ms" in data:
-        raw = data.get("timeout_ms")
-        try:
-            timeout_ms = int(raw)
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid timeout_ms", status_code=400) from exc
-        if timeout_ms <= 0 or timeout_ms > 600_000:
+        timeout_ms = parse_positive_int(data.get("timeout_ms"), field="timeout_ms")
+        if timeout_ms > 600_000:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid timeout_ms", status_code=400)
         out["timeout_ms"] = int(timeout_ms)
 
     if "concurrency" in data:
-        raw = data.get("concurrency")
-        try:
-            concurrency = int(raw)
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid concurrency", status_code=400) from exc
-        if concurrency < 1 or concurrency > 200:
+        concurrency = parse_positive_int(data.get("concurrency"), field="concurrency")
+        if concurrency > 200:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid concurrency", status_code=400)
         out["concurrency"] = int(concurrency)
 

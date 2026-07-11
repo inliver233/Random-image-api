@@ -36,12 +36,12 @@ export function ActionAlerts(props: ActionAlertsProps) {
   return (
     <>
       {message ? <Alert type="success" showIcon message={message} description={successDesc} /> : null}
-      {showSecondaryRequestId && message && requestId ? (
+      {showSecondaryRequestId && requestId ? (
         <Typography.Text type="secondary">请求ID: {requestId}</Typography.Text>
       ) : null}
       {warningMessage ? <Alert type="warning" showIcon message={warningMessage} /> : null}
       {errorMessage ? <Alert type="error" showIcon message={errorMessage} description={errorDesc} /> : null}
-      {showSecondaryRequestId && errorMessage && errorRequestId ? (
+      {showSecondaryRequestId && errorRequestId && errorRequestId !== requestId ? (
         <Typography.Text type="secondary">请求ID: {errorRequestId}</Typography.Text>
       ) : null}
     </>
