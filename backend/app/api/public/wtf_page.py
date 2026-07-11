@@ -1077,22 +1077,23 @@ def _build_wtf_html(*, base_url: str) -> str:
       const effectiveType = conn && conn.effectiveType ? String(conn.effectiveType) : "";
       const slow = effectiveType.includes("2g") || effectiveType.includes("3g");
 
-      let initial = mobile ? 12 : 18;
-      let step = mobile ? 8 : 14;
-      let maxInflight = mobile ? 12 : 22;
+      // Cap concurrent /random picks to cut N× amplification on the origin.
+      let initial = mobile ? 10 : 14;
+      let step = mobile ? 6 : 10;
+      let maxInflight = mobile ? 6 : 10;
 
       if (viewMode === "masonry") {{
-        initial = mobile ? 14 : 24;
-        step = mobile ? 10 : 16;
-        maxInflight = mobile ? 14 : 22;
+        initial = mobile ? 12 : 18;
+        step = mobile ? 8 : 12;
+        maxInflight = mobile ? 8 : 12;
       }} else if (viewMode === "tiles") {{
-        initial = mobile ? 16 : 24;
-        step = mobile ? 10 : 14;
-        maxInflight = mobile ? 16 : 20;
+        initial = mobile ? 12 : 18;
+        step = mobile ? 8 : 10;
+        maxInflight = mobile ? 8 : 12;
       }}
 
       if (slow) {{
-        maxInflight = Math.max(6, Math.floor(maxInflight * 0.6));
+        maxInflight = Math.max(4, Math.floor(maxInflight * 0.6));
       }}
 
       return {{ initial: initial, step: step, maxInflight: maxInflight }};
@@ -1202,6 +1203,46 @@ def _build_wtf_html(*, base_url: str) -> str:
       }}
       const s = qp.toString();
       return s ? ("?" + s) : "";
+    }}
+
+    function isAbsoluteHttpUrl(u) {{
+      return /^https?:\\/\\//i.test(String(u || "").trim());
+    }}
+
+    function isRelativeProxyPath(u) {{
+      const s = String(u || "").trim();
+      return s.startsWith("/") && !s.startsWith("//");
+    }}
+
+    function forceLocalQuery(path, q) {{
+      // Always force origin-side stream for cascade (skip edge 302 on /i).
+      const base = String(path || "").trim();
+      if (!base) return "";
+      if (q) {{
+        return base + q + (q.indexOf("local=") >= 0 ? "" : "&local=1");
+      }}
+      return base + "?local=1";
+    }}
+
+    /** Prefer edge absolute proxy; local /i path for cascade / mirror query. */
+    function resolveImageSrc(data) {{
+      const urls = data && data.urls ? data.urls : {{}};
+      const proxy = String(urls.proxy || "").trim();
+      const local = String(urls.local || "").trim();
+      const q = buildProxyQuery();
+      if (isAbsoluteHttpUrl(proxy)) {{
+        return {{
+          primary: proxy,
+          fallback: isRelativeProxyPath(local) ? forceLocalQuery(local, q) : "",
+        }};
+      }}
+      if (isRelativeProxyPath(proxy)) {{
+        return {{ primary: proxy + q, fallback: "" }};
+      }}
+      if (isRelativeProxyPath(local)) {{
+        return {{ primary: local + q, fallback: "" }};
+      }}
+      return null;
     }}
 
     function selectItem(item) {{
@@ -1548,6 +1589,8 @@ def _build_wtf_html(*, base_url: str) -> str:
 
       let tries = 0;
       let done = false;
+      let cascadeTried = false;
+      let cascadeFallback = "";
 
       const finishOk = () => {{
         if (done) return;
@@ -1632,9 +1675,11 @@ def _build_wtf_html(*, base_url: str) -> str:
               updateMasonryEstimate(item);
             }}
           }} catch (e) {{}}
-          const proxy = data && data.urls ? String(data.urls.proxy || "") : "";
-          if (!proxy || proxy[0] !== "/") throw new Error("BAD_PROXY");
-          img.src = proxy + buildProxyQuery();
+          const resolved = resolveImageSrc(data);
+          if (!resolved || !resolved.primary) throw new Error("BAD_PROXY");
+          cascadeTried = false;
+          cascadeFallback = resolved.fallback || "";
+          img.src = resolved.primary;
         }} catch (e) {{
           if (done) return;
           if (myGen !== generation) {{
@@ -1679,6 +1724,12 @@ def _build_wtf_html(*, base_url: str) -> str:
         if (myGen !== generation) {{
           done = true;
           try {{ item.remove(); }} catch (e) {{}}
+          return;
+        }}
+        // Edge absolute URL failed → one-shot cascade to local /i stream.
+        if (!cascadeTried && cascadeFallback) {{
+          cascadeTried = true;
+          try {{ img.src = cascadeFallback; }} catch (e) {{}}
           return;
         }}
         if (tries < 3) {{

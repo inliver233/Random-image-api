@@ -11,7 +11,7 @@ from app.core.errors import ApiError, ErrorCode
 from app.core.image_edge import resolve_image_edge_redirect_url, resolve_public_proxy_url
 from app.core.imgproxy import build_signed_processing_url, load_imgproxy_config_from_settings
 from app.core.proxy_mirror import resolve_proxy_mirror
-from app.core.recent_dedup import get_recent_lists, record_recent
+from app.core.recent_dedup import get_recent_lists
 from app.core.random_defaults import (
     build_pick_kwargs,
     build_random_debug_base,
@@ -25,9 +25,9 @@ from app.core.random_defaults import (
 )
 from app.core.random_delivery import (
     attach_background,
-    best_effort,
     build_edge_redirect_response,
     deliver_random_image_stream,
+    schedule_edge_side_effects,
 )
 from app.core.random_engine_pick import pick_with_strategy
 from app.core.random_query import build_no_match_error
@@ -37,7 +37,6 @@ from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.runtime_config_cache import get_cached_runtime_config
 from app.db.tags_get import get_tag_names_for_image
 from app.db.session import create_sessionmaker
-from app.jobs.enqueue import enqueue_opportunistic_hydrate_metadata
 
 router = APIRouter()
 
@@ -371,28 +370,22 @@ async def random_image(
             if format == "json":
                 tags = await get_tag_names_for_image(session, image_id=image.id)
 
-        if bool(anti_repeat_enabled):
-            try:
-                record_recent(
-                    now=time.monotonic(),
-                    image_id=int(image.id),
-                    user_id=int(image.user_id) if getattr(image, "user_id", None) is not None else None,
-                    window_s=float(dedup_window_s),
-                    max_images=int(dedup_max_images),
-                    max_authors=int(dedup_max_authors),
-                )
-            except Exception:
-                pass
-
-        if needs_opportunistic_hydrate(image):
-            background_tasks.add_task(
-                best_effort,
-                enqueue_opportunistic_hydrate_metadata,
-                engine,
-                illust_id=int(image.illust_id),
-                reason="random",
-                timeout_s=2.5,
-            )
+        # JSON/redirect never prove bytes — never mark_image_ok here.
+        schedule_edge_side_effects(
+            background_tasks=background_tasks,
+            engine=engine,
+            image_id=int(image.id),
+            illust_id=int(image.illust_id),
+            user_id=int(image.user_id) if getattr(image, "user_id", None) is not None else None,
+            anti_repeat_enabled=bool(anti_repeat_enabled),
+            dedup_window_s=float(dedup_window_s),
+            dedup_max_images=int(dedup_max_images),
+            dedup_max_authors=int(dedup_max_authors),
+            needs_hydrate=needs_opportunistic_hydrate(image),
+            hydrate_reason="random",
+            mark_ok_on_edge=False,
+            should_mark_ok=False,
+        )
 
         if format == "image" and redirect == 1:
             # Prefer CF image edge as primary public delivery when configured.
@@ -442,10 +435,11 @@ async def random_image(
                 imgproxy_url = None
 
         request_id = getattr(getattr(request, "state", None), "request_id", None) or "req_unknown"
+        local_proxy_path = f"/i/{image.id}.{image.ext}"
         proxy_url = resolve_public_proxy_url(
             settings=request.app.state.settings,
             original_url=str(image.original_url),
-            local_proxy_path=f"/i/{image.id}.{image.ext}",
+            local_proxy_path=local_proxy_path,
         )
         if format == "simple_json":
             return build_simple_json_body(
@@ -455,6 +449,7 @@ async def random_image(
                 origin_url=origin_url,
                 imgproxy_url=imgproxy_url,
                 debug=debug,
+                local_url=local_proxy_path,
             )
 
         return build_json_body(
@@ -465,6 +460,7 @@ async def random_image(
             origin_url=origin_url,
             imgproxy_url=imgproxy_url,
             debug=debug,
+            local_url=local_proxy_path,
         )
 
     # When edge is enabled and client did not force local mirror/proxy, hand bytes off to CF.

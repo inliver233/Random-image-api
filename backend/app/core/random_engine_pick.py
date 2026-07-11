@@ -269,6 +269,13 @@ async def pick_with_strategy(
         )
         if image is not None:
             return image, {**debug_base, "attempts_used": 1, **eng_meta}
+        # Keep engine miss meta so dual-run ops can see why Python took over.
+        engine_fallback_meta = {
+            "picked_by": "python",
+            "engine_status": str((eng_meta or {}).get("engine_status") or "fallback"),
+            **{k: v for k, v in (eng_meta or {}).items() if k not in {"picked_by"}},
+        }
+        debug_base = {**debug_base, **engine_fallback_meta}
 
     if strategy_norm == "random":
         return await pick_by_random_key(

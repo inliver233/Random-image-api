@@ -3,7 +3,8 @@ import { Alert, Button, Card, Form, Input, Modal, Skeleton, Space, Switch, Table
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 
-import { ApiError, apiJson } from "../api/client";
+import { messageFromError, requestIdDescription, requestIdFromError } from "../admin/errors";
+import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ApiKeyItem = {
@@ -43,17 +44,6 @@ type UpdateApiKeyResponse = {
   api_key_id: string;
   request_id: string;
 };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
-
-function messageFromError(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  if (err instanceof Error) return err.message;
-  return "未知错误";
-}
 
 export function ApiKeysPage() {
   const queryClient = useQueryClient();
@@ -202,7 +192,7 @@ export function ApiKeysPage() {
           type="error"
           showIcon
           message="加载 API Keys 失败"
-          description={requestIdFromError(listQuery.error) ? `请求ID: ${requestIdFromError(listQuery.error)}` : ""}
+          description={requestIdDescription(listQuery.error)}
         />
       ) : items.length === 0 ? (
         <Alert type="info" showIcon message="暂无 API Key" description="创建后可用于公网接口鉴权（X-API-Key）。" />

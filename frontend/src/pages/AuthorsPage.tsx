@@ -2,7 +2,8 @@ import { Alert, Button, Card, Skeleton, Space, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 
-import { ApiError, apiJson } from "../api/client";
+import { requestIdDescription } from "../admin/errors";
+import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
 type AuthorItem = {
@@ -17,11 +18,6 @@ type AuthorsListResponse = {
   next_cursor: string;
   request_id: string;
 };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
 
 const columns: ColumnsType<AuthorItem> = [
   { title: "作者ID", dataIndex: "user_id", key: "user_id" },
@@ -63,7 +59,7 @@ export function AuthorsPage() {
           type="error"
           showIcon
           message="加载作者列表失败"
-          description={requestIdFromError(query.error) ? `请求ID: ${requestIdFromError(query.error)}` : ""}
+          description={requestIdDescription(query.error)}
         />
       ) : !query.data ? (
         <Skeleton active />

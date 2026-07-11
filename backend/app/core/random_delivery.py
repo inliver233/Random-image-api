@@ -170,31 +170,22 @@ async def deliver_random_image_stream(
                 cache_control="no-store",
                 range_header=range_header,
             )
-            if bool(anti_repeat_enabled):
-                try:
-                    record_recent(
-                        now=time.monotonic(),
-                        image_id=int(image_id),
-                        user_id=user_id_for_recent,
-                        window_s=float(dedup_window_s),
-                        max_images=int(dedup_max_images),
-                        max_authors=int(dedup_max_authors),
-                    )
-                except Exception:
-                    pass
-            if should_mark_ok:
-                background_tasks.add_task(
-                    best_effort, mark_image_ok, engine, image_id=image_id, now=iso_utc_ms(), timeout_s=1.5
-                )
-            if needs_hydrate:
-                background_tasks.add_task(
-                    best_effort,
-                    enqueue_opportunistic_hydrate_metadata,
-                    engine,
-                    illust_id=illust_id_for_hydrate,
-                    reason="random",
-                    timeout_s=2.5,
-                )
+            # Stream path proved bytes — mark ok when needed (edge 302 does not).
+            schedule_edge_side_effects(
+                background_tasks=background_tasks,
+                engine=engine,
+                image_id=image_id,
+                illust_id=illust_id_for_hydrate,
+                user_id=user_id_for_recent,
+                anti_repeat_enabled=bool(anti_repeat_enabled),
+                dedup_window_s=float(dedup_window_s),
+                dedup_max_images=int(dedup_max_images),
+                dedup_max_authors=int(dedup_max_authors),
+                needs_hydrate=bool(needs_hydrate),
+                hydrate_reason="random",
+                mark_ok_on_edge=True,
+                should_mark_ok=bool(should_mark_ok),
+            )
             return attach_background(resp, background_tasks)
         except ApiError as exc:
             if exc.code in {

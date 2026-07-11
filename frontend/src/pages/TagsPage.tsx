@@ -3,7 +3,8 @@ import type { ColumnsType } from "antd/es/table";
 import React from "react";
 import { useNavigate } from "react-router-dom";
 
-import { ApiError, apiJson } from "../api/client";
+import { requestIdDescription } from "../admin/errors";
+import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
 type TagItem = {
@@ -18,11 +19,6 @@ type TagsListResponse = {
   next_cursor: string;
   request_id: string;
 };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
 
 const baseColumns: ColumnsType<TagItem> = [
   { title: "标签", dataIndex: "name", key: "name" },
@@ -82,7 +78,7 @@ export function TagsPage() {
           type="error"
           showIcon
           message="加载标签失败"
-          description={requestIdFromError(query.error) ? `请求ID: ${requestIdFromError(query.error)}` : ""}
+          description={requestIdDescription(query.error)}
         />
       ) : !query.data ? (
         <Skeleton active />

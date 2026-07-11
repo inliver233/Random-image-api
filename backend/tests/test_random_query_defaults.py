@@ -243,6 +243,7 @@ def test_build_json_bodies() -> None:
     )
     assert simple["ok"] is True
     assert simple["data"]["urls"]["proxy"] == "/i/1.jpg"
+    assert simple["data"]["urls"]["local"] == "/i/1.jpg"
     assert "tags" not in simple["data"]
     full = build_json_body(
         request_id="r1",
@@ -255,6 +256,7 @@ def test_build_json_bodies() -> None:
     )
     assert full["data"]["tags"] == ["x"]
     assert full["data"]["image"]["title"] == "t"
+    assert full["data"]["urls"]["local"] == "/i/1.jpg"
 
 
 def test_build_pick_kwargs_shape() -> None:

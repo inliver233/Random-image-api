@@ -2,7 +2,8 @@ import { Alert, Button, Card, Skeleton, Space, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 
-import { ApiError, apiJson } from "../api/client";
+import { requestIdDescription } from "../admin/errors";
+import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
 type AuditItem = {
@@ -22,11 +23,6 @@ type AuditListResponse = {
   next_cursor: string;
   request_id: string;
 };
-
-function requestIdFromError(err: unknown): string | null {
-  if (!(err instanceof ApiError)) return null;
-  return err.body?.request_id ? String(err.body.request_id) : null;
-}
 
 const columns: ColumnsType<AuditItem> = [
   { title: "时间", dataIndex: "created_at", key: "created_at" },
@@ -80,7 +76,7 @@ export function AuditPage() {
           type="error"
           showIcon
           message="加载审计日志失败"
-          description={requestIdFromError(query.error) ? `请求ID: ${requestIdFromError(query.error)}` : ""}
+          description={requestIdDescription(query.error)}
         />
       ) : !query.data ? (
         <Skeleton active />

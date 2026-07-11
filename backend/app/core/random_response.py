@@ -32,7 +32,9 @@ def build_simple_json_body(
     origin_url: str | None,
     imgproxy_url: str | None,
     debug: dict[str, Any],
+    local_url: str | None = None,
 ) -> dict[str, Any]:
+    local = local_url or f"/i/{image.id}.{image.ext}"
     return {
         "ok": True,
         "code": "OK",
@@ -41,6 +43,8 @@ def build_simple_json_body(
             "image": _image_core_fields(image),
             "urls": {
                 "proxy": proxy_url,
+                # Always-present origin-side stream path for client edge→local cascade.
+                "local": local,
                 "origin": origin_url,
                 "imgproxy": imgproxy_url,
             },
@@ -58,10 +62,12 @@ def build_json_body(
     origin_url: str | None,
     imgproxy_url: str | None,
     debug: dict[str, Any],
+    local_url: str | None = None,
 ) -> dict[str, Any]:
     image_obj = _image_core_fields(image)
     image_obj["title"] = image.title
     image_obj["created_at_pixiv"] = image.created_at_pixiv
+    local = local_url or f"/i/{image.id}.{image.ext}"
     return {
         "ok": True,
         "code": "OK",
@@ -71,6 +77,7 @@ def build_json_body(
             "tags": tags,
             "urls": {
                 "proxy": proxy_url,
+                "local": local,
                 "origin": origin_url,
                 "imgproxy": imgproxy_url,
                 "legacy_single": f"/{image.illust_id}.{image.ext}",

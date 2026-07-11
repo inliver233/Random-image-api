@@ -287,6 +287,8 @@ def test_random_simple_json_proxy_prefers_image_edge(tmp_path: Path, monkeypatch
         proxy = body["data"]["urls"]["proxy"]
         assert isinstance(proxy, str)
         assert proxy.startswith("https://img.example.com/u/")
+        assert body["data"]["urls"]["local"].startswith("/i/")
+        assert body["data"]["urls"]["local"].endswith(".jpg")
         parts = proxy.removeprefix("https://img.example.com/u/").split("/")
         assert len(parts) == 3
         exp_s, sig, b64path = parts

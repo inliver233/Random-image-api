@@ -179,4 +179,5 @@ def test_random_json_returns_shape_and_hides_origin_by_default(tmp_path: Path, m
         assert body["data"]["image"]["id"].isdigit()
         image_id = body["data"]["image"]["id"]
         assert body["data"]["urls"]["proxy"] == f"/i/{image_id}.jpg"
+        assert body["data"]["urls"]["local"] == f"/i/{image_id}.jpg"
         assert body["data"]["urls"]["origin"] is None
