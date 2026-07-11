@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -181,6 +182,53 @@ async def api_key_rate_limit_status(
             "redis_url_configured": redis_url_configured,
             # True when redis was requested but process is on memory (missing URL / import / connect).
             "using_memory_fallback": cfg_backend == "redis" and active_backend == "memory",
+        },
+        request_id=rid,
+    )
+
+
+@router.get("/maintenance/modular-ports")
+async def modular_ports_status(
+    request: Request,
+    _claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    """Read-only Phase-4 port backends (catalog / job queue / recent dedup). No secrets."""
+    _ = _claims
+    rid = get_or_create_request_id(request)
+    settings = getattr(request.app.state, "settings", None)
+    catalog = getattr(request.app.state, "catalog_store", None)
+    recent = getattr(request.app.state, "recent_dedup", None)
+    catalog_backend = str(getattr(catalog, "backend", "sqlite") or "sqlite")
+    recent_active = str(getattr(recent, "backend", "memory") or "memory").lower()
+    if recent_active not in {"memory", "redis"}:
+        recent_active = "memory"
+    recent_cfg = (
+        str(getattr(settings, "recent_dedup_backend", "memory") or "memory").lower()
+        if settings is not None
+        else "memory"
+    )
+    if recent_cfg not in {"memory", "redis"}:
+        recent_cfg = "memory"
+    job_requested = str(os.environ.get("JOB_QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
+    if job_requested not in {"sqlite", "memory", "redis", "nats"}:
+        job_requested = "sqlite"
+    return admin_ok(
+        request,
+        payload={
+            "catalog": {
+                "backend": catalog_backend,
+            },
+            "job_queue": {
+                # Implemented claim path is always sqlite until a real alternate ships.
+                "backend": "sqlite",
+                "requested": job_requested,
+            },
+            "recent_dedup": {
+                "configured_backend": recent_cfg,
+                "active_backend": recent_active,
+                # redis reserved: factory falls back to memory.
+                "using_memory_fallback": recent_cfg == "redis" and recent_active == "memory",
+            },
         },
         request_id=rid,
     )

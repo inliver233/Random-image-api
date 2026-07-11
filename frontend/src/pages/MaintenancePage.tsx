@@ -79,6 +79,18 @@ type ApiKeyRateLimitStatusResponse = {
   request_id: string;
 };
 
+type ModularPortsStatusResponse = {
+  ok: true;
+  catalog: { backend: string };
+  job_queue: { backend: string; requested: string };
+  recent_dedup: {
+    configured_backend: string;
+    active_backend: string;
+    using_memory_fallback: boolean;
+  };
+  request_id: string;
+};
+
 export function MaintenancePage() {
   const [form] = Form.useForm<CleanupFormValues>();
   const alerts = useActionAlerts();
@@ -95,6 +107,12 @@ export function MaintenancePage() {
   const apiKeyRlStatus = useQuery({
     queryKey: ["admin", "maintenance", "api-key-rate-limit"],
     queryFn: () => apiJson<ApiKeyRateLimitStatusResponse>("/admin/api/maintenance/api-key-rate-limit"),
+    refetchInterval: 30_000,
+  });
+
+  const modularPortsStatus = useQuery({
+    queryKey: ["admin", "maintenance", "modular-ports"],
+    queryFn: () => apiJson<ModularPortsStatusResponse>("/admin/api/maintenance/modular-ports"),
     refetchInterval: 30_000,
   });
 
@@ -263,6 +281,47 @@ export function MaintenancePage() {
         </QueryState>
 
         <Button onClick={() => void apiKeyRlStatus.refetch()} loading={apiKeyRlStatus.isFetching}>
+          刷新状态
+        </Button>
+      </Card>
+
+      <Card title="模块端口（Phase 4）">
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          Catalog / JobQueue / RecentDedup 端口只读状态。默认均为本地实现；Redis/NATS/Postgres
+          仅端口就绪，生产切换仍属运维。不展示密钥或连接串。
+        </Typography.Paragraph>
+
+        <QueryState query={modularPortsStatus}>
+          {modularPortsStatus.data ? (
+            <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
+              <Descriptions.Item label="Catalog">
+                <Tag>{modularPortsStatus.data.catalog.backend}</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Job Queue">
+                <Tag>{modularPortsStatus.data.job_queue.backend}</Tag>
+                {modularPortsStatus.data.job_queue.requested !== modularPortsStatus.data.job_queue.backend ? (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    requested={modularPortsStatus.data.job_queue.requested}
+                  </Tag>
+                ) : null}
+              </Descriptions.Item>
+              <Descriptions.Item label="Recent Dedup">
+                {modularPortsStatus.data.recent_dedup.active_backend === "redis" ? (
+                  <Tag color="green">redis</Tag>
+                ) : (
+                  <Tag>memory</Tag>
+                )}
+                {modularPortsStatus.data.recent_dedup.using_memory_fallback ? (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    redis→memory fallback
+                  </Tag>
+                ) : null}
+              </Descriptions.Item>
+            </Descriptions>
+          ) : null}
+        </QueryState>
+
+        <Button onClick={() => void modularPortsStatus.refetch()} loading={modularPortsStatus.isFetching}>
           刷新状态
         </Button>
       </Card>
