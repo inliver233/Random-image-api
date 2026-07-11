@@ -7,16 +7,16 @@ Implementation:
 - Protocol: `JobQueuePort` in `backend/app/jobs/queue.py`
 - Default: `SqliteJobQueue` → existing `claim_next_job` / `claim_pending_job_by_id` / `renew_job_lock` + enqueue helpers
 - Shared insert shape: `new_pending_job` / `enqueue_pending_in_session` (same-txn admin/worker paths)
-- Worker: `_JobScheduler` + `poll_and_execute_jobs` take optional `queue=`
-- Public opportunistic hydrate: `jobs/enqueue.py` → `queue.enqueue_opportunistic_hydrate`
+- Worker: `_JobScheduler` + `poll_and_execute_jobs` take optional `queue=`; `execute_claimed_job` renews via `queue.renew_lock`
+- Public opportunistic hydrate: `schedule_hydrate_if_needed` / `schedule_pick_side_effects` / `deliver_random_image_stream` accept `job_queue=` from `app.state.job_queue`
 - Admin/control-plane enqueue callers:
   - `admin/proxies` probe → `queue.enqueue`
-  - `easy_proxies/auto_refresh` → `queue.enqueue` after active-job check
-  - `admin/imports`, `admin/hydration_runs` → `enqueue_pending_in_session` (coupled txn)
+  - `easy_proxies/auto_refresh` → injected `queue=` (worker shares process queue)
+  - `admin/imports`, `admin/hydration_runs` → `enqueue_pending_in_session` (coupled txn); inline import execute passes `queue=`
   - `handlers/import_images` bulk hydrate → `new_pending_job` batch add
 - Factory: `build_job_queue(engine, backend=...)` — unknown backends fall back to sqlite
 - Resolve: `resolve_job_queue(queue, engine)` prefers injected port
-- Wire-up: `app.state.job_queue` in `main.py`
+- Wire-up: `app.state.job_queue` in `main.py`; worker builds one queue for scheduler + auto_refresh
 
 ## Methods
 

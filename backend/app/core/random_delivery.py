@@ -96,6 +96,7 @@ def schedule_hydrate_if_needed(
     illust_id: int,
     needs_hydrate: bool,
     hydrate_reason: str,
+    queue: Any | None = None,
 ) -> None:
     """Queue opportunistic hydrate metadata enqueue when the image still needs it."""
     if not needs_hydrate:
@@ -107,6 +108,7 @@ def schedule_hydrate_if_needed(
         illust_id=int(illust_id),
         reason=str(hydrate_reason),
         timeout_s=2.5,
+        queue=queue,
     )
 
 
@@ -128,6 +130,7 @@ def schedule_edge_side_effects(
     should_mark_ok: bool = False,
     catalog: CatalogStore | None = None,
     recent_dedup: RecentDedupPort | None = None,
+    job_queue: Any | None = None,
 ) -> None:
     if bool(anti_repeat_enabled):
         try:
@@ -155,6 +158,7 @@ def schedule_edge_side_effects(
         illust_id=illust_id,
         needs_hydrate=needs_hydrate,
         hydrate_reason=hydrate_reason,
+        queue=job_queue,
     )
 
 
@@ -169,6 +173,7 @@ def schedule_pick_side_effects(
     should_mark_ok: bool = False,
     catalog: CatalogStore | None = None,
     recent_dedup: RecentDedupPort | None = None,
+    job_queue: Any | None = None,
 ) -> None:
     """Thin wrapper: anti-repeat / hydrate / optional mark_ok from RandomPickContext + image."""
     schedule_edge_side_effects(
@@ -187,6 +192,7 @@ def schedule_pick_side_effects(
         should_mark_ok=bool(should_mark_ok),
         catalog=catalog,
         recent_dedup=recent_dedup,
+        job_queue=job_queue,
     )
 
 
@@ -224,6 +230,7 @@ async def deliver_random_image_stream(
     no_match_error: Callable[[], ApiError],
     catalog: CatalogStore | None = None,
     recent_dedup: RecentDedupPort | None = None,
+    job_queue: Any | None = None,
 ) -> Any:
     """Pick + edge-redirect-or-stream retry loop for /random?format=image."""
     store = resolve_catalog_store(catalog)
@@ -263,6 +270,7 @@ async def deliver_random_image_stream(
                     should_mark_ok=bool(should_mark_ok),
                     catalog=store,
                     recent_dedup=dedup,
+                    job_queue=job_queue,
                 )
                 observe_image_delivery(path="edge_redirect")
                 return attach_background(
@@ -306,6 +314,7 @@ async def deliver_random_image_stream(
                 should_mark_ok=bool(should_mark_ok),
                 catalog=store,
                 recent_dedup=dedup,
+                job_queue=job_queue,
             )
             observe_image_delivery(path="local_stream")
             if use_pixiv_cat:

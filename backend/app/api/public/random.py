@@ -59,6 +59,7 @@ async def random_image(
     recent_dedup = resolve_recent_dedup(getattr(request.app.state, "recent_dedup", None))
     random_service = resolve_random_service_factory(getattr(request.app.state, "random_service", None))
     random_pick = getattr(request.app.state, "random_pick", None)
+    job_queue = getattr(request.app.state, "job_queue", None)
     Session = create_sessionmaker(engine)
     runtime = await resolve_runtime_for_request(request, engine)
 
@@ -130,6 +131,7 @@ async def random_image(
             hydrate_reason="random",
             catalog=catalog,
             recent_dedup=recent_dedup,
+            job_queue=job_queue,
         )
 
         if format == "image" and redirect == 1:
@@ -230,4 +232,5 @@ async def random_image(
         no_match_error=_no_match_error,
         catalog=catalog,
         recent_dedup=recent_dedup,
+        job_queue=job_queue,
     )

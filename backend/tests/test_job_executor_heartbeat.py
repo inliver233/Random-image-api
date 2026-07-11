@@ -15,17 +15,23 @@ def _sqlite_url(db_path: Path) -> str:
     return "sqlite+aiosqlite:///" + db_path.as_posix()
 
 
+class _FakeQueue:
+    backend = "fake"
+
+    def __init__(self) -> None:
+        self.renew_calls: list[tuple[int, str]] = []
+
+    async def renew_lock(self, *, job_id: int, worker_id: str, now=None) -> bool:  # noqa: ANN001
+        _ = now
+        self.renew_calls.append((int(job_id), str(worker_id)))
+        return True
+
+
 def test_execute_claimed_job_renews_lock_while_running(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "executor_hb.db"
     engine = create_engine(_sqlite_url(db_path))
-    renew_calls: list[tuple[int, str]] = []
+    fake_queue = _FakeQueue()
 
-    async def _fake_renew(engine_arg, *, job_id: int, worker_id: str, now=None) -> bool:  # noqa: ANN001
-        _ = engine_arg, now
-        renew_calls.append((int(job_id), str(worker_id)))
-        return True
-
-    monkeypatch.setattr("app.jobs.executor.renew_job_lock", _fake_renew)
     monkeypatch.setattr("app.jobs.executor._renew_interval_s", lambda _ttl: 0.05)
 
     async def _run() -> None:
@@ -82,11 +88,12 @@ VALUES (7,'noop','running',0,NULL,'{}','w-hb','2026-02-10T00:00:00.000Z','2026-0
             worker_id="w-hb",
             now=now,
             lock_ttl_s=60,
+            queue=fake_queue,  # type: ignore[arg-type]
         )
         assert transition is not None
         assert transition.status == JobStatus.COMPLETED
-        assert len(renew_calls) >= 2
-        assert all(call == (7, "w-hb") for call in renew_calls)
+        assert len(fake_queue.renew_calls) >= 2
+        assert all(call == (7, "w-hb") for call in fake_queue.renew_calls)
 
         await engine.dispose()
 

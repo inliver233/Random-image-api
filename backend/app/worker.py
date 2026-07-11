@@ -169,6 +169,7 @@ class _JobScheduler:
                         job_row=row,
                         worker_id=str(self._worker_id),
                         lock_ttl_s=int(self._lock_ttl_s),
+                        queue=self._queue,
                     )
                 except Exception as exc:
                     msg = redact_text(format_exc(exc))
@@ -224,6 +225,7 @@ async def poll_and_execute_jobs(
                 job_row=job_row,
                 worker_id=worker_id,
                 lock_ttl_s=int(lock_ttl_s),
+                queue=job_queue,
             )
         except Exception as exc:
             msg = redact_text(format_exc(exc))
@@ -328,23 +330,6 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
 
         strict = parse_bool_env("EASY_PROXIES_BINDINGS_STRICT", default=False)
 
-        refresher = EasyProxiesAutoRefresher(
-            EasyProxiesAutoRefreshConfig(
-                base_url=base_url,
-                interval_s=interval_s,
-                conflict_policy=conflict_policy or "skip_non_easy_proxies",
-                host_override=host_override,
-                auto_attach=bool(auto_attach),
-                attach_pool_id=attach_pool_id,
-                attach_weight=int(attach_weight),
-                recompute_bindings=bool(recompute_bindings),
-                max_tokens_per_proxy=int(max_tokens_per_proxy),
-                strict=bool(strict),
-            )
-        )
-        if refresher.enabled:
-            log.info("easy_proxies_auto_refresh_enabled base_url=%s interval_s=%s", base_url, interval_s)
-
         worker_id = parse_str_env("WORKER_ID", default=f"pid{os.getpid()}")
         jobs_lock_ttl_s = parse_int_env(
             "WORKER_JOBS_LOCK_TTL_SECONDS",
@@ -395,6 +380,25 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
 
         job_queue = build_job_queue(engine, backend=parse_str_env("JOB_QUEUE_BACKEND", default="sqlite"))
         log.info("job_queue_backend=%s", getattr(job_queue, "backend", "sqlite"))
+
+        refresher = EasyProxiesAutoRefresher(
+            EasyProxiesAutoRefreshConfig(
+                base_url=base_url,
+                interval_s=interval_s,
+                conflict_policy=conflict_policy or "skip_non_easy_proxies",
+                host_override=host_override,
+                auto_attach=bool(auto_attach),
+                attach_pool_id=attach_pool_id,
+                attach_weight=int(attach_weight),
+                recompute_bindings=bool(recompute_bindings),
+                max_tokens_per_proxy=int(max_tokens_per_proxy),
+                strict=bool(strict),
+            ),
+            queue=job_queue,
+        )
+        if refresher.enabled:
+            log.info("easy_proxies_auto_refresh_enabled base_url=%s interval_s=%s", base_url, interval_s)
+
         scheduler = _JobScheduler(
             engine,
             dispatcher,

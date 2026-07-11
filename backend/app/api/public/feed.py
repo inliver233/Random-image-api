@@ -68,6 +68,7 @@ async def feed_images(
     recent_dedup = resolve_recent_dedup(getattr(request.app.state, "recent_dedup", None))
     random_service = resolve_random_service_factory(getattr(request.app.state, "random_service", None))
     random_pick = getattr(request.app.state, "random_pick", None)
+    job_queue = getattr(request.app.state, "job_queue", None)
     Session = create_sessionmaker(engine)
     runtime = await resolve_runtime_for_request(request, engine)
 
@@ -115,6 +116,7 @@ async def feed_images(
             hydrate_reason="feed",
             catalog=catalog,
             recent_dedup=recent_dedup,
+            job_queue=job_queue,
         )
         urls = resolve_public_item_urls(
             image=image,

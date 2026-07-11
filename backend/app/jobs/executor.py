@@ -12,10 +12,11 @@ from app.core.coerce import as_int, as_str, format_exc
 from app.core.time import iso_utc_ms
 from app.core.metrics import JOBS_FAILED_TOTAL
 from app.db.session import is_sqlite_busy_error, with_sqlite_busy_retry
-from app.jobs.claim import DEFAULT_LOCK_TTL_S, renew_job_lock
+from app.jobs.claim import DEFAULT_LOCK_TTL_S
 from app.jobs.dispatch import JobDispatcher
 from app.jobs.errors import JobDeferError, JobPermanentError
 from app.jobs.model import Job, JobStatus, JobTransition, on_job_defer, on_job_failure, on_job_success
+from app.jobs.queue import JobQueuePort, resolve_job_queue
 
 log = logging.getLogger("app.jobs.executor")
 
@@ -89,6 +90,7 @@ async def execute_claimed_job(
     worker_id: str,
     now: datetime | None = None,
     lock_ttl_s: int = DEFAULT_LOCK_TTL_S,
+    queue: JobQueuePort | None = None,
 ) -> JobTransition | None:
     worker_id = worker_id.strip()
     if not worker_id:
@@ -98,6 +100,7 @@ async def execute_claimed_job(
     if job.id <= 0:
         raise ValueError("job_row.id is required")
 
+    job_queue = resolve_job_queue(queue, engine)
     now_dt = now or datetime.now(timezone.utc)
     stop_heartbeat = asyncio.Event()
     renew_every = _renew_interval_s(int(lock_ttl_s))
@@ -110,7 +113,7 @@ async def execute_claimed_job(
             except asyncio.TimeoutError:
                 pass
             try:
-                renewed = await renew_job_lock(engine, job_id=int(job.id), worker_id=worker_id)
+                renewed = await job_queue.renew_lock(job_id=int(job.id), worker_id=worker_id)
                 if not renewed:
                     log.warning("job_lock_renew_lost job_id=%s worker_id=%s", job.id, worker_id)
                     return

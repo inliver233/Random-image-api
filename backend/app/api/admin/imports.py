@@ -376,7 +376,9 @@ async def create_import(
         if claimed is not None:
             dispatcher = JobDispatcher()
             dispatcher.register("import_images", build_import_images_handler(engine))
-            await execute_claimed_job(engine, dispatcher, job_row=claimed, worker_id=worker_id)
+            await execute_claimed_job(
+                engine, dispatcher, job_row=claimed, worker_id=worker_id, queue=queue
+            )
             executed_inline = True
 
     return admin_ok(request, payload={"import_id": str(import_id),
