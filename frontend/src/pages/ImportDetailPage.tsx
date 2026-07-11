@@ -4,7 +4,7 @@ import React from "react";
 import { useParams } from "react-router-dom";
 
 import { apiJson } from "../api/client";
-import { requestIdFromError, messageFromError } from "../admin/errors";
+import { messageFromError, requestIdDescription, requestIdFromError } from "../admin/errors";
 
 type ImportDetailResponse = {
   ok: true;
@@ -125,7 +125,7 @@ export function ImportDetailPage() {
           type="error"
           showIcon
           message="加载导入详情失败"
-          description={requestIdFromError(query.error) ? `请求ID: ${requestIdFromError(query.error)}` : ""}
+          description={requestIdDescription(query.error)}
         />
       ) : (
         <>

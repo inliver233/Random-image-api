@@ -18,3 +18,15 @@ export function requestIdDescription(err: unknown): string {
   const rid = requestIdFromError(err);
   return rid ? `请求ID: ${rid}` : "";
 }
+
+/** Description preferring request id, else message (import history style). */
+export function requestIdOrMessageDescription(err: unknown): string {
+  return requestIdDescription(err) || messageFromError(err);
+}
+
+/** `请求ID: …（message）` when id present, else message only. */
+export function requestIdWithMessageDescription(err: unknown): string {
+  const rid = requestIdFromError(err);
+  const msg = messageFromError(err);
+  return rid ? `请求ID: ${rid}（${msg}）` : msg;
+}

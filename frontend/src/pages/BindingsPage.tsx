@@ -5,7 +5,7 @@ import React, { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { ApiError, apiJson } from "../api/client";
-import { requestIdFromError, messageFromError } from "../admin/errors";
+import { messageFromError, requestIdDescription, requestIdFromError } from "../admin/errors";
 
 type ProxyRef = {
   id: string;
@@ -541,7 +541,7 @@ export function BindingsPage() {
           type="error"
           showIcon
           message="加载绑定列表失败"
-          description={requestIdFromError(query.error) ? `请求ID: ${requestIdFromError(query.error)}` : ""}
+          description={requestIdDescription(query.error)}
         />
       ) : !query.data ? (
         <Skeleton active />

@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { apiJson } from "../api/client";
-import { requestIdFromError, messageFromError } from "../admin/errors";
+import { messageFromError, requestIdDescription, requestIdFromError } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ProxyPoolItem = {
@@ -346,7 +346,7 @@ export function ProxyPoolsPage() {
         {pools.isLoading ? (
           <Skeleton active />
         ) : pools.isError ? (
-          <Alert type="error" showIcon message="加载代理池失败" description={requestIdFromError(pools.error) ? `请求ID: ${requestIdFromError(pools.error)}` : ""} />
+          <Alert type="error" showIcon message="加载代理池失败" description={requestIdDescription(pools.error)} />
         ) : !pools.data || pools.data.items.length === 0 ? (
           <Alert type="info" showIcon message="暂无代理池" description="请先创建一个代理池，然后为它配置代理节点。" />
         ) : (
@@ -480,7 +480,7 @@ export function ProxyPoolsPage() {
         {endpoints.isLoading && endpointRows.length === 0 ? (
           <Skeleton active />
         ) : endpoints.isError ? (
-          <Alert type="error" showIcon message="加载代理节点失败" description={requestIdFromError(endpoints.error) ? `请求ID: ${requestIdFromError(endpoints.error)}` : ""} />
+          <Alert type="error" showIcon message="加载代理节点失败" description={requestIdDescription(endpoints.error)} />
         ) : endpointRows.length === 0 ? (
           <Alert type="info" showIcon message="暂无代理节点" description="请先在“代理管理”中导入或添加节点，再为代理池配置成员。" />
         ) : (

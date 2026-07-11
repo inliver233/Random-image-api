@@ -5,7 +5,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { apiJson } from "../api/client";
-import { requestIdFromError, messageFromError } from "../admin/errors";
+import { messageFromError, requestIdFromError, requestIdOrMessageDescription } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ImportFormValues = {
@@ -400,7 +400,7 @@ export function ImportPage() {
             type="error"
             showIcon
             message="加载导入历史失败"
-            description={requestIdFromError(historyQuery.error) ? `请求ID: ${requestIdFromError(historyQuery.error)}` : messageFromError(historyQuery.error)}
+            description={requestIdOrMessageDescription(historyQuery.error)}
             style={{ marginTop: 12 }}
           />
         ) : historyItems.length === 0 ? (

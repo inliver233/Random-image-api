@@ -3,7 +3,7 @@ import { Alert, Button, Card, Form, InputNumber, Select, Skeleton, Space, Switch
 import React, { useEffect, useState } from "react";
 
 import { ApiError, apiJson } from "../api/client";
-import { requestIdFromError } from "../admin/errors";
+import { requestIdDescription, requestIdFromError } from "../admin/errors";
 
 type ProxyPoolItem = {
   id: string;
@@ -221,7 +221,7 @@ export function SettingsPage() {
           type="error"
           showIcon
           message="加载设置失败"
-          description={requestIdFromError(query.error) ? `请求ID: ${requestIdFromError(query.error)}` : ""}
+          description={requestIdDescription(query.error)}
         />
       ) : !query.data ? (
         <Skeleton active />

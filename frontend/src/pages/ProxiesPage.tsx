@@ -4,7 +4,7 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useEffect, useState } from "react";
 
 import { ApiError, apiJson } from "../api/client";
-import { requestIdFromError } from "../admin/errors";
+import { requestIdDescription, requestIdFromError } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ProxyEndpointItem = {
@@ -821,7 +821,7 @@ export function ProxiesPage() {
             type="error"
             showIcon
             message="加载代理节点失败"
-            description={requestIdFromError(query.error) ? `请求ID: ${requestIdFromError(query.error)}` : ""}
+            description={requestIdDescription(query.error)}
           />
         ) : endpointItems.length === 0 && !query.isFetching ? (
           <Alert type="info" showIcon message="暂无代理节点" description="请先导入代理节点以启用代理路由。" />

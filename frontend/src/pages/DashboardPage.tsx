@@ -3,7 +3,7 @@ import { Alert, Button, Card, Col, Row, Skeleton, Space, Typography } from "antd
 import React from "react";
 import { useNavigate } from "react-router-dom";
 
-import { messageFromError, requestIdFromError } from "../admin/errors";
+import { requestIdDescription, requestIdWithMessageDescription } from "../admin/errors";
 import { apiJson } from "../api/client";
 
 type SummaryResponse = {
@@ -171,11 +171,7 @@ export function DashboardPage() {
           type="error"
           showIcon
           message="创建补全任务失败"
-          description={
-            requestIdFromError(createHydration.error)
-              ? `请求ID: ${requestIdFromError(createHydration.error)}（${messageFromError(createHydration.error)}）`
-              : messageFromError(createHydration.error)
-          }
+          description={requestIdWithMessageDescription(createHydration.error)}
           style={{ marginBottom: 16 }}
         />
       ) : null}
@@ -190,7 +186,7 @@ export function DashboardPage() {
                 type="error"
                 showIcon
                 message="加载总览失败"
-                description={requestIdFromError(summary.error) ? `请求ID: ${requestIdFromError(summary.error)}` : ""}
+                description={requestIdDescription(summary.error)}
               />
             ) : (
               <Space direction="vertical">
@@ -212,7 +208,7 @@ export function DashboardPage() {
                 type="error"
                 showIcon
                 message="加载总览失败"
-                description={requestIdFromError(summary.error) ? `请求ID: ${requestIdFromError(summary.error)}` : ""}
+                description={requestIdDescription(summary.error)}
               />
             ) : (
               <Space direction="vertical">
@@ -235,7 +231,7 @@ export function DashboardPage() {
                 type="error"
                 showIcon
                 message="加载总览失败"
-                description={requestIdFromError(summary.error) ? `请求ID: ${requestIdFromError(summary.error)}` : ""}
+                description={requestIdDescription(summary.error)}
               />
             ) : (
               <Space direction="vertical">
@@ -258,14 +254,14 @@ export function DashboardPage() {
                 type="error"
                 showIcon
                 message="加载设置失败"
-                description={requestIdFromError(settings.error) ? `请求ID: ${requestIdFromError(settings.error)}` : ""}
+                description={requestIdDescription(settings.error)}
               />
             ) : summary.isError ? (
               <Alert
                 type="error"
                 showIcon
                 message="加载总览失败"
-                description={requestIdFromError(summary.error) ? `请求ID: ${requestIdFromError(summary.error)}` : ""}
+                description={requestIdDescription(summary.error)}
               />
             ) : (
               <Space direction="vertical">
@@ -293,7 +289,7 @@ export function DashboardPage() {
                 type="error"
                 showIcon
                 message="加载随机统计失败"
-                description={requestIdFromError(randomStats.error) ? `请求ID: ${requestIdFromError(randomStats.error)}` : ""}
+                description={requestIdDescription(randomStats.error)}
               />
             ) : !randomStats.data ? (
               <Skeleton active />
@@ -323,7 +319,7 @@ export function DashboardPage() {
                 type="error"
                 showIcon
                 message="加载版本信息失败"
-                description={requestIdFromError(version.error) ? `请求ID: ${requestIdFromError(version.error)}` : ""}
+                description={requestIdDescription(version.error)}
               />
             ) : !version.data ? (
               <Skeleton active />
@@ -347,7 +343,7 @@ export function DashboardPage() {
                 type="error"
                 showIcon
                 message="加载任务失败"
-                description={requestIdFromError(failedJobs.error) ? `请求ID: ${requestIdFromError(failedJobs.error)}` : ""}
+                description={requestIdDescription(failedJobs.error)}
               />
             ) : (
               <Space direction="vertical" style={{ width: "100%" }}>

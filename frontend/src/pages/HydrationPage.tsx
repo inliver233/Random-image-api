@@ -20,7 +20,7 @@ import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { apiJson } from "../api/client";
-import { requestIdFromError, messageFromError } from "../admin/errors";
+import { requestIdDescription, requestIdWithMessageDescription } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type SummaryResponse = {
@@ -419,7 +419,7 @@ export function HydrationPage() {
                 type="error"
                 showIcon
                 message="加载总览失败"
-                description={requestIdFromError(summary.error) ? `请求ID: ${requestIdFromError(summary.error)}` : ""}
+                description={requestIdDescription(summary.error)}
               />
             ) : (
               <Space direction="vertical">
@@ -471,9 +471,7 @@ export function HydrationPage() {
                 style={{ marginTop: 12 }}
                 message="创建全量补全任务失败"
                 description={
-                  requestIdFromError(createBackfill.error)
-                    ? `请求ID: ${requestIdFromError(createBackfill.error)}（${messageFromError(createBackfill.error)}）`
-                    : messageFromError(createBackfill.error)
+                  requestIdWithMessageDescription(createBackfill.error)
                 }
               />
             ) : null}
@@ -532,9 +530,7 @@ export function HydrationPage() {
                 style={{ marginTop: 12 }}
                 message="创建单图补全任务失败"
                 description={
-                  requestIdFromError(createManual.error)
-                    ? `请求ID: ${requestIdFromError(createManual.error)}（${messageFromError(createManual.error)}）`
-                    : messageFromError(createManual.error)
+                  requestIdWithMessageDescription(createManual.error)
                 }
               />
             ) : null}
@@ -550,7 +546,7 @@ export function HydrationPage() {
             type="error"
             showIcon
             message="加载覆盖率统计失败"
-            description={requestIdFromError(summary.error) ? `请求ID: ${requestIdFromError(summary.error)}` : ""}
+            description={requestIdDescription(summary.error)}
           />
         ) : enabledImagesTotal <= 0 ? (
           <Alert type="info" showIcon message="暂无可用图片" description="请先导入图片链接后再查看覆盖率统计。" />
@@ -581,9 +577,7 @@ export function HydrationPage() {
           showIcon
           message="补全任务操作失败"
           description={
-            requestIdFromError(runAction.error)
-              ? `请求ID: ${requestIdFromError(runAction.error)}（${messageFromError(runAction.error)}）`
-              : messageFromError(runAction.error)
+            requestIdWithMessageDescription(runAction.error)
           }
         />
       ) : null}
@@ -615,7 +609,7 @@ export function HydrationPage() {
             type="error"
             showIcon
             message="加载补全运行列表失败"
-            description={requestIdFromError(runs.error) ? `请求ID: ${requestIdFromError(runs.error)}` : ""}
+            description={requestIdDescription(runs.error)}
           />
         ) : !runs.data ? (
           <Skeleton active />
@@ -647,9 +641,7 @@ export function HydrationPage() {
                 style={{ marginTop: 12 }}
                 message="加载更多失败"
                 description={
-                  requestIdFromError(loadMoreRuns.error)
-                    ? `请求ID: ${requestIdFromError(loadMoreRuns.error)}（${messageFromError(loadMoreRuns.error)}）`
-                    : messageFromError(loadMoreRuns.error)
+                  requestIdWithMessageDescription(loadMoreRuns.error)
                 }
               />
             ) : null}

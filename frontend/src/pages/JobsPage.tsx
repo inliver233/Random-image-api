@@ -4,7 +4,7 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useState } from "react";
 
 import { apiJson } from "../api/client";
-import { requestIdFromError } from "../admin/errors";
+import { requestIdDescription, requestIdFromError } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type JobItem = {
@@ -274,7 +274,7 @@ export function JobsPage() {
             type="error"
             showIcon
             message="加载任务列表失败"
-            description={requestIdFromError(query.error) ? `请求ID: ${requestIdFromError(query.error)}` : ""}
+            description={requestIdDescription(query.error)}
           />
         ) : !query.data ? (
           <Skeleton active />
@@ -316,7 +316,7 @@ export function JobsPage() {
             type="error"
             showIcon
             message="加载任务详情失败"
-            description={requestIdFromError(jobDetail.error) ? `请求ID: ${requestIdFromError(jobDetail.error)}` : ""}
+            description={requestIdDescription(jobDetail.error)}
           />
         ) : !jobDetail.data ? (
           <Skeleton active />

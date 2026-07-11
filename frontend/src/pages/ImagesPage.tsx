@@ -5,7 +5,7 @@ import React from "react";
 import { useMemo, useState } from "react";
 
 import { apiJson } from "../api/client";
-import { requestIdFromError, messageFromError } from "../admin/errors";
+import { messageFromError, requestIdDescription, requestIdFromError } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ImageItem = {
@@ -359,7 +359,7 @@ export function ImagesPage() {
           type="error"
           showIcon
           message="加载图片列表失败"
-          description={requestIdFromError(query.error) ? `请求ID: ${requestIdFromError(query.error)}` : ""}
+          description={requestIdDescription(query.error)}
         />
       ) : !query.data ? (
         <Skeleton active />

@@ -3,7 +3,7 @@ import { Alert, Button, Card, Form, Input, InputNumber, Select, Skeleton, Space,
 import React, { useEffect, useMemo, useState } from "react";
 
 import { ApiError, apiJson } from "../api/client";
-import { requestIdFromError } from "../admin/errors";
+import { requestIdDescription, requestIdFromError } from "../admin/errors";
 
 type SettingsResponse = {
   ok: true;
@@ -382,7 +382,7 @@ export function RecommendationPage() {
           type="error"
           showIcon
           message="加载设置失败"
-          description={requestIdFromError(query.error) ? `请求ID: ${requestIdFromError(query.error)}` : ""}
+          description={requestIdDescription(query.error)}
         />
       ) : !query.data ? (
         <Skeleton active />
