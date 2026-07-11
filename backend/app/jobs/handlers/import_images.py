@@ -12,6 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.admin_request import parse_bool
+from app.core.coerce import as_optional_int, as_str, derive_orientation
 from app.core.config import load_settings
 from app.core.data_files import get_sqlite_db_dir, resolve_file_ref
 from app.core.pixiv_urls import parse_pixiv_original_url
@@ -35,42 +37,8 @@ class ImportLineError:
     message: str
 
 
-def _as_bool(value: Any, *, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"1", "true", "yes", "y", "on"}:
-            return True
-        if v in {"0", "false", "no", "n", "off"}:
-            return False
-    return default
-
-
-def _as_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return None
-    try:
-        return int(value)
-    except Exception:
-        return None
-
-
-def _as_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    s = str(value).strip()
-    return s if s else None
-
-
 def _parse_pbd_ai_type(value: Any) -> int | None:
-    raw = _as_int(value)
+    raw = as_optional_int(value)
     if raw is None:
         return None
     # PixivBatchDownloader: 0 unknown, 1 non-ai, 2 ai
@@ -82,14 +50,14 @@ def _parse_pbd_ai_type(value: Any) -> int | None:
 
 
 def _parse_pbd_illust_type(value: Any) -> int | None:
-    raw = _as_int(value)
+    raw = as_optional_int(value)
     if raw in {0, 1, 2}:
         return int(raw)
     return None
 
 
 def _parse_pbd_created_at(value: Any) -> str | None:
-    s = _as_str(value)
+    s = as_str(value)
     if not s:
         return None
     try:
@@ -102,18 +70,6 @@ def _parse_pbd_created_at(value: Any) -> str | None:
         dt = dt.replace(tzinfo=timezone.utc)
     dt_utc = dt.astimezone(timezone.utc).replace(microsecond=0)
     return dt_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _derive_orientation(width: int | None, height: int | None) -> tuple[float | None, int | None]:
-    if width is None or height is None or width <= 0 or height <= 0:
-        return None, None
-    if width > height:
-        orientation = 2
-    elif height > width:
-        orientation = 1
-    else:
-        orientation = 3
-    return float(width) / float(height), orientation
 
 
 def _resolve_payload_file(payload: dict[str, Any]) -> Path | None:
@@ -186,7 +142,7 @@ def build_import_images_handler(engine: AsyncEngine):
         input_format_raw = str(payload.get("input_format") or "text").strip().lower()
         input_format = "pixiv_batch_downloader_json" if input_format_raw in {"pixiv_batch_downloader_json", "pbd_json", "pbd"} else "text"
 
-        hydrate_on_import = _as_bool(payload.get("hydrate_on_import"), default=False)
+        hydrate_on_import = parse_bool(payload.get("hydrate_on_import"), default=False)
         if input_format == "pixiv_batch_downloader_json":
             # PixivBatchDownloader export already contains most metadata;
             # keep this import token-free by default.
@@ -392,7 +348,7 @@ def build_import_images_handler(engine: AsyncEngine):
             for idx, raw_item in enumerate(items, start=1):
                 if not isinstance(raw_item, dict):
                     continue
-                url = _as_str(raw_item.get("original"))
+                url = as_str(raw_item.get("original"))
                 if not url:
                     continue
                 total += 1
@@ -419,15 +375,15 @@ def build_import_images_handler(engine: AsyncEngine):
 
                 accepted += 1
 
-                width = _as_int(raw_item.get("fullWidth"))
-                height = _as_int(raw_item.get("fullHeight"))
+                width = as_optional_int(raw_item.get("fullWidth"))
+                height = as_optional_int(raw_item.get("fullHeight"))
                 if width is not None and width <= 0:
                     width = None
                 if height is not None and height <= 0:
                     height = None
 
-                aspect_ratio, orientation = _derive_orientation(width, height)
-                x_restrict = _as_int(raw_item.get("xRestrict"))
+                aspect_ratio, orientation = derive_orientation(width, height)
+                x_restrict = as_optional_int(raw_item.get("xRestrict"))
                 if x_restrict not in {0, 1, 2}:
                     x_restrict = None
 
@@ -448,13 +404,13 @@ def build_import_images_handler(engine: AsyncEngine):
                         "x_restrict": x_restrict,
                         "ai_type": _parse_pbd_ai_type(raw_item.get("aiType")),
                         "illust_type": _parse_pbd_illust_type(raw_item.get("type")),
-                        "user_id": _as_int(raw_item.get("userId")),
-                        "user_name": _as_str(raw_item.get("user")),
-                        "title": _as_str(raw_item.get("title")),
+                        "user_id": as_optional_int(raw_item.get("userId")),
+                        "user_name": as_str(raw_item.get("user")),
+                        "title": as_str(raw_item.get("title")),
                         "created_at_pixiv": _parse_pbd_created_at(raw_item.get("date")),
-                        "bookmark_count": _as_int(raw_item.get("bmk")),
-                        "view_count": _as_int(raw_item.get("viewCount")),
-                        "comment_count": _as_int(raw_item.get("commentCount")),
+                        "bookmark_count": as_optional_int(raw_item.get("bmk")),
+                        "view_count": as_optional_int(raw_item.get("viewCount")),
+                        "comment_count": as_optional_int(raw_item.get("commentCount")),
                     }
                 )
 

@@ -14,6 +14,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.coerce import as_int, as_optional_int, as_str, derive_orientation
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.errors import ApiError, ErrorCode
@@ -92,35 +93,6 @@ def _normalize_iso_utc_seconds(value: str | None) -> str | None:
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _as_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return None
-    try:
-        return int(value)
-    except Exception:
-        return None
-
-
-def _as_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    s = str(value).strip()
-    return s if s else None
-
-
-def _derive_orientation(width: int | None, height: int | None) -> tuple[float | None, int | None]:
-    if width is None or height is None or width <= 0 or height <= 0:
-        return None, None
-    if width > height:
-        orientation = 2
-    elif height > width:
-        orientation = 1
-    else:
-        orientation = 3
-    return float(width) / float(height), orientation
-
 
 def _extract_tags(illust: dict[str, Any]) -> list[tuple[str, str | None]]:
     raw_tags = illust.get("tags")
@@ -131,11 +103,11 @@ def _extract_tags(illust: dict[str, Any]) -> list[tuple[str, str | None]]:
     for raw in raw_tags[: _MAX_TAGS * 2]:
         if not isinstance(raw, dict):
             continue
-        name = _as_str(raw.get("name"))
+        name = as_str(raw.get("name"))
         if not name or name in seen:
             continue
         seen.add(name)
-        translated = _as_str(raw.get("translated_name"))
+        translated = as_str(raw.get("translated_name"))
         out.append((name, translated))
         if len(out) >= _MAX_TAGS:
             break
@@ -147,7 +119,7 @@ def _extract_original_urls(illust: dict[str, Any], *, page_count: int) -> list[s
     if page_count <= 1:
         meta_single = illust.get("meta_single_page")
         if isinstance(meta_single, dict):
-            url = _as_str(meta_single.get("original_image_url"))
+            url = as_str(meta_single.get("original_image_url"))
             if url:
                 return [url]
         meta_pages = illust.get("meta_pages")
@@ -156,7 +128,7 @@ def _extract_original_urls(illust: dict[str, Any], *, page_count: int) -> list[s
             if isinstance(first, dict):
                 image_urls = first.get("image_urls")
                 if isinstance(image_urls, dict):
-                    url = _as_str(image_urls.get("original"))
+                    url = as_str(image_urls.get("original"))
                     if url:
                         return [url]
         raise ValueError("missing original_image_url")
@@ -172,7 +144,7 @@ def _extract_original_urls(illust: dict[str, Any], *, page_count: int) -> list[s
         image_urls = page.get("image_urls")
         if not isinstance(image_urls, dict):
             raise ValueError("invalid meta_pages.image_urls")
-        url = _as_str(image_urls.get("original"))
+        url = as_str(image_urls.get("original"))
         if not url:
             raise ValueError("missing meta_pages.image_urls.original")
         urls.append(url)
@@ -486,12 +458,6 @@ def build_hydrate_metadata_handler(
                 await asyncio.sleep(float(wait_s))
             last_pixiv_request_m_global = float(time.monotonic())
 
-    def _as_int(value: Any, *, default: int = 0) -> int:
-        try:
-            return int(value)
-        except Exception:
-            return default
-
     def _missing_set_from_criteria(criteria: dict[str, Any]) -> set[str]:
         default = {"tags", "geometry", "r18", "ai", "illust_type", "user", "title", "created_at", "popularity"}
         raw = criteria.get("missing")
@@ -554,7 +520,7 @@ def build_hydrate_metadata_handler(
                 try:
                     cursor_raw = json.loads(run.cursor_json or "{}")
                     if isinstance(cursor_raw, dict):
-                        cursor_image_id = _as_int(cursor_raw.get("cursor_image_id"), default=0)
+                        cursor_image_id = as_int(cursor_raw.get("cursor_image_id"), default=0)
                 except Exception:
                     cursor_image_id = 0
 
@@ -1301,7 +1267,7 @@ LIMIT 1;
             if not isinstance(illust, dict):
                 raise JobPermanentError("Pixiv illust detail missing illust")
 
-            page_count = _as_int(illust.get("page_count")) or 1
+            page_count = as_optional_int(illust.get("page_count")) or 1
             if page_count <= 0 or page_count > 1000:
                 raise JobPermanentError("Pixiv illust detail invalid page_count")
 
@@ -1322,18 +1288,18 @@ LIMIT 1;
                     raise JobPermanentError(f"Pixiv illust detail invalid original url: {bad}") from exc
                 pages.append(_IllustPage(page_index=int(idx), original_url=url_s, ext=ext))
 
-            width = _as_int(illust.get("width"))
-            height = _as_int(illust.get("height"))
-            aspect_ratio, orientation = _derive_orientation(width, height)
+            width = as_optional_int(illust.get("width"))
+            height = as_optional_int(illust.get("height"))
+            aspect_ratio, orientation = derive_orientation(width, height)
 
-            x_restrict = _as_int(illust.get("x_restrict"))
-            ai_type = _as_int(illust.get("illust_ai_type"))
+            x_restrict = as_optional_int(illust.get("x_restrict"))
+            ai_type = as_optional_int(illust.get("illust_ai_type"))
             if ai_type is None:
-                ai_type = _as_int(illust.get("ai_type"))
+                ai_type = as_optional_int(illust.get("ai_type"))
 
-            illust_type = _as_int(illust.get("illust_type"))
+            illust_type = as_optional_int(illust.get("illust_type"))
             if illust_type is None:
-                kind = _as_str(illust.get("type"))
+                kind = as_str(illust.get("type"))
                 if kind == "illust":
                     illust_type = 0
                 elif kind == "manga":
@@ -1344,27 +1310,27 @@ LIMIT 1;
                 illust_type = None
 
             user = illust.get("user")
-            user_id = _as_int(user.get("id")) if isinstance(user, dict) else None
-            user_name = _as_str(user.get("name")) if isinstance(user, dict) else None
+            user_id = as_optional_int(user.get("id")) if isinstance(user, dict) else None
+            user_name = as_str(user.get("name")) if isinstance(user, dict) else None
 
-            title = _as_str(illust.get("title"))
+            title = as_str(illust.get("title"))
             created_at_pixiv = None
             try:
-                created_at_pixiv = _normalize_iso_utc_seconds(_as_str(illust.get("create_date")))
+                created_at_pixiv = _normalize_iso_utc_seconds(as_str(illust.get("create_date")))
             except Exception:
                 created_at_pixiv = None
 
-            bookmark_count = _as_int(illust.get("total_bookmarks"))
+            bookmark_count = as_optional_int(illust.get("total_bookmarks"))
             if bookmark_count is None:
-                bookmark_count = _as_int(illust.get("bookmark_count"))
+                bookmark_count = as_optional_int(illust.get("bookmark_count"))
 
-            view_count = _as_int(illust.get("total_view"))
+            view_count = as_optional_int(illust.get("total_view"))
             if view_count is None:
-                view_count = _as_int(illust.get("view_count"))
+                view_count = as_optional_int(illust.get("view_count"))
 
-            comment_count = _as_int(illust.get("total_comments"))
+            comment_count = as_optional_int(illust.get("total_comments"))
             if comment_count is None:
-                comment_count = _as_int(illust.get("comment_count"))
+                comment_count = as_optional_int(illust.get("comment_count"))
 
             tags = _extract_tags(illust)
 
@@ -1409,9 +1375,9 @@ LIMIT 1;
         payload_json = str(job.get("payload_json") or "")
         payload = _parse_payload(payload_json)
 
-        hydration_run_id = _as_int(payload.get("hydration_run_id"), default=0)
+        hydration_run_id = as_int(payload.get("hydration_run_id"), default=0)
         if hydration_run_id > 0:
-            job_id = _as_int(job.get("id"), default=0)
+            job_id = as_int(job.get("id"), default=0)
             worker_id = str(job.get("locked_by") or "").strip()
             if job_id <= 0 or not worker_id:
                 raise JobPermanentError("Invalid job state")
@@ -1432,7 +1398,7 @@ LIMIT 1;
             missing_predicate_sql = _build_missing_predicate_sql(missing)
 
             cursor_image_id = int(run_state.get("cursor_image_id") or 0)
-            batch_size = _as_int(os.environ.get("HYDRATION_RUN_BATCH_SIZE"), default=10)
+            batch_size = as_int(os.environ.get("HYDRATION_RUN_BATCH_SIZE"), default=10)
             batch_size = max(1, min(int(batch_size), 200))
 
             processed = 0

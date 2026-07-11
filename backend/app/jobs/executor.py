@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.coerce import as_int, as_str
 from app.core.time import iso_utc_ms
 from app.core.metrics import JOBS_FAILED_TOTAL
 from app.db.session import is_sqlite_busy_error, with_sqlite_busy_retry
@@ -19,30 +20,17 @@ from app.jobs.model import Job, JobStatus, JobTransition, on_job_defer, on_job_f
 log = logging.getLogger("app.jobs.executor")
 
 
-def _as_int(value: Any, *, default: int = 0) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return default
-
-
-def _as_str(value: Any) -> str | None:
-    if value is None:
-        return None
-    s = str(value).strip()
-    return s if s else None
-
 
 def _job_from_row(row: dict[str, Any]) -> Job:
     return Job(
-        id=_as_int(row.get("id")),
+        id=as_int(row.get("id")),
         status=JobStatus(str(row.get("status") or "").strip() or JobStatus.RUNNING.value),
-        attempt=_as_int(row.get("attempt")),
-        max_attempts=max(1, _as_int(row.get("max_attempts"), default=3)),
-        run_after=_as_str(row.get("run_after")),
-        last_error=_as_str(row.get("last_error")),
-        locked_by=_as_str(row.get("locked_by")),
-        locked_at=_as_str(row.get("locked_at")),
+        attempt=as_int(row.get("attempt")),
+        max_attempts=max(1, as_int(row.get("max_attempts"), default=3)),
+        run_after=as_str(row.get("run_after")),
+        last_error=as_str(row.get("last_error")),
+        locked_by=as_str(row.get("locked_by")),
+        locked_at=as_str(row.get("locked_at")),
     )
 
 
