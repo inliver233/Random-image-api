@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.metrics import RANDOM_OPPORTUNISTIC_HYDRATE_ENQUEUED_TOTAL
@@ -53,8 +54,13 @@ async def enqueue_opportunistic_hydrate_metadata(
                 ref_id=ref_id,
             )
             session.add(job)
-            await session.flush()
-            await session.commit()
+            try:
+                await session.flush()
+                await session.commit()
+            except IntegrityError:
+                # Concurrent enqueue of the same active opportunistic hydrate job.
+                await session.rollback()
+                return None
             return int(job.id)
 
     job_id = await with_sqlite_busy_retry(_op)

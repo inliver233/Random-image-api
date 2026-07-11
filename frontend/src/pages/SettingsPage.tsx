@@ -344,8 +344,8 @@ export function SettingsPage() {
                 style={{ maxWidth: 360 }}
               />
             </Form.Item>
-            <Form.Item label="默认质量抽样数量（quality）" name="random_quality_samples" extra="仅在“质量优先”策略下生效（建议 3~50；大图库可更高）。">
-              <InputNumber min={1} max={1000} style={{ width: 240 }} />
+            <Form.Item label="默认质量抽样数量（quality）" name="random_quality_samples" extra="仅在“质量优先”策略下生效（建议 3~50；自动扩样上限 64，设置/查询硬上限 200）。">
+              <InputNumber min={1} max={200} style={{ width: 240 }} />
             </Form.Item>
 
             <Typography.Title level={5} style={{ marginTop: 12 }}>

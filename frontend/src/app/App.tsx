@@ -21,6 +21,7 @@ import { BindingsPage } from "../pages/BindingsPage";
 import { JobsPage } from "../pages/JobsPage";
 import { HydrationPage } from "../pages/HydrationPage";
 import { SettingsPage } from "../pages/SettingsPage";
+import { MaintenancePage } from "../pages/MaintenancePage";
 import { AuditPage } from "../pages/AuditPage";
 import { RecommendationPage } from "../pages/RecommendationPage";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
@@ -121,6 +122,7 @@ export function App() {
             <Route path="jobs" element={<JobsPage />} />
             <Route path="hydration" element={<HydrationPage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="maintenance" element={<MaintenancePage />} />
             <Route path="audit" element={<AuditPage />} />
             <Route path="*" element={<PlaceholderPage title="页面不存在" />} />
           </Route>

@@ -533,7 +533,7 @@ async def update_settings(
                 except Exception as exc:
                     raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Invalid random.{key}", status_code=400) from exc
                 if key == "quality_samples":
-                    if n < 1 or n > 1000:
+                    if n < 1 or n > 200:
                         raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Invalid random.{key}", status_code=400)
                 elif n < 0 or n > 10_000_000:
                     raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Invalid random.{key}", status_code=400)

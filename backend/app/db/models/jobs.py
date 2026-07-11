@@ -16,6 +16,17 @@ class JobRow(Base):
         sa.Index("idx_jobs_status_priority", "status", "priority", "id"),
         sa.Index("idx_jobs_run_after", "run_after"),
         sa.Index("idx_jobs_ref", "ref_type", "ref_id"),
+        # Prevent concurrent opportunistic hydrate enqueue races for the same illust.
+        sa.Index(
+            "uq_jobs_active_opportunistic_hydrate",
+            "type",
+            "ref_type",
+            "ref_id",
+            unique=True,
+            sqlite_where=sa.text(
+                "type = 'hydrate_metadata' AND ref_type = 'opportunistic_hydrate' AND status IN ('pending','running')"
+            ),
+        ),
     )
 
     id: Mapped[int] = mapped_column(sa.Integer(), primary_key=True, autoincrement=True)

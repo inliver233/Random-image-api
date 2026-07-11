@@ -221,6 +221,10 @@ export function HydrationPage() {
     });
   }, [enabledImagesTotal, missingCounts]);
 
+  const [runItems, setRunItems] = useState<HydrationRunItem[]>([]);
+  const [runsNextCursor, setRunsNextCursor] = useState("");
+  const [runsRequestId, setRunsRequestId] = useState<string | null>(null);
+
   const runs = useQuery({
     queryKey: ["admin", "hydration-runs", { statusFilter }],
     queryFn: () => {
@@ -229,6 +233,35 @@ export function HydrationPage() {
         query.set("status", statusFilter);
       }
       return apiJson<HydrationRunsResponse>(`/admin/api/hydration-runs?${query.toString()}`);
+    },
+  });
+
+  React.useEffect(() => {
+    if (!runs.data) return;
+    setRunItems(runs.data.items);
+    setRunsNextCursor(runs.data.next_cursor || "");
+    setRunsRequestId(runs.data.request_id);
+  }, [runs.data]);
+
+  const loadMoreRuns = useMutation({
+    mutationFn: (cursor: string) => {
+      const query = new URLSearchParams({ limit: "30", cursor });
+      if (statusFilter !== "all") {
+        query.set("status", statusFilter);
+      }
+      return apiJson<HydrationRunsResponse>(`/admin/api/hydration-runs?${query.toString()}`);
+    },
+    onSuccess: (data) => {
+      setRunItems((prev) => {
+        const seen = new Set(prev.map((x) => x.id));
+        const merged = [...prev];
+        for (const item of data.items) {
+          if (!seen.has(item.id)) merged.push(item);
+        }
+        return merged;
+      });
+      setRunsNextCursor(data.next_cursor || "");
+      setRunsRequestId(data.request_id);
     },
   });
 
@@ -606,20 +639,40 @@ export function HydrationPage() {
           />
         ) : !runs.data ? (
           <Skeleton active />
-        ) : runs.data.items.length === 0 ? (
+        ) : runItems.length === 0 ? (
           <Alert type="info" showIcon message="暂无补全任务" description="请先创建一个全量补全任务。" />
         ) : (
           <>
-            <Typography.Text type="secondary">请求ID: {runs.data.request_id}</Typography.Text>
+            {runsRequestId ? <Typography.Text type="secondary">请求ID: {runsRequestId}</Typography.Text> : null}
             <Table<HydrationRunItem>
               rowKey={(row) => row.id}
               columns={columns}
-              dataSource={runs.data.items}
+              dataSource={runItems}
               pagination={false}
               size="small"
               scroll={{ x: 1900 }}
               style={{ marginTop: 12 }}
             />
+            {runsNextCursor ? (
+              <div style={{ marginTop: 12 }}>
+                <Button onClick={() => loadMoreRuns.mutate(runsNextCursor)} loading={loadMoreRuns.isPending}>
+                  加载更多
+                </Button>
+              </div>
+            ) : null}
+            {loadMoreRuns.isError ? (
+              <Alert
+                type="error"
+                showIcon
+                style={{ marginTop: 12 }}
+                message="加载更多失败"
+                description={
+                  requestIdFromError(loadMoreRuns.error)
+                    ? `请求ID: ${requestIdFromError(loadMoreRuns.error)}（${messageFromError(loadMoreRuns.error)}）`
+                    : messageFromError(loadMoreRuns.error)
+                }
+              />
+            ) : null}
           </>
         )}
       </Card>
