@@ -264,7 +264,7 @@ async def modular_ports_status(
             "recent_dedup": {
                 "configured_backend": recent_cfg,
                 "active_backend": recent_active,
-                # redis reserved: factory falls back to memory.
+                # True when redis requested but factory fell back (missing REDIS_URL).
                 "using_memory_fallback": recent_cfg == "redis" and recent_active == "memory",
             },
         },

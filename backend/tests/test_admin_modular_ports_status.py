@@ -70,7 +70,40 @@ def test_admin_modular_ports_status_recent_redis_fallback(tmp_path: Path, monkey
         body = resp.json()
         assert body["ok"] is True
         assert body["recent_dedup"]["configured_backend"] == "redis"
+        # No REDIS_URL → factory stays on memory (using_memory_fallback).
         assert body["recent_dedup"]["active_backend"] == "memory"
         assert body["recent_dedup"]["using_memory_fallback"] is True
         assert body["job_queue"]["backend"] == "sqlite"
         assert body["job_queue"]["requested"] == "nats"
+
+
+def test_admin_modular_ports_status_recent_redis_active(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "admin_modular_ports_redis_active.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
+    monkeypatch.setenv("RECENT_DEDUP_BACKEND", "redis")
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+
+    app = create_app()
+    with TestClient(app) as client:
+        token = client.post(
+            "/admin/api/login",
+            headers={"X-Request-Id": "req_test"},
+            json={"username": "admin", "password": "pass_test"},
+        ).json()["token"]
+
+        resp = client.get(
+            "/admin/api/maintenance/modular-ports",
+            headers={"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["recent_dedup"]["configured_backend"] == "redis"
+        assert body["recent_dedup"]["active_backend"] == "redis"
+        assert body["recent_dedup"]["using_memory_fallback"] is False

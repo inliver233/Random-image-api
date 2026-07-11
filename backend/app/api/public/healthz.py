@@ -175,7 +175,7 @@ async def healthz(request: Request) -> Any:
                     str(getattr(getattr(request.app.state, "catalog_store", None), "backend", "sqlite") or "sqlite")
                 ),
             },
-            # Anti-repeat short window (memory default; redis reserved). Config-only.
+            # Anti-repeat short window (memory default; redis when ready). Active store label.
             "recent_dedup": {
                 "backend": (
                     str(getattr(getattr(request.app.state, "recent_dedup", None), "backend", "memory") or "memory")

@@ -47,7 +47,7 @@ class Settings:
     # Rate-limit backend for public API keys: memory (default) | redis (needs REDIS_URL).
     public_api_key_rate_limit_backend: str
     redis_url: str
-    # Short-window anti-repeat store: memory (default) | redis reserved (falls back to memory).
+    # Short-window anti-repeat store: memory (default) | redis (requires REDIS_URL; fail-open).
     recent_dedup_backend: str
     random_totals_persist_interval_seconds: int
     # Optional Go random-engine BFF dual-run / cutover (empty = Python-only pick).
@@ -229,7 +229,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if public_api_key_rate_limit_backend not in {"memory", "redis"}:
         public_api_key_rate_limit_backend = "memory"
     redis_url = _get(env, "REDIS_URL", "") or _get(env, "PUBLIC_API_KEY_REDIS_URL", "")
-    # memory (default). redis reserved — factory falls back until implemented.
+    # memory (default). redis activates only with REDIS_URL (see build_recent_dedup).
     recent_dedup_backend = _get(env, "RECENT_DEDUP_BACKEND", "memory").lower()
     if recent_dedup_backend not in {"memory", "redis"}:
         recent_dedup_backend = "memory"

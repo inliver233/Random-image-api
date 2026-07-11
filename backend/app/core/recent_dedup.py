@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
+import time
 from collections import deque
+from dataclasses import dataclass, field
 from threading import Lock
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
+
+log = logging.getLogger(__name__)
 
 # Best-effort global de-dup (process-local): reduce short-term duplicates without extra DB writes.
 _RECENT_LOCK = Lock()
@@ -13,10 +18,11 @@ _RECENT_AUTHORS: deque[tuple[float, int]] = deque()
 
 @runtime_checkable
 class RecentDedupPort(Protocol):
-    """Short-window anti-repeat store (memory today; Redis later without handler rewrite).
+    """Short-window anti-repeat store (memory default; optional Redis for multi-instance).
 
-    Semantics: process-local best-effort only. Fail-open is intentional — dedup must never
-    block /random. Cross-instance Redis is optional and must fail open to empty windows.
+    Semantics: best-effort only. Fail-open is intentional — dedup must never block /random.
+    Cross-instance Redis must fail open (empty windows / no-op record), not raise into the
+    request path. Call sites are synchronous (pick plan + background side-effects).
     """
 
     backend: str
@@ -154,10 +160,229 @@ def record_recent(
             _RECENT_AUTHORS.append((float(now), int(user_id_i)))
 
 
-def build_recent_dedup(*, backend: str = "memory") -> RecentDedupPort:
-    """Build anti-repeat store. Only memory is implemented; redis reserved → memory."""
-    backend_norm = (backend or "memory").strip().lower()
-    if backend_norm not in {"memory"}:
-        # redis reserved — fall back to memory until implemented (fail-open for multi-instance).
-        backend_norm = "memory"
+@dataclass
+class RedisRecentDedup:
+    """Cross-instance short-window anti-repeat via Redis sorted sets (optional).
+
+    Keys:
+      - ``{prefix}images``  member=image_id, score=unix wall time
+      - ``{prefix}authors`` member=user_id,  score=unix wall time
+
+    Call sites pass process ``time.monotonic()`` for memory; Redis always scores with
+    wall-clock so multi-instance windows align. Fail-open to process-local memory when
+    redis package/connect/command fails (public API stays up).
+    """
+
+    redis_url: str
+    key_prefix: str = "np:recent:"
+    backend: str = "redis"
+    _client: Any = field(default=None, repr=False)
+    _fallback: MemoryRecentDedup = field(default_factory=MemoryRecentDedup, repr=False)
+    _connect_failed: bool = field(default=False, repr=False)
+
+    def _images_key(self) -> str:
+        return f"{self.key_prefix}images"
+
+    def _authors_key(self) -> str:
+        return f"{self.key_prefix}authors"
+
+    def _get_client(self) -> Any | None:
+        if self._client is not None:
+            return self._client
+        if self._connect_failed:
+            return None
+        try:
+            import redis as redis_sync  # type: ignore[import-not-found]
+        except Exception as exc:
+            log.warning("recent_dedup_redis_import_failed err=%s", type(exc).__name__)
+            self._connect_failed = True
+            return None
+        try:
+            client = redis_sync.from_url(
+                str(self.redis_url),
+                encoding="utf-8",
+                decode_responses=True,
+                socket_connect_timeout=0.4,
+                socket_timeout=0.4,
+            )
+            client.ping()
+            self._client = client
+            return client
+        except Exception as exc:
+            log.warning("recent_dedup_redis_connect_failed err=%s", type(exc).__name__)
+            self._connect_failed = True
+            return None
+
+    def _prune_key(self, client: Any, *, key: str, now_s: float, window_s: float, max_n: int) -> None:
+        cutoff = float(now_s) - max(0.0, float(window_s))
+        try:
+            client.zremrangebyscore(key, "-inf", cutoff)
+            if int(max_n) > 0:
+                # Drop oldest (lowest score) beyond hard cap.
+                n = int(client.zcard(key) or 0)
+                overflow = n - int(max_n)
+                if overflow > 0:
+                    client.zremrangebyrank(key, 0, overflow - 1)
+        except Exception as exc:
+            log.warning("recent_dedup_redis_prune_failed err=%s", type(exc).__name__)
+
+    def prune(self, now: float, *, window_s: float, max_images: int, max_authors: int) -> None:
+        client = self._get_client()
+        if client is None:
+            self._fallback.prune(
+                now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+            )
+            return
+        now_s = time.time()
+        self._prune_key(
+            client, key=self._images_key(), now_s=now_s, window_s=float(window_s), max_n=int(max_images)
+        )
+        self._prune_key(
+            client, key=self._authors_key(), now_s=now_s, window_s=float(window_s), max_n=int(max_authors)
+        )
+
+    def get_lists(
+        self, now: float, *, window_s: float, max_images: int, max_authors: int
+    ) -> tuple[list[int], list[int]]:
+        client = self._get_client()
+        if client is None:
+            return self._fallback.get_lists(
+                now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+            )
+        now_s = time.time()
+        try:
+            self._prune_key(
+                client, key=self._images_key(), now_s=now_s, window_s=float(window_s), max_n=int(max_images)
+            )
+            self._prune_key(
+                client, key=self._authors_key(), now_s=now_s, window_s=float(window_s), max_n=int(max_authors)
+            )
+            raw_images = client.zrange(self._images_key(), 0, -1) or []
+            raw_authors = client.zrange(self._authors_key(), 0, -1) or []
+            images: list[int] = []
+            for x in raw_images:
+                try:
+                    images.append(int(x))
+                except Exception:
+                    continue
+            authors: list[int] = []
+            for x in raw_authors:
+                try:
+                    authors.append(int(x))
+                except Exception:
+                    continue
+            return images, authors
+        except Exception as exc:
+            log.warning("recent_dedup_redis_get_failed err=%s", type(exc).__name__)
+            return self._fallback.get_lists(
+                now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+            )
+
+    def get_sets(
+        self, now: float, *, window_s: float, max_images: int, max_authors: int
+    ) -> tuple[set[int], set[int]]:
+        images, authors = self.get_lists(
+            now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+        )
+        return set(images), set(authors)
+
+    def record(
+        self,
+        *,
+        now: float,
+        image_id: int,
+        user_id: int | None,
+        window_s: float,
+        max_images: int,
+        max_authors: int,
+    ) -> None:
+        try:
+            image_id_i = int(image_id)
+        except Exception:
+            return
+        if image_id_i <= 0:
+            return
+        user_id_i: int | None
+        try:
+            user_id_i = int(user_id) if user_id is not None else None
+        except Exception:
+            user_id_i = None
+
+        client = self._get_client()
+        if client is None:
+            self._fallback.record(
+                now=float(now),
+                image_id=int(image_id_i),
+                user_id=user_id_i,
+                window_s=float(window_s),
+                max_images=int(max_images),
+                max_authors=int(max_authors),
+            )
+            return
+
+        now_s = time.time()
+        try:
+            pipe = client.pipeline(transaction=False)
+            pipe.zadd(self._images_key(), {str(image_id_i): float(now_s)})
+            if user_id_i is not None and user_id_i > 0:
+                pipe.zadd(self._authors_key(), {str(user_id_i): float(now_s)})
+            pipe.execute()
+            self._prune_key(
+                client, key=self._images_key(), now_s=now_s, window_s=float(window_s), max_n=int(max_images)
+            )
+            self._prune_key(
+                client, key=self._authors_key(), now_s=now_s, window_s=float(window_s), max_n=int(max_authors)
+            )
+        except Exception as exc:
+            log.warning("recent_dedup_redis_record_failed err=%s", type(exc).__name__)
+            self._fallback.record(
+                now=float(now),
+                image_id=int(image_id_i),
+                user_id=user_id_i,
+                window_s=float(window_s),
+                max_images=int(max_images),
+                max_authors=int(max_authors),
+            )
+
+    def clear(self) -> None:
+        client = self._get_client()
+        if client is None:
+            self._fallback.clear()
+            return
+        try:
+            client.delete(self._images_key(), self._authors_key())
+        except Exception as exc:
+            log.warning("recent_dedup_redis_clear_failed err=%s", type(exc).__name__)
+            self._fallback.clear()
+        # Also clear process-local fallback so admin/tests stay coherent.
+        try:
+            self._fallback.clear()
+        except Exception:
+            pass
+
+    def aclose(self) -> None:
+        """Optional close for app shutdown (sync client)."""
+        client = self._client
+        self._client = None
+        if client is None:
+            return
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
+def normalize_recent_dedup_backend(raw: str | None) -> str:
+    v = (raw or "memory").strip().lower()
+    if v in {"redis", "memory"}:
+        return v
+    return "memory"
+
+
+def build_recent_dedup(*, backend: str = "memory", redis_url: str = "") -> RecentDedupPort:
+    """Build anti-repeat store. Redis only when backend=redis and redis_url set; else memory."""
+    backend_norm = normalize_recent_dedup_backend(backend)
+    url = (redis_url or "").strip()
+    if backend_norm == "redis" and url:
+        return RedisRecentDedup(redis_url=url, backend="redis")
     return MemoryRecentDedup()

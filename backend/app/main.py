@@ -187,7 +187,8 @@ def create_app() -> FastAPI:
     app.state.engine = engine
     app.state.catalog_store = build_catalog_store(database_url=str(settings.database_url))
     app.state.recent_dedup = build_recent_dedup(
-        backend=str(getattr(settings, "recent_dedup_backend", "memory") or "memory")
+        backend=str(getattr(settings, "recent_dedup_backend", "memory") or "memory"),
+        redis_url=str(getattr(settings, "redis_url", "") or ""),
     )
     app.state.httpx_transport = build_default_async_transport()
     app.state.httpx_client = build_shared_async_client(transport=app.state.httpx_transport)
