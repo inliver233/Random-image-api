@@ -35,6 +35,7 @@ def test_admin_modular_ports_status_defaults(tmp_path: Path, monkeypatch) -> Non
         body = resp.json()
         assert body["ok"] is True
         assert body["catalog"]["backend"] == "sqlite"
+        assert body["tags"]["backend"] == "sqlite"
         assert body["job_queue"]["backend"] == "sqlite"
         assert body["job_queue"]["requested"] == "sqlite"
         assert body["job_queue"]["implemented"] is True

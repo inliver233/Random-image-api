@@ -470,6 +470,12 @@ export function MaintenancePage() {
                 ) : (
                   <Tag>memory</Tag>
                 )}
+                {modularPortsStatus.data.recent_dedup.configured_backend !==
+                modularPortsStatus.data.recent_dedup.active_backend ? (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    requested={modularPortsStatus.data.recent_dedup.configured_backend}
+                  </Tag>
+                ) : null}
                 {modularPortsStatus.data.recent_dedup.using_memory_fallback ? (
                   <Tag color="orange" style={{ marginLeft: 8 }}>
                     redis→memory fallback
