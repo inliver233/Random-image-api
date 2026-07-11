@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Skeleton, Space, Table, Typography } from "antd";
+import { Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React, { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
-import { messageFromError, requestIdDescription, requestIdFromError } from "../admin/errors";
+import { QueryState } from "../admin/QueryState";
+import { messageFromError, requestIdFromError } from "../admin/errors";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { ApiError, apiJson } from "../api/client";
 
@@ -525,25 +526,15 @@ export function BindingsPage() {
 
       {poolId == null ? (
         <Alert type="info" showIcon message="请先选择代理池" description="可在“代理池”页面创建后再返回此处。" />
-      ) : query.isLoading ? (
-        <Skeleton active />
-      ) : query.isError ? (
-        <Alert
-          type="error"
-          showIcon
-          message="加载绑定列表失败"
-          description={requestIdDescription(query.error)}
-        />
-      ) : !query.data ? (
-        <Skeleton active />
-      ) : query.data.items.length === 0 ? (
-        <Alert
-          type="info"
-          showIcon
-          message="暂无绑定数据"
-          description="请先创建代理池并加入代理节点，然后点击“重新计算绑定”。"
-        />
       ) : (
+        <QueryState
+          query={query}
+          errorMessage="加载绑定列表失败"
+          empty={Boolean(query.data && query.data.items.length === 0)}
+          emptyMessage="暂无绑定数据"
+          emptyDescription="请先创建代理池并加入代理节点，然后点击“重新计算绑定”。"
+        >
+          {query.data ? (
         <Card>
           <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
           <Table<BindingItem>
@@ -570,6 +561,8 @@ export function BindingsPage() {
             style={{ marginTop: 12 }}
           />
         </Card>
+          ) : null}
+        </QueryState>
       )}
     </Space>
   );

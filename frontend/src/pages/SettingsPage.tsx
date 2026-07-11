@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, InputNumber, Select, Skeleton, Space, Switch, Typography } from "antd";
+import { Alert, Button, Card, Form, InputNumber, Select, Space, Switch, Typography } from "antd";
 import React, { useEffect } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
-import { requestIdDescription } from "../admin/errors";
+import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 
@@ -205,146 +205,137 @@ export function SettingsPage() {
         errorRequestId={alerts.errorRequestId}
       />
 
-      {query.isLoading ? (
-        <Skeleton active />
-      ) : query.isError ? (
-        <Alert
-          type="error"
-          showIcon
-          message="加载设置失败"
-          description={requestIdDescription(query.error)}
-        />
-      ) : !query.data ? (
-        <Skeleton active />
-      ) : (
-        <Card>
-          <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
-          <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
-            <Typography.Title level={5} style={{ marginTop: 12 }}>
-              代理设置
-            </Typography.Title>
+      <QueryState query={query} errorMessage="加载设置失败">
+        {query.data ? (
+          <Card>
+            <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
+            <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
+              <Typography.Title level={5} style={{ marginTop: 12 }}>
+                代理设置
+              </Typography.Title>
 
-            <Form.Item label="启用代理" name="proxy_enabled" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item label="失败即拦截（严格模式）" name="proxy_fail_closed" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item label="代理路由模式" name="proxy_route_mode">
-              <Select
-                options={[
-                  { value: "pixiv_only", label: "仅 Pixiv" },
-                  { value: "all", label: "全部流量" },
-                  { value: "allowlist", label: "仅白名单域名" },
-                  { value: "off", label: "关闭" },
-                ]}
-                style={{ maxWidth: 320 }}
+              <Form.Item label="启用代理" name="proxy_enabled" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+              <Form.Item label="失败即拦截（严格模式）" name="proxy_fail_closed" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+              <Form.Item label="代理路由模式" name="proxy_route_mode">
+                <Select
+                  options={[
+                    { value: "pixiv_only", label: "仅 Pixiv" },
+                    { value: "all", label: "全部流量" },
+                    { value: "allowlist", label: "仅白名单域名" },
+                    { value: "off", label: "关闭" },
+                  ]}
+                  style={{ maxWidth: 320 }}
+                />
+              </Form.Item>
+              <Form.Item label="白名单域名" name="proxy_allowlist_domains">
+                <Select mode="tags" style={{ maxWidth: 520 }} tokenSeparators={[",", "\n", " "]} placeholder="例如：example.com api.example.com" />
+              </Form.Item>
+              <Form.Item
+                label="默认代理池"
+                name="proxy_default_pool_id"
+                extra={poolsQuery.isError ? "代理池列表加载失败：可先到“代理池”页面创建。" : "不指定时会自动选择第一个启用的代理池。"}
+              >
+                <Select
+                  style={{ maxWidth: 420 }}
+                  loading={poolsQuery.isLoading}
+                  options={[
+                    { value: 0, label: "不指定（自动选择）" },
+                    ...(poolsQuery.data?.items || [])
+                      .filter((p) => Boolean(p.enabled))
+                      .map((p) => ({ value: Number(p.id), label: `${p.name}(#${p.id})` })),
+                  ]}
+                />
+              </Form.Item>
+
+              <Typography.Title level={5} style={{ marginTop: 12 }}>
+                图片加速
+              </Typography.Title>
+              <Form.Item
+                label="使用第三方反向代理（仅图片上游）"
+                name="image_proxy_use_pixiv_cat"
+                valuePropName="checked"
+                extra="开启后：服务端拉取图片时会把 i.pximg.net 替换为 i.pixiv.*（客户端仍访问本站域名，不会暴露第三方域名）。会按访问地区智能选择上游：大陆优先 i.pixiv.re，非大陆默认 i.pixiv.cat。"
+              >
+                <Switch />
+              </Form.Item>
+              <Form.Item
+                label="镜像域名"
+                name="image_proxy_pximg_mirror_host"
+                extra="可选 i.pixiv.cat / i.pixiv.re / i.pixiv.nl。未显式指定 pximg_mirror_host 时：大陆访问会自动用 i.pixiv.re；非大陆使用这里选择的镜像（默认 i.pixiv.cat）。"
+              >
+                <Select
+                  style={{ maxWidth: 360 }}
+                  options={[
+                    { value: "i.pixiv.cat", label: "i.pixiv.cat（默认）" },
+                    { value: "i.pixiv.re", label: "i.pixiv.re（大陆优先）" },
+                    { value: "i.pixiv.nl", label: "i.pixiv.nl（备用）" },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item
+                label="自定义镜像白名单"
+                name="image_proxy_extra_pximg_mirror_hosts"
+                extra="用于公开接口的 proxy= 参数：仅允许这里配置的自定义域名被用作图片上游镜像（防止 SSRF）。示例：i.mirror.example.com"
+              >
+                <Select mode="tags" style={{ maxWidth: 520 }} tokenSeparators={[",", "\n", " "]} placeholder="例如：i.mirror.example.com" />
+              </Form.Item>
+
+              <Typography.Title level={5} style={{ marginTop: 12 }}>
+                随机接口设置
+              </Typography.Title>
+              <Form.Item
+                label="默认尝试次数"
+                name="random_default_attempts"
+                extra="与公开接口 runtime 校验一致：1–10。"
+              >
+                <InputNumber min={1} max={10} style={{ width: 200 }} />
+              </Form.Item>
+              <Form.Item label="默认严格 R18 过滤" name="random_default_r18_strict" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+              <Form.Item label="失败冷却时间（毫秒）" name="random_fail_cooldown_ms">
+                <InputNumber min={0} max={10_000_000} style={{ width: 240 }} />
+              </Form.Item>
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="策略 / 质量抽样 / 去重"
+                description="默认随机策略、quality_samples、推荐打分与去重参数请在「推荐策略」页面编辑，避免与系统设置重复维护。"
               />
-            </Form.Item>
-            <Form.Item label="白名单域名" name="proxy_allowlist_domains">
-              <Select mode="tags" style={{ maxWidth: 520 }} tokenSeparators={[",", "\n", " "]} placeholder="例如：example.com api.example.com" />
-            </Form.Item>
-            <Form.Item
-              label="默认代理池"
-              name="proxy_default_pool_id"
-              extra={poolsQuery.isError ? "代理池列表加载失败：可先到“代理池”页面创建。" : "不指定时会自动选择第一个启用的代理池。"}
-            >
-              <Select
-                style={{ maxWidth: 420 }}
-                loading={poolsQuery.isLoading}
-                options={[
-                  { value: 0, label: "不指定（自动选择）" },
-                  ...(poolsQuery.data?.items || [])
-                    .filter((p) => Boolean(p.enabled))
-                    .map((p) => ({ value: Number(p.id), label: `${p.name}(#${p.id})` })),
-                ]}
-              />
-            </Form.Item>
 
-            <Typography.Title level={5} style={{ marginTop: 12 }}>
-              图片加速
-            </Typography.Title>
-            <Form.Item
-              label="使用第三方反向代理（仅图片上游）"
-              name="image_proxy_use_pixiv_cat"
-              valuePropName="checked"
-              extra="开启后：服务端拉取图片时会把 i.pximg.net 替换为 i.pixiv.*（客户端仍访问本站域名，不会暴露第三方域名）。会按访问地区智能选择上游：大陆优先 i.pixiv.re，非大陆默认 i.pixiv.cat。"
-            >
-              <Switch />
-            </Form.Item>
-            <Form.Item
-              label="镜像域名"
-              name="image_proxy_pximg_mirror_host"
-              extra="可选 i.pixiv.cat / i.pixiv.re / i.pixiv.nl。未显式指定 pximg_mirror_host 时：大陆访问会自动用 i.pixiv.re；非大陆使用这里选择的镜像（默认 i.pixiv.cat）。"
-            >
-              <Select
-                style={{ maxWidth: 360 }}
-                options={[
-                  { value: "i.pixiv.cat", label: "i.pixiv.cat（默认）" },
-                  { value: "i.pixiv.re", label: "i.pixiv.re（大陆优先）" },
-                  { value: "i.pixiv.nl", label: "i.pixiv.nl（备用）" },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item
-              label="自定义镜像白名单"
-              name="image_proxy_extra_pximg_mirror_hosts"
-              extra="用于公开接口的 proxy= 参数：仅允许这里配置的自定义域名被用作图片上游镜像（防止 SSRF）。示例：i.mirror.example.com"
-            >
-              <Select mode="tags" style={{ maxWidth: 520 }} tokenSeparators={[",", "\n", " "]} placeholder="例如：i.mirror.example.com" />
-            </Form.Item>
+              <Typography.Title level={5} style={{ marginTop: 12 }}>
+                安全设置
+              </Typography.Title>
+              <Form.Item label="在公开 JSON 中隐藏原图 URL" name="security_hide_origin_url_in_public_json" valuePropName="checked">
+                <Switch />
+              </Form.Item>
 
-            <Typography.Title level={5} style={{ marginTop: 12 }}>
-              随机接口设置
-            </Typography.Title>
-            <Form.Item
-              label="默认尝试次数"
-              name="random_default_attempts"
-              extra="与公开接口 runtime 校验一致：1–10。"
-            >
-              <InputNumber min={1} max={10} style={{ width: 200 }} />
-            </Form.Item>
-            <Form.Item label="默认严格 R18 过滤" name="random_default_r18_strict" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-            <Form.Item label="失败冷却时间（毫秒）" name="random_fail_cooldown_ms">
-              <InputNumber min={0} max={10_000_000} style={{ width: 240 }} />
-            </Form.Item>
-            <Alert
-              type="info"
-              showIcon
-              style={{ marginBottom: 16 }}
-              message="策略 / 质量抽样 / 去重"
-              description="默认随机策略、quality_samples、推荐打分与去重参数请在「推荐策略」页面编辑，避免与系统设置重复维护。"
-            />
-
-            <Typography.Title level={5} style={{ marginTop: 12 }}>
-              安全设置
-            </Typography.Title>
-            <Form.Item label="在公开 JSON 中隐藏原图 URL" name="security_hide_origin_url_in_public_json" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-
-            <Typography.Title level={5} style={{ marginTop: 12 }}>
-              补全任务设置
-            </Typography.Title>
-            <Form.Item
-              label="Pixiv 请求最小间隔（毫秒）"
-              name="pixiv_hydrate_min_interval_ms"
-              extra="每次补全任务请求 Pixiv（OAuth/作品详情）前至少等待该间隔。建议 300~2000。"
-            >
-              <InputNumber min={0} max={60_000} style={{ width: 240 }} />
-            </Form.Item>
-            <Form.Item
-              label="随机抖动（毫秒）"
-              name="pixiv_hydrate_jitter_ms"
-              extra="在最小间隔基础上增加 0~抖动 的随机等待，降低固定节奏触发风控的概率。"
-            >
-              <InputNumber min={0} max={60_000} style={{ width: 240 }} />
-            </Form.Item>
-          </Form>
-        </Card>
-      )}
+              <Typography.Title level={5} style={{ marginTop: 12 }}>
+                补全任务设置
+              </Typography.Title>
+              <Form.Item
+                label="Pixiv 请求最小间隔（毫秒）"
+                name="pixiv_hydrate_min_interval_ms"
+                extra="每次补全任务请求 Pixiv（OAuth/作品详情）前至少等待该间隔。建议 300~2000。"
+              >
+                <InputNumber min={0} max={60_000} style={{ width: 240 }} />
+              </Form.Item>
+              <Form.Item
+                label="随机抖动（毫秒）"
+                name="pixiv_hydrate_jitter_ms"
+                extra="在最小间隔基础上增加 0~抖动 的随机等待，降低固定节奏触发风控的概率。"
+              >
+                <InputNumber min={0} max={60_000} style={{ width: 240 }} />
+              </Form.Item>
+            </Form>
+          </Card>
+        ) : null}
+      </QueryState>
     </Space>
   );
 }

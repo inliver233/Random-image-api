@@ -11,7 +11,13 @@ from sqlalchemy.orm import aliased
 from app.api.admin.deps import get_admin_claims
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object, parse_bool, parse_optional_str, parse_positive_int
+from app.core.admin_request import (
+    load_json_object,
+    parse_bool,
+    parse_int_in_range,
+    parse_optional_str,
+    parse_positive_int,
+)
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
@@ -90,12 +96,13 @@ async def _load_recompute_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
     pool_id = parse_positive_int(data.get("pool_id"), field="pool_id")
-    max_tokens_per_proxy = parse_positive_int(
+    max_tokens_per_proxy = parse_int_in_range(
         data.get("max_tokens_per_proxy", 2),
         field="max_tokens_per_proxy",
+        min_value=1,
+        max_value=1000,
+        invalid_message="Invalid max_tokens_per_proxy",
     )
-    if max_tokens_per_proxy > 1000:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid max_tokens_per_proxy", status_code=400)
 
     strict = parse_bool(data.get("strict"), default=True)
 
@@ -106,9 +113,13 @@ async def _load_override_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
     override_proxy_id = parse_positive_int(data.get("override_proxy_id"), field="override_proxy_id")
-    ttl_ms = parse_positive_int(data.get("ttl_ms"), field="ttl_ms")
-    if ttl_ms > 30 * 24 * 60 * 60 * 1000:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid ttl_ms", status_code=400)
+    ttl_ms = parse_int_in_range(
+        data.get("ttl_ms"),
+        field="ttl_ms",
+        min_value=1,
+        max_value=30 * 24 * 60 * 60 * 1000,
+        invalid_message="Invalid ttl_ms",
+    )
 
     reason = parse_optional_str(data.get("reason"), max_len=200, field="reason", invalid_message="Invalid reason") or ""
 

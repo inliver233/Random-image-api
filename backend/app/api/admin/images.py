@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object, parse_bool, parse_positive_int_list
+from app.core.admin_request import load_json_object, parse_bool, parse_choice, parse_positive_int_list
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.db.models.image_tags import ImageTag
@@ -18,7 +18,7 @@ from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 
 router = APIRouter()
 
-_ALLOWED_MISSING = {"tags", "geometry", "r18", "ai", "illust_type", "user", "title", "created_at", "popularity"}
+_ALLOWED_MISSING = frozenset({"tags", "geometry", "r18", "ai", "illust_type", "user", "title", "created_at", "popularity"})
 
 
 def _parse_missing(values: list[str] | None) -> list[str]:
@@ -26,11 +26,12 @@ def _parse_missing(values: list[str] | None) -> list[str]:
     seen: set[str] = set()
     for raw in values or []:
         for part in str(raw or "").replace(",", "|").split("|"):
-            key = part.strip().lower()
-            if not key or key in seen:
+            text = str(part or "").strip()
+            if not text:
                 continue
-            if key not in _ALLOWED_MISSING:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported missing", status_code=400)
+            key = parse_choice(text, field="missing", choices=_ALLOWED_MISSING, invalid_message="Unsupported missing")
+            if key in seen:
+                continue
             seen.add(key)
             out.append(key)
     return out

@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Skeleton, Space, Switch, Table, Typography } from "antd";
+import { Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Space, Switch, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
-import { requestIdDescription } from "../admin/errors";
+import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 
@@ -379,46 +379,41 @@ export function TokensPage() {
         </Form>
       </Modal>
 
-      {query.isLoading ? (
-        <Skeleton active />
-      ) : query.isError ? (
-        <Alert
-          type="error"
-          showIcon
-          message="加载令牌列表失败"
-          description={requestIdDescription(query.error)}
-        />
-      ) : !query.data ? (
-        <Skeleton active />
-      ) : query.data.items.length === 0 ? (
-        <Alert type="info" showIcon message="暂无令牌" description="请至少添加一个令牌，才能执行 Pixiv 接口相关任务。" />
-      ) : (
-        <Card>
-          <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
-          <Table<TokenItem>
-            rowKey={(row) => row.id}
-            columns={columns({
-              onEdit: (row) => openEdit(row),
-              onTestRefresh: (id) => testRefresh.mutate(id),
-              onResetFailures: (id) => resetFailures.mutate(id),
-              onToggleEnabled: (row) =>
-                updateToken.mutate({
-                  tokenId: row.id,
-                  body: { enabled: !row.enabled },
-                }),
-              onDelete: (id) => deleteToken.mutate(id),
-              testPendingId: testRefresh.isPending ? testRefresh.variables ?? null : null,
-              resetPendingId: resetFailures.isPending ? resetFailures.variables ?? null : null,
-              updatePendingId: updateToken.isPending ? updateToken.variables?.tokenId ?? null : null,
-              deletePendingId: deleteToken.isPending ? deleteToken.variables ?? null : null,
-            })}
-            dataSource={query.data.items}
-            pagination={false}
-            size="small"
-            style={{ marginTop: 12 }}
-          />
-        </Card>
-      )}
+      <QueryState
+        query={query}
+        errorMessage="加载令牌列表失败"
+        empty={Boolean(query.data && query.data.items.length === 0)}
+        emptyMessage="暂无令牌"
+        emptyDescription="请至少添加一个令牌，才能执行 Pixiv 接口相关任务。"
+      >
+        {query.data ? (
+          <Card>
+            <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
+            <Table<TokenItem>
+              rowKey={(row) => row.id}
+              columns={columns({
+                onEdit: (row) => openEdit(row),
+                onTestRefresh: (id) => testRefresh.mutate(id),
+                onResetFailures: (id) => resetFailures.mutate(id),
+                onToggleEnabled: (row) =>
+                  updateToken.mutate({
+                    tokenId: row.id,
+                    body: { enabled: !row.enabled },
+                  }),
+                onDelete: (id) => deleteToken.mutate(id),
+                testPendingId: testRefresh.isPending ? testRefresh.variables ?? null : null,
+                resetPendingId: resetFailures.isPending ? resetFailures.variables ?? null : null,
+                updatePendingId: updateToken.isPending ? updateToken.variables?.tokenId ?? null : null,
+                deletePendingId: deleteToken.isPending ? deleteToken.variables ?? null : null,
+              })}
+              dataSource={query.data.items}
+              pagination={false}
+              size="small"
+              style={{ marginTop: 12 }}
+            />
+          </Card>
+        ) : null}
+      </QueryState>
     </Space>
   );
 }

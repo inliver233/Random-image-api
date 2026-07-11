@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, InputNumber, Select, Skeleton, Space, Switch, Table, Typography } from "antd";
+import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React, { useEffect, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
-import { requestIdDescription } from "../admin/errors";
+import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
@@ -756,51 +756,48 @@ export function ProxiesPage() {
           />
         ) : null}
 
-        {query.isLoading ? (
-          <Skeleton active />
-        ) : query.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="加载代理节点失败"
-            description={requestIdDescription(query.error)}
-          />
-        ) : endpointItems.length === 0 && !query.isFetching ? (
-          <Alert type="info" showIcon message="暂无代理节点" description="请先导入代理节点以启用代理路由。" />
-        ) : (
-          <>
-            {listRequestId ? <Typography.Text type="secondary">请求ID: {listRequestId}</Typography.Text> : null}
-            <Table<ProxyEndpointItem>
-              rowKey={(row) => row.id}
-              columns={columns({
-                onToggleEnabled: (row) => updateEndpoint.mutate({ endpointId: row.id, enabled: !row.enabled }),
-                updatePendingId: updateEndpoint.isPending ? updateEndpoint.variables?.endpointId ?? null : null,
-                onResetFailures: (row) => resetEndpointFailures.mutate({ endpointId: row.id }),
-                resetPendingId: resetEndpointFailures.isPending ? resetEndpointFailures.variables?.endpointId ?? null : null,
-              })}
-              dataSource={endpointItems}
-              pagination={false}
-              size="small"
-              scroll={{ x: 1500 }}
-              style={{ marginTop: 12 }}
-            />
-            {nextCursor ? (
-              <div style={{ marginTop: 12 }}>
-                <Button onClick={() => loadMore.mutate(nextCursor)} loading={loadMore.isPending}>
-                  加载更多
-                </Button>
-              </div>
-            ) : null}
-            {loadMore.isError ? (
-              <Alert
-                type="error"
-                showIcon
-                message={loadMore.error instanceof Error ? loadMore.error.message : "加载更多失败"}
+        <QueryState
+          query={query}
+          errorMessage="加载代理节点失败"
+          empty={Boolean(query.data && endpointItems.length === 0 && !query.isFetching)}
+          emptyMessage="暂无代理节点"
+          emptyDescription="请先导入代理节点以启用代理路由。"
+        >
+          {query.data ? (
+            <>
+              {listRequestId ? <Typography.Text type="secondary">请求ID: {listRequestId}</Typography.Text> : null}
+              <Table<ProxyEndpointItem>
+                rowKey={(row) => row.id}
+                columns={columns({
+                  onToggleEnabled: (row) => updateEndpoint.mutate({ endpointId: row.id, enabled: !row.enabled }),
+                  updatePendingId: updateEndpoint.isPending ? updateEndpoint.variables?.endpointId ?? null : null,
+                  onResetFailures: (row) => resetEndpointFailures.mutate({ endpointId: row.id }),
+                  resetPendingId: resetEndpointFailures.isPending ? resetEndpointFailures.variables?.endpointId ?? null : null,
+                })}
+                dataSource={endpointItems}
+                pagination={false}
+                size="small"
+                scroll={{ x: 1500 }}
                 style={{ marginTop: 12 }}
               />
-            ) : null}
-          </>
-        )}
+              {nextCursor ? (
+                <div style={{ marginTop: 12 }}>
+                  <Button onClick={() => loadMore.mutate(nextCursor)} loading={loadMore.isPending}>
+                    加载更多
+                  </Button>
+                </div>
+              ) : null}
+              {loadMore.isError ? (
+                <Alert
+                  type="error"
+                  showIcon
+                  message={loadMore.error instanceof Error ? loadMore.error.message : "加载更多失败"}
+                  style={{ marginTop: 12 }}
+                />
+              ) : null}
+            </>
+          ) : null}
+        </QueryState>
       </Card>
     </Space>
   );

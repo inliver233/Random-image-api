@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { QueryState } from "../admin/QueryState";
 import { requestIdDescription } from "../admin/errors";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
@@ -345,25 +346,27 @@ export function ProxyPoolsPage() {
       />
 
       <Card title="代理池列表">
-        {pools.isLoading ? (
-          <Skeleton active />
-        ) : pools.isError ? (
-          <Alert type="error" showIcon message="加载代理池失败" description={requestIdDescription(pools.error)} />
-        ) : !pools.data || pools.data.items.length === 0 ? (
-          <Alert type="info" showIcon message="暂无代理池" description="请先创建一个代理池，然后为它配置代理节点。" />
-        ) : (
-          <>
-            <Typography.Text type="secondary">请求ID: {pools.data.request_id}</Typography.Text>
-            <Table<ProxyPoolItem>
-              rowKey={(row) => row.id}
-              columns={poolColumns}
-              dataSource={pools.data.items}
-              pagination={false}
-              size="small"
-              style={{ marginTop: 12 }}
-            />
-          </>
-        )}
+        <QueryState
+          query={pools}
+          errorMessage="加载代理池失败"
+          empty={Boolean(pools.data && pools.data.items.length === 0)}
+          emptyMessage="暂无代理池"
+          emptyDescription="请先创建一个代理池，然后为它配置代理节点。"
+        >
+          {pools.data ? (
+            <>
+              <Typography.Text type="secondary">请求ID: {pools.data.request_id}</Typography.Text>
+              <Table<ProxyPoolItem>
+                rowKey={(row) => row.id}
+                columns={poolColumns}
+                dataSource={pools.data.items}
+                pagination={false}
+                size="small"
+                style={{ marginTop: 12 }}
+              />
+            </>
+          ) : null}
+        </QueryState>
       </Card>
 
       <Modal

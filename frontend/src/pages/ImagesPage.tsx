@@ -1,11 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Popconfirm, Select, Skeleton, Space, Table, Tag, Typography } from "antd";
+import { Alert, Button, Card, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 import { useMemo, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
-import { requestIdDescription } from "../admin/errors";
+import { QueryState } from "../admin/QueryState";
 import { missingLabel } from "../admin/missingFields";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
@@ -335,44 +335,39 @@ export function ImagesPage() {
         requestIdPlacement="description"
       />
 
-      {query.isLoading ? (
-        <Skeleton active />
-      ) : query.isError ? (
-        <Alert
-          type="error"
-          showIcon
-          message="加载图片列表失败"
-          description={requestIdDescription(query.error)}
-        />
-      ) : !query.data ? (
-        <Skeleton active />
-      ) : items.length === 0 ? (
-        <Alert type="info" showIcon message="暂无图片" description="请先导入图片链接，或取消筛选条件。" />
-      ) : (
-        <Card>
-          {listRequestId ? <Typography.Text type="secondary">请求ID: {listRequestId}</Typography.Text> : null}
-          <Table<ImageItem>
-            rowKey={(row) => row.id}
-            columns={columns}
-            dataSource={items}
-            rowSelection={{
-              selectedRowKeys,
-              onChange: (keys) => setSelectedRowKeys(keys),
-            }}
-            pagination={false}
-            size="small"
-            scroll={{ x: 2000 }}
-            style={{ marginTop: 12 }}
-          />
-          {nextCursor ? (
-            <div style={{ marginTop: 12 }}>
-              <Button onClick={() => loadMore.mutate(nextCursor)} loading={loadMore.isPending}>
-                加载更多
-              </Button>
-            </div>
-          ) : null}
-        </Card>
-      )}
+      <QueryState
+        query={query}
+        errorMessage="加载图片列表失败"
+        empty={Boolean(query.data && items.length === 0)}
+        emptyMessage="暂无图片"
+        emptyDescription="请先导入图片链接，或取消筛选条件。"
+      >
+        {query.data ? (
+          <Card>
+            {listRequestId ? <Typography.Text type="secondary">请求ID: {listRequestId}</Typography.Text> : null}
+            <Table<ImageItem>
+              rowKey={(row) => row.id}
+              columns={columns}
+              dataSource={items}
+              rowSelection={{
+                selectedRowKeys,
+                onChange: (keys) => setSelectedRowKeys(keys),
+              }}
+              pagination={false}
+              size="small"
+              scroll={{ x: 2000 }}
+              style={{ marginTop: 12 }}
+            />
+            {nextCursor ? (
+              <div style={{ marginTop: 12 }}>
+                <Button onClick={() => loadMore.mutate(nextCursor)} loading={loadMore.isPending}>
+                  加载更多
+                </Button>
+              </div>
+            ) : null}
+          </Card>
+        ) : null}
+      </QueryState>
     </Space>
   );
 }

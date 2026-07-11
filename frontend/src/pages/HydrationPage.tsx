@@ -9,7 +9,6 @@ import {
   InputNumber,
   Row,
   Select,
-  Skeleton,
   Space,
   Table,
   Tag,
@@ -19,7 +18,8 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { requestIdDescription, requestIdWithMessageDescription } from "../admin/errors";
+import { QueryState } from "../admin/QueryState";
+import { requestIdWithMessageDescription } from "../admin/errors";
 import { jobStatusColor, jobStatusLabel } from "../admin/jobStatus";
 import { missingLabel } from "../admin/missingFields";
 import { apiJson } from "../api/client";
@@ -364,16 +364,7 @@ export function HydrationPage() {
       <Row gutter={[16, 16]}>
         <Col xs={24} md={12} xl={8}>
           <Card title="工作线程 / 队列">
-            {summary.isLoading ? (
-              <Skeleton active />
-            ) : summary.isError ? (
-              <Alert
-                type="error"
-                showIcon
-                message="加载总览失败"
-                description={requestIdDescription(summary.error)}
-              />
-            ) : (
+            <QueryState query={summary} errorMessage="加载总览失败">
               <Space direction="vertical">
                 <Typography.Text>工作线程心跳: {workerLastSeen || "（暂无）"}</Typography.Text>
                 <Typography.Text>等待任务: {pendingJobs}</Typography.Text>
@@ -384,7 +375,7 @@ export function HydrationPage() {
                   <Button size="small" onClick={() => runs.refetch()} loading={runs.isFetching}>刷新运行列表</Button>
                 </Space>
               </Space>
-            )}
+            </QueryState>
           </Card>
         </Col>
 
@@ -491,18 +482,13 @@ export function HydrationPage() {
       </Row>
 
       <Card title="元数据覆盖率统计">
-        {summary.isLoading ? (
-          <Skeleton active />
-        ) : summary.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="加载覆盖率统计失败"
-            description={requestIdDescription(summary.error)}
-          />
-        ) : enabledImagesTotal <= 0 ? (
-          <Alert type="info" showIcon message="暂无可用图片" description="请先导入图片链接后再查看覆盖率统计。" />
-        ) : (
+        <QueryState
+          query={summary}
+          errorMessage="加载覆盖率统计失败"
+          empty={Boolean(summary.data && enabledImagesTotal <= 0)}
+          emptyMessage="暂无可用图片"
+          emptyDescription="请先导入图片链接后再查看覆盖率统计。"
+        >
           <Table
             size="small"
             pagination={false}
@@ -520,7 +506,7 @@ export function HydrationPage() {
               return { key: opt.value, label: opt.label, missing, present, coverage };
             })}
           />
-        )}
+        </QueryState>
       </Card>
 
       {runAction.isError ? (
@@ -554,51 +540,46 @@ export function HydrationPage() {
           <Button onClick={() => runs.refetch()} loading={runs.isFetching}>刷新</Button>
         </Space>
 
-        {runs.isLoading ? (
-          <Skeleton active />
-        ) : runs.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="加载补全运行列表失败"
-            description={requestIdDescription(runs.error)}
-          />
-        ) : !runs.data ? (
-          <Skeleton active />
-        ) : runItems.length === 0 ? (
-          <Alert type="info" showIcon message="暂无补全任务" description="请先创建一个全量补全任务。" />
-        ) : (
-          <>
-            {runsRequestId ? <Typography.Text type="secondary">请求ID: {runsRequestId}</Typography.Text> : null}
-            <Table<HydrationRunItem>
-              rowKey={(row) => row.id}
-              columns={columns}
-              dataSource={runItems}
-              pagination={false}
-              size="small"
-              scroll={{ x: 1900 }}
-              style={{ marginTop: 12 }}
-            />
-            {runsNextCursor ? (
-              <div style={{ marginTop: 12 }}>
-                <Button onClick={() => loadMoreRuns.mutate(runsNextCursor)} loading={loadMoreRuns.isPending}>
-                  加载更多
-                </Button>
-              </div>
-            ) : null}
-            {loadMoreRuns.isError ? (
-              <Alert
-                type="error"
-                showIcon
+        <QueryState
+          query={runs}
+          errorMessage="加载补全运行列表失败"
+          empty={Boolean(runs.data && runItems.length === 0)}
+          emptyMessage="暂无补全任务"
+          emptyDescription="请先创建一个全量补全任务。"
+        >
+          {runs.data ? (
+            <>
+              {runsRequestId ? <Typography.Text type="secondary">请求ID: {runsRequestId}</Typography.Text> : null}
+              <Table<HydrationRunItem>
+                rowKey={(row) => row.id}
+                columns={columns}
+                dataSource={runItems}
+                pagination={false}
+                size="small"
+                scroll={{ x: 1900 }}
                 style={{ marginTop: 12 }}
-                message="加载更多失败"
-                description={
-                  requestIdWithMessageDescription(loadMoreRuns.error)
-                }
               />
-            ) : null}
-          </>
-        )}
+              {runsNextCursor ? (
+                <div style={{ marginTop: 12 }}>
+                  <Button onClick={() => loadMoreRuns.mutate(runsNextCursor)} loading={loadMoreRuns.isPending}>
+                    加载更多
+                  </Button>
+                </div>
+              ) : null}
+              {loadMoreRuns.isError ? (
+                <Alert
+                  type="error"
+                  showIcon
+                  style={{ marginTop: 12 }}
+                  message="加载更多失败"
+                  description={
+                    requestIdWithMessageDescription(loadMoreRuns.error)
+                  }
+                />
+              ) : null}
+            </>
+          ) : null}
+        </QueryState>
       </Card>
     </Space>
   );

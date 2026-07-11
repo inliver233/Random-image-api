@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Descriptions, Popconfirm, Progress, Skeleton, Space, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Popconfirm, Progress, Space, Typography } from "antd";
 import React from "react";
 import { useParams } from "react-router-dom";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
-import { requestIdDescription } from "../admin/errors";
+import { QueryState } from "../admin/QueryState";
 import { jobStatusLabel } from "../admin/jobStatus";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
@@ -102,16 +102,7 @@ export function ImportDetailPage() {
         requestIdPlacement="description"
       />
 
-      {query.isLoading ? (
-        <Skeleton active />
-      ) : query.isError ? (
-        <Alert
-          type="error"
-          showIcon
-          message="加载导入详情失败"
-          description={requestIdDescription(query.error)}
-        />
-      ) : (
+      <QueryState query={query} errorMessage="加载导入详情失败">
         <>
           <Typography.Text type="secondary">请求ID: {query.data?.request_id}</Typography.Text>
 
@@ -239,7 +230,7 @@ export function ImportDetailPage() {
             </pre>
           </Card>
         </>
-      )}
+      </QueryState>
     </Space>
   );
 }

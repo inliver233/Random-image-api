@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Descriptions, Drawer, Select, Skeleton, Space, Typography } from "antd";
+import { Button, Card, Descriptions, Drawer, Select, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React, { useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
 import { CursorTableCard } from "../admin/CursorTableCard";
-import { requestIdDescription } from "../admin/errors";
+import { QueryState } from "../admin/QueryState";
 import { jobStatusLabel, jobStatusTag, jobTypeLabel } from "../admin/jobStatus";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
@@ -235,45 +235,36 @@ export function JobsPage() {
         title={detailJobId ? `任务详情 #${detailJobId}` : "任务详情"}
         width={720}
       >
-        {jobDetail.isLoading ? (
-          <Skeleton active />
-        ) : jobDetail.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="加载任务详情失败"
-            description={requestIdDescription(jobDetail.error)}
-          />
-        ) : !jobDetail.data ? (
-          <Skeleton active />
-        ) : (
-          <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-            <Typography.Text type="secondary">请求ID: {jobDetail.data.request_id}</Typography.Text>
-            <Descriptions size="small" column={2} bordered>
-              <Descriptions.Item label="任务ID">#{jobDetail.data.item.id}</Descriptions.Item>
-              <Descriptions.Item label="类型">{jobTypeLabel(jobDetail.data.item.type)}</Descriptions.Item>
-              <Descriptions.Item label="状态">{jobStatusLabel(jobDetail.data.item.status)}</Descriptions.Item>
-              <Descriptions.Item label="优先级">{jobDetail.data.item.priority}</Descriptions.Item>
-              <Descriptions.Item label="重试次数">{`${jobDetail.data.item.attempt} / ${jobDetail.data.item.max_attempts}`}</Descriptions.Item>
-              <Descriptions.Item label="下次执行">{jobDetail.data.item.run_after || "-"}</Descriptions.Item>
-              <Descriptions.Item label="锁定者">{jobDetail.data.item.locked_by || "-"}</Descriptions.Item>
-              <Descriptions.Item label="锁定时间">{jobDetail.data.item.locked_at || "-"}</Descriptions.Item>
-              <Descriptions.Item label="引用类型">{jobDetail.data.item.ref_type || "-"}</Descriptions.Item>
-              <Descriptions.Item label="引用ID">{jobDetail.data.item.ref_id || "-"}</Descriptions.Item>
-              <Descriptions.Item label="创建时间">{jobDetail.data.item.created_at}</Descriptions.Item>
-              <Descriptions.Item label="更新时间">{jobDetail.data.item.updated_at}</Descriptions.Item>
-              <Descriptions.Item label="错误信息" span={2}>
-                {jobDetail.data.item.last_error || "-"}
-              </Descriptions.Item>
-            </Descriptions>
+        <QueryState query={jobDetail} errorMessage="加载任务详情失败">
+          {jobDetail.data ? (
+            <Space direction="vertical" size="middle" style={{ width: "100%" }}>
+              <Typography.Text type="secondary">请求ID: {jobDetail.data.request_id}</Typography.Text>
+              <Descriptions size="small" column={2} bordered>
+                <Descriptions.Item label="任务ID">#{jobDetail.data.item.id}</Descriptions.Item>
+                <Descriptions.Item label="类型">{jobTypeLabel(jobDetail.data.item.type)}</Descriptions.Item>
+                <Descriptions.Item label="状态">{jobStatusLabel(jobDetail.data.item.status)}</Descriptions.Item>
+                <Descriptions.Item label="优先级">{jobDetail.data.item.priority}</Descriptions.Item>
+                <Descriptions.Item label="重试次数">{`${jobDetail.data.item.attempt} / ${jobDetail.data.item.max_attempts}`}</Descriptions.Item>
+                <Descriptions.Item label="下次执行">{jobDetail.data.item.run_after || "-"}</Descriptions.Item>
+                <Descriptions.Item label="锁定者">{jobDetail.data.item.locked_by || "-"}</Descriptions.Item>
+                <Descriptions.Item label="锁定时间">{jobDetail.data.item.locked_at || "-"}</Descriptions.Item>
+                <Descriptions.Item label="引用类型">{jobDetail.data.item.ref_type || "-"}</Descriptions.Item>
+                <Descriptions.Item label="引用ID">{jobDetail.data.item.ref_id || "-"}</Descriptions.Item>
+                <Descriptions.Item label="创建时间">{jobDetail.data.item.created_at}</Descriptions.Item>
+                <Descriptions.Item label="更新时间">{jobDetail.data.item.updated_at}</Descriptions.Item>
+                <Descriptions.Item label="错误信息" span={2}>
+                  {jobDetail.data.item.last_error || "-"}
+                </Descriptions.Item>
+              </Descriptions>
 
-            <Card size="small" title="任务参数（结构化）">
-              <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                {JSON.stringify(jobDetail.data.item.payload, null, 2)}
-              </pre>
-            </Card>
-          </Space>
-        )}
+              <Card size="small" title="任务参数（结构化）">
+                <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {JSON.stringify(jobDetail.data.item.payload, null, 2)}
+                </pre>
+              </Card>
+            </Space>
+          ) : null}
+        </QueryState>
       </Drawer>
     </Space>
   );

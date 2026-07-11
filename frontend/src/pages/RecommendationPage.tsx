@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, InputNumber, Select, Skeleton, Space, Switch, Typography } from "antd";
+import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, Typography } from "antd";
 import React, { useEffect, useMemo, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
-import { requestIdDescription } from "../admin/errors";
+import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 
@@ -353,185 +353,176 @@ export function RecommendationPage() {
         errorRequestId={saveAlerts.errorRequestId}
       />
 
-      {query.isLoading ? (
-        <Skeleton active />
-      ) : query.isError ? (
-        <Alert
-          type="error"
-          showIcon
-          message="加载设置失败"
-          description={requestIdDescription(query.error)}
-        />
-      ) : !query.data ? (
-        <Skeleton active />
-      ) : (
-        <Card>
-          <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
-          <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
-            <Typography.Title level={5} style={{ marginTop: 12 }}>
-              选择路径
-            </Typography.Title>
-            <Form.Item label="默认随机策略" name="random_strategy">
-              <Select
-                options={[
-                  { value: "quality", label: "质量优先（推荐）" },
-                  { value: "random", label: "纯随机（random_key）" },
-                ]}
-                style={{ maxWidth: 360 }}
-              />
-            </Form.Item>
-            <Form.Item
-              label="质量抽样数量（quality_samples）"
-              name="random_quality_samples"
-              extra="质量优先会先抽样 N 张候选再按评分挑选，N 越大越偏向高分，但每次请求会读取并评分更多候选。建议 3~50；自动扩样上限 64，查询/设置硬上限 200。"
-            >
-              <InputNumber min={1} max={200} style={{ width: 240 }} />
-            </Form.Item>
-            <Form.Item label="质量选择模式（pick_mode）" name="pick_mode" extra="best 更偏向稳定返回高分；weighted 更随机但仍偏向高分。">
-              <Select
-                options={[
-                  { value: "weighted", label: "加权随机（weighted）" },
-                  { value: "best", label: "直接取最高分（best）" },
-                ]}
-                style={{ maxWidth: 360 }}
-              />
-            </Form.Item>
-            <Form.Item label="随机温度（temperature）" name="temperature" extra="越小越趋近“只挑最高分”，越大越接近随机。建议 0.3~3。">
-              <InputNumber min={0.05} max={100} step={0.05} style={{ width: 240 }} />
-            </Form.Item>
-
-            <Typography.Title level={5} style={{ marginTop: 12 }}>
-              全局防重复（dedup）
-            </Typography.Title>
-            <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-              开启后，同一张图片在窗口期内会尽量不重复返回（进程内 best-effort；严格模式可禁止回退重复）。
-            </Typography.Paragraph>
-            <Space wrap align="start">
-              <Form.Item label="启用" name="dedup_enabled" valuePropName="checked">
-                <Switch />
-              </Form.Item>
-              <Form.Item label="窗口（秒）" name="dedup_window_s" extra="例如 1200 表示 20 分钟。">
-                <InputNumber min={0} max={24 * 60 * 60} step={10} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="最大图片缓存" name="dedup_max_images">
-                <InputNumber min={1} max={200000} step={100} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="最大作者缓存" name="dedup_max_authors">
-                <InputNumber min={1} max={200000} step={50} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="严格模式" name="dedup_strict" valuePropName="checked" extra="开启后，当窗口内无可用图时不会回退重复。">
-                <Switch />
-              </Form.Item>
-              <Form.Item label="图片重复惩罚" name="dedup_image_penalty">
-                <InputNumber min={0} max={1000} step={0.5} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="作者重复惩罚" name="dedup_author_penalty">
-                <InputNumber min={0} max={1000} step={0.5} style={{ width: 240 }} />
-              </Form.Item>
-            </Space>
-
-            <Typography.Title level={5} style={{ marginTop: 12 }}>
-              评分公式（score_weights）
-            </Typography.Title>
-            <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-              <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{qualityFormulaText}</pre>
-            </Typography.Paragraph>
-            <Space wrap>
-              <Form.Item label="收藏权重（bookmark）" name="w_bookmark">
-                <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="浏览权重（view）" name="w_view">
-                <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="评论权重（comment）" name="w_comment">
-                <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="分辨率权重（pixels）" name="w_pixels">
-                <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="收藏率权重（bookmark_rate）" name="w_bookmark_rate">
-                <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="新鲜度权重（freshness）" name="w_freshness" extra="时间衰减（loss）：-w * (age_days/half_life)，越老越扣分。">
-                <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="新鲜度半衰期（天）" name="freshness_half_life_days" extra="半衰期越小，衰减越强。">
-                <InputNumber min={0.1} max={3650} step={0.5} style={{ width: 240 }} />
+      <QueryState query={query} errorMessage="加载设置失败">
+        {query.data ? (
+          <Card>
+            <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
+            <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
+              <Typography.Title level={5} style={{ marginTop: 12 }}>
+                选择路径
+              </Typography.Title>
+              <Form.Item label="默认随机策略" name="random_strategy">
+                <Select
+                  options={[
+                    { value: "quality", label: "质量优先（推荐）" },
+                    { value: "random", label: "纯随机（random_key）" },
+                  ]}
+                  style={{ maxWidth: 360 }}
+                />
               </Form.Item>
               <Form.Item
-                label="收藏增长率权重（bookmark_velocity）"
-                name="w_bookmark_velocity"
-                extra="ln(1 + bookmark_count/(age_days + smooth_days))，帮助“好看的新图”被选中。"
+                label="质量抽样数量（quality_samples）"
+                name="random_quality_samples"
+                extra="质量优先会先抽样 N 张候选再按评分挑选，N 越大越偏向高分，但每次请求会读取并评分更多候选。建议 3~50；自动扩样上限 64，查询/设置硬上限 200。"
               >
-                <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
+                <InputNumber min={1} max={200} style={{ width: 240 }} />
               </Form.Item>
-              <Form.Item label="增长率平滑（天）" name="velocity_smooth_days" extra="值越大，越不容易因为“刚发布”而爆表。">
-                <InputNumber min={0} max={3650} step={0.5} style={{ width: 240 }} />
+              <Form.Item label="质量选择模式（pick_mode）" name="pick_mode" extra="best 更偏向稳定返回高分；weighted 更随机但仍偏向高分。">
+                <Select
+                  options={[
+                    { value: "weighted", label: "加权随机（weighted）" },
+                    { value: "best", label: "直接取最高分（best）" },
+                  ]}
+                  style={{ maxWidth: 360 }}
+                />
               </Form.Item>
-            </Space>
+              <Form.Item label="随机温度（temperature）" name="temperature" extra="越小越趋近“只挑最高分”，越大越接近随机。建议 0.3~3。">
+                <InputNumber min={0.05} max={100} step={0.05} style={{ width: 240 }} />
+              </Form.Item>
 
-            <Typography.Title level={5} style={{ marginTop: 12 }}>
-              类别倍率（multipliers）
-            </Typography.Title>
-            <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-              提示：倍率=0 会直接剔除该类别；倍率越大，被选中的概率越高。建议范围 0~3（通常不需要很大）。
-            </Typography.Paragraph>
-            <Space wrap>
-              <Form.Item label="AI（ai_type=1）" name="m_ai">
-                <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="非 AI（ai_type=0）" name="m_non_ai">
-                <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="未知 AI（ai_type=NULL）" name="m_unknown_ai">
-                <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="插画（illust_type=0）" name="m_illust">
-                <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="漫画（illust_type=1）" name="m_manga">
-                <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="动图（illust_type=2）" name="m_ugoira">
-                <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
-              </Form.Item>
-              <Form.Item label="未知类型（illust_type=NULL）" name="m_unknown_illust_type">
-                <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
-              </Form.Item>
-            </Space>
+              <Typography.Title level={5} style={{ marginTop: 12 }}>
+                全局防重复（dedup）
+              </Typography.Title>
+              <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+                开启后，同一张图片在窗口期内会尽量不重复返回（进程内 best-effort；严格模式可禁止回退重复）。
+              </Typography.Paragraph>
+              <Space wrap align="start">
+                <Form.Item label="启用" name="dedup_enabled" valuePropName="checked">
+                  <Switch />
+                </Form.Item>
+                <Form.Item label="窗口（秒）" name="dedup_window_s" extra="例如 1200 表示 20 分钟。">
+                  <InputNumber min={0} max={24 * 60 * 60} step={10} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="最大图片缓存" name="dedup_max_images">
+                  <InputNumber min={1} max={200000} step={100} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="最大作者缓存" name="dedup_max_authors">
+                  <InputNumber min={1} max={200000} step={50} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="严格模式" name="dedup_strict" valuePropName="checked" extra="开启后，当窗口内无可用图时不会回退重复。">
+                  <Switch />
+                </Form.Item>
+                <Form.Item label="图片重复惩罚" name="dedup_image_penalty">
+                  <InputNumber min={0} max={1000} step={0.5} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="作者重复惩罚" name="dedup_author_penalty">
+                  <InputNumber min={0} max={1000} step={0.5} style={{ width: 240 }} />
+                </Form.Item>
+              </Space>
 
-            <Typography.Title level={5} style={{ marginTop: 12 }}>
-              预览（/random）
-            </Typography.Title>
-            <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-              预览使用的是“已保存并生效”的配置（不是未保存的草稿）。建议先保存，再预览。
-            </Typography.Paragraph>
-            <Space wrap align="end">
-              <Form.Item label="种子（可选）" name="preview_seed">
-                <Input placeholder="例如: demo-seed-1" style={{ width: 280 }} />
-              </Form.Item>
-              <Button onClick={() => preview.mutate(form.getFieldsValue(true))} loading={preview.isPending}>
-                预览一次随机结果
-              </Button>
-            </Space>
+              <Typography.Title level={5} style={{ marginTop: 12 }}>
+                评分公式（score_weights）
+              </Typography.Title>
+              <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+                <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{qualityFormulaText}</pre>
+              </Typography.Paragraph>
+              <Space wrap>
+                <Form.Item label="收藏权重（bookmark）" name="w_bookmark">
+                  <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="浏览权重（view）" name="w_view">
+                  <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="评论权重（comment）" name="w_comment">
+                  <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="分辨率权重（pixels）" name="w_pixels">
+                  <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="收藏率权重（bookmark_rate）" name="w_bookmark_rate">
+                  <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="新鲜度权重（freshness）" name="w_freshness" extra="时间衰减（loss）：-w * (age_days/half_life)，越老越扣分。">
+                  <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="新鲜度半衰期（天）" name="freshness_half_life_days" extra="半衰期越小，衰减越强。">
+                  <InputNumber min={0.1} max={3650} step={0.5} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item
+                  label="收藏增长率权重（bookmark_velocity）"
+                  name="w_bookmark_velocity"
+                  extra="ln(1 + bookmark_count/(age_days + smooth_days))，帮助“好看的新图”被选中。"
+                >
+                  <InputNumber min={-100} max={100} step={0.1} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="增长率平滑（天）" name="velocity_smooth_days" extra="值越大，越不容易因为“刚发布”而爆表。">
+                  <InputNumber min={0} max={3650} step={0.5} style={{ width: 240 }} />
+                </Form.Item>
+              </Space>
 
-            {preview.isPending ? <Alert type="info" showIcon message="正在预览..." /> : null}
-            <ActionAlerts
-              message={previewAlerts.message}
-              requestId={previewAlerts.requestId}
-              errorMessage={previewAlerts.errorMessage}
-              errorRequestId={previewAlerts.errorRequestId}
-              requestIdPlacement="secondary"
-            />
-            {previewUrl ? <Typography.Text type="secondary">请求链接: {previewUrl}</Typography.Text> : null}
-            {previewBody ? (
-              <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                {JSON.stringify(previewBody, null, 2)}
-              </pre>
-            ) : null}
-          </Form>
-        </Card>
-      )}
+              <Typography.Title level={5} style={{ marginTop: 12 }}>
+                类别倍率（multipliers）
+              </Typography.Title>
+              <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+                提示：倍率=0 会直接剔除该类别；倍率越大，被选中的概率越高。建议范围 0~3（通常不需要很大）。
+              </Typography.Paragraph>
+              <Space wrap>
+                <Form.Item label="AI（ai_type=1）" name="m_ai">
+                  <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="非 AI（ai_type=0）" name="m_non_ai">
+                  <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="未知 AI（ai_type=NULL）" name="m_unknown_ai">
+                  <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="插画（illust_type=0）" name="m_illust">
+                  <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="漫画（illust_type=1）" name="m_manga">
+                  <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="动图（illust_type=2）" name="m_ugoira">
+                  <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
+                </Form.Item>
+                <Form.Item label="未知类型（illust_type=NULL）" name="m_unknown_illust_type">
+                  <InputNumber min={0} max={100} step={0.05} style={{ width: 240 }} />
+                </Form.Item>
+              </Space>
+
+              <Typography.Title level={5} style={{ marginTop: 12 }}>
+                预览（/random）
+              </Typography.Title>
+              <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+                预览使用的是“已保存并生效”的配置（不是未保存的草稿）。建议先保存，再预览。
+              </Typography.Paragraph>
+              <Space wrap align="end">
+                <Form.Item label="种子（可选）" name="preview_seed">
+                  <Input placeholder="例如: demo-seed-1" style={{ width: 280 }} />
+                </Form.Item>
+                <Button onClick={() => preview.mutate(form.getFieldsValue(true))} loading={preview.isPending}>
+                  预览一次随机结果
+                </Button>
+              </Space>
+
+              {preview.isPending ? <Alert type="info" showIcon message="正在预览..." /> : null}
+              <ActionAlerts
+                message={previewAlerts.message}
+                requestId={previewAlerts.requestId}
+                errorMessage={previewAlerts.errorMessage}
+                errorRequestId={previewAlerts.errorRequestId}
+                requestIdPlacement="secondary"
+              />
+              {previewUrl ? <Typography.Text type="secondary">请求链接: {previewUrl}</Typography.Text> : null}
+              {previewBody ? (
+                <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {JSON.stringify(previewBody, null, 2)}
+                </pre>
+              ) : null}
+            </Form>
+          </Card>
+        ) : null}
+      </QueryState>
     </Space>
   );
 }

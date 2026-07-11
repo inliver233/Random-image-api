@@ -3,6 +3,7 @@ import { Alert, Button, Card, Col, Row, Skeleton, Space, Typography } from "antd
 import React from "react";
 import { useNavigate } from "react-router-dom";
 
+import { QueryState } from "../admin/QueryState";
 import { requestIdDescription, requestIdWithMessageDescription } from "../admin/errors";
 import { apiJson } from "../api/client";
 
@@ -179,38 +180,20 @@ export function DashboardPage() {
       <Row gutter={[16, 16]}>
         <Col xs={24} md={12} xl={6}>
           <Card title="工作线程 / 队列">
-            {summary.isLoading ? (
-              <Skeleton active />
-            ) : summary.isError ? (
-              <Alert
-                type="error"
-                showIcon
-                message="加载总览失败"
-                description={requestIdDescription(summary.error)}
-              />
-            ) : (
+            <QueryState query={summary} errorMessage="加载总览失败">
               <Space direction="vertical">
                 <Typography.Text>工作线程心跳: {workerLastSeenAt || "（暂无）"}</Typography.Text>
                 <Typography.Text>等待任务: {pendingJobs}</Typography.Text>
                 <Typography.Text>运行任务: {runningJobs}</Typography.Text>
                 <Typography.Text>失败任务: {failedJobsTotal}</Typography.Text>
               </Space>
-            )}
+            </QueryState>
           </Card>
         </Col>
 
         <Col xs={24} md={12} xl={6}>
           <Card title="图片">
-            {summary.isLoading ? (
-              <Skeleton active />
-            ) : summary.isError ? (
-              <Alert
-                type="error"
-                showIcon
-                message="加载总览失败"
-                description={requestIdDescription(summary.error)}
-              />
-            ) : (
+            <QueryState query={summary} errorMessage="加载总览失败">
               <Space direction="vertical">
                 <Typography.Text>总数: {imageCount}</Typography.Text>
                 <Typography.Text>启用: {imageEnabledCount}</Typography.Text>
@@ -218,22 +201,13 @@ export function DashboardPage() {
                   打开图片列表
                 </Button>
               </Space>
-            )}
+            </QueryState>
           </Card>
         </Col>
 
         <Col xs={24} md={12} xl={6}>
           <Card title="令牌">
-            {summary.isLoading ? (
-              <Skeleton active />
-            ) : summary.isError ? (
-              <Alert
-                type="error"
-                showIcon
-                message="加载总览失败"
-                description={requestIdDescription(summary.error)}
-              />
-            ) : (
+            <QueryState query={summary} errorMessage="加载总览失败">
               <Space direction="vertical">
                 <Typography.Text>总数: {tokenCount}</Typography.Text>
                 <Typography.Text>启用: {tokenEnabledCount}</Typography.Text>
@@ -241,7 +215,7 @@ export function DashboardPage() {
                   打开令牌列表
                 </Button>
               </Space>
-            )}
+            </QueryState>
           </Card>
         </Col>
 
@@ -282,70 +256,43 @@ export function DashboardPage() {
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
         <Col xs={24} md={12} xl={8}>
           <Card title="随机接口（/random）统计">
-            {randomStats.isLoading ? (
-              <Skeleton active />
-            ) : randomStats.isError ? (
-              <Alert
-                type="error"
-                showIcon
-                message="加载随机统计失败"
-                description={requestIdDescription(randomStats.error)}
-              />
-            ) : !randomStats.data ? (
-              <Skeleton active />
-            ) : (
-              <Space direction="vertical">
-                <Typography.Text>总请求: {totalRequests}</Typography.Text>
-                <Typography.Text>
-                  总成功/失败: {totalOk}/{totalError}
-                </Typography.Text>
-                <Typography.Text>
-                  近 1 分钟请求: {lastWindowRequests}（成功/失败: {lastWindowOk}/{lastWindowError}）
-                </Typography.Text>
-                <Typography.Text>近 1 分钟成功率: {(lastWindowSuccessRate * 100).toFixed(1)}%</Typography.Text>
-                <Typography.Text>当前并发（in-flight）: {inFlight}</Typography.Text>
-                <Typography.Text type="secondary">请求ID: {randomStats.data.request_id}</Typography.Text>
-              </Space>
-            )}
+            <QueryState query={randomStats} errorMessage="加载随机统计失败">
+              {randomStats.data ? (
+                <Space direction="vertical">
+                  <Typography.Text>总请求: {totalRequests}</Typography.Text>
+                  <Typography.Text>
+                    总成功/失败: {totalOk}/{totalError}
+                  </Typography.Text>
+                  <Typography.Text>
+                    近 1 分钟请求: {lastWindowRequests}（成功/失败: {lastWindowOk}/{lastWindowError}）
+                  </Typography.Text>
+                  <Typography.Text>近 1 分钟成功率: {(lastWindowSuccessRate * 100).toFixed(1)}%</Typography.Text>
+                  <Typography.Text>当前并发（in-flight）: {inFlight}</Typography.Text>
+                  <Typography.Text type="secondary">请求ID: {randomStats.data.request_id}</Typography.Text>
+                </Space>
+              ) : null}
+            </QueryState>
           </Card>
         </Col>
 
         <Col xs={24} md={12} xl={8}>
           <Card title="版本信息">
-            {version.isLoading ? (
-              <Skeleton active />
-            ) : version.isError ? (
-              <Alert
-                type="error"
-                showIcon
-                message="加载版本信息失败"
-                description={requestIdDescription(version.error)}
-              />
-            ) : !version.data ? (
-              <Skeleton active />
-            ) : (
-              <Space direction="vertical">
-                <Typography.Text>版本: {version.data.version || "（未知）"}</Typography.Text>
-                <Typography.Text>构建时间: {version.data.build_time || "（未设置）"}</Typography.Text>
-                <Typography.Text>提交: {version.data.git_commit || "（未设置）"}</Typography.Text>
-                <Typography.Text type="secondary">请求ID: {version.data.request_id}</Typography.Text>
-              </Space>
-            )}
+            <QueryState query={version} errorMessage="加载版本信息失败">
+              {version.data ? (
+                <Space direction="vertical">
+                  <Typography.Text>版本: {version.data.version || "（未知）"}</Typography.Text>
+                  <Typography.Text>构建时间: {version.data.build_time || "（未设置）"}</Typography.Text>
+                  <Typography.Text>提交: {version.data.git_commit || "（未设置）"}</Typography.Text>
+                  <Typography.Text type="secondary">请求ID: {version.data.request_id}</Typography.Text>
+                </Space>
+              ) : null}
+            </QueryState>
           </Card>
         </Col>
 
         <Col xs={24} md={12} xl={8}>
           <Card title="失败任务（最近10条）">
-            {failedJobs.isLoading ? (
-              <Skeleton active />
-            ) : failedJobs.isError ? (
-              <Alert
-                type="error"
-                showIcon
-                message="加载任务失败"
-                description={requestIdDescription(failedJobs.error)}
-              />
-            ) : (
+            <QueryState query={failedJobs} errorMessage="加载任务失败">
               <Space direction="vertical" style={{ width: "100%" }}>
                 <Typography.Text>数量: {failedJobCount}</Typography.Text>
                 {failedJobCount === 0 ? (
@@ -380,7 +327,7 @@ export function DashboardPage() {
                   打开任务页
                 </Button>
               </Space>
-            )}
+            </QueryState>
           </Card>
         </Col>
       </Row>
