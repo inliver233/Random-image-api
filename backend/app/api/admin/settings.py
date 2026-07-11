@@ -452,16 +452,11 @@ async def update_settings(
                     key = str(k or "").strip().lower().strip(".")
                     if not key or len(key) > 200:
                         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid proxy.route_pools", status_code=400)
-                    try:
-                        pool_id = int(v)
-                    except Exception as exc:
-                        raise ApiError(
-                            code=ErrorCode.BAD_REQUEST,
-                            message="Invalid proxy.route_pools",
-                            status_code=400,
-                        ) from exc
-                    if pool_id <= 0:
-                        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid proxy.route_pools", status_code=400)
+                    pool_id = parse_positive_int(
+                        v,
+                        field="route_pools",
+                        invalid_message="Invalid proxy.route_pools",
+                    )
                     route_pools[key] = int(pool_id)
                 updates.append(("proxy.route_pools", route_pools))
 

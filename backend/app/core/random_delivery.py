@@ -11,8 +11,7 @@ from fastapi.responses import RedirectResponse
 from app.core.errors import ApiError, ErrorCode
 from app.core.http_stream import stream_url
 from app.core.image_edge import resolve_image_edge_redirect_url
-from app.core.proxy_routing import select_proxy_uri_for_url
-from app.core.pximg_reverse_proxy import rewrite_pximg_to_mirror
+from app.core.origin_stream import prepare_origin_stream
 from app.core.recent_dedup import record_recent
 from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.time import iso_utc_ms
@@ -132,7 +131,6 @@ async def deliver_random_image_stream(
                 break
             image_id = int(image.id)
             origin_url = str(image.original_url)
-            source_url = rewrite_pximg_to_mirror(origin_url, mirror_host=mirror_host) if use_pixiv_cat else origin_url
             illust_id_for_hydrate = int(image.illust_id)
             needs_hydrate = needs_opportunistic_hydrate(image)
             should_mark_ok = should_mark_image_ok(image)
@@ -161,11 +159,14 @@ async def deliver_random_image_stream(
                     background_tasks,
                 )
 
-        proxy_uri = None
-        if not use_pixiv_cat:
-            picked = await select_proxy_uri_for_url(engine, settings, runtime, url=origin_url)
-            if picked is not None:
-                proxy_uri = picked.uri
+        source_url, proxy_uri = await prepare_origin_stream(
+            engine=engine,
+            settings=settings,
+            runtime=runtime,
+            origin_url=origin_url,
+            use_mirror=bool(use_pixiv_cat),
+            mirror_host=mirror_host,
+        )
         try:
             resp = await stream_url(
                 source_url,

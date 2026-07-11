@@ -7,9 +7,8 @@ from fastapi.responses import RedirectResponse
 
 from app.core.http_stream import stream_url
 from app.core.image_edge import resolve_image_edge_redirect_url
+from app.core.origin_stream import prepare_origin_stream
 from app.core.proxy_mirror import resolve_proxy_mirror
-from app.core.proxy_routing import select_proxy_uri_for_url
-from app.core.pximg_reverse_proxy import rewrite_pximg_to_mirror
 from app.core.random_delivery import (
     attach_background,
     best_effort,
@@ -101,21 +100,14 @@ async def deliver_known_image(
     # Caller already decided use_pixiv_cat; keep it authoritative for stream source.
     mirror_host = proxy_override or pximg_mirror_host_override or resolved.mirror_host
     use_mirror = bool(use_pixiv_cat) or bool(proxy_override)
-    proxy_uri = None
-    source_url = (
-        rewrite_pximg_to_mirror(str(image.original_url), mirror_host=mirror_host)
-        if use_mirror
-        else str(image.original_url)
+    source_url, proxy_uri = await prepare_origin_stream(
+        engine=engine,
+        settings=settings,
+        runtime=runtime,
+        origin_url=str(image.original_url),
+        use_mirror=use_mirror,
+        mirror_host=mirror_host,
     )
-    if not use_mirror:
-        picked = await select_proxy_uri_for_url(
-            engine,
-            settings,
-            runtime,
-            url=str(image.original_url),
-        )
-        if picked is not None:
-            proxy_uri = picked.uri
 
     transport = getattr(request.app.state, "httpx_transport", None)
     shared_client = getattr(request.app.state, "httpx_client", None)
