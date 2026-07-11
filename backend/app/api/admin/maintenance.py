@@ -12,6 +12,7 @@ from app.core.admin_json import admin_ok
 from app.core.admin_request import load_json_object_optional, load_json_object, parse_bool, parse_int_in_range
 from app.core.cf_api_proxy import load_cf_api_proxy_config_from_settings
 from app.core.image_edge import load_image_edge_config_from_settings
+from app.core.r2_prewarm import r2_prewarm_enabled, r2_prewarm_url
 from app.core.random_defaults import resolve_fail_cooldown_ms, resolve_r18_strict
 from app.core.random_engine_client import engine_filter_count, engine_health, random_engine_base_url
 from app.core.random_engine_pick import build_engine_filters
@@ -173,6 +174,51 @@ async def cf_api_proxy_status(
             "base_urls": list(cfg.base_urls) if cfg is not None else list(raw_bases),
             "base_url_count": len(cfg.base_urls) if cfg is not None else len(raw_bases),
             "has_secret": bool(secret),
+            "missing": missing,
+        },
+        request_id=rid,
+    )
+
+
+@router.get("/maintenance/r2-prewarm")
+async def r2_prewarm_status(
+    request: Request,
+    _claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    """Read-only R2 prewarm webhook status (never returns full secrets).
+
+    BFF best-effort POST of image_ids after hydrate/import/heal when enabled.
+    Worker R2 binding / R2_MODE is separate (edge/img-worker).
+    """
+    _ = _claims
+    rid = get_or_create_request_id(request)
+    settings = getattr(request.app.state, "settings", None)
+    flag_enabled = bool(getattr(settings, "r2_prewarm_enabled", False)) if settings is not None else False
+    raw_url = str(getattr(settings, "r2_prewarm_url", "") or "").strip() if settings is not None else ""
+    ready = r2_prewarm_enabled(settings) if settings is not None else False
+    url = r2_prewarm_url(settings) if settings is not None else None
+    missing: list[str] = []
+    if not flag_enabled:
+        missing.append("R2_PREWARM_ENABLED")
+    if not raw_url:
+        missing.append("R2_PREWARM_URL")
+    # Never return the full URL if it embeds credentials; only host-ish preview.
+    url_preview = ""
+    if url:
+        try:
+            from urllib.parse import urlparse
+
+            p = urlparse(url)
+            url_preview = f"{p.scheme}://{p.netloc}" if p.netloc else url[:48]
+        except Exception:
+            url_preview = url[:48]
+    return admin_ok(
+        request,
+        payload={
+            "enabled_flag": flag_enabled,
+            "ready": ready,
+            "url_configured": bool(raw_url),
+            "url_preview": url_preview,
             "missing": missing,
         },
         request_id=rid,

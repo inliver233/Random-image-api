@@ -16,8 +16,15 @@ ERROR_CACHE_TTL_SECONDS = "30"
 ORIGIN_403_CIRCUIT_THRESHOLD = "8"
 ORIGIN_403_CIRCUIT_WINDOW_MS = "60000"
 ORIGIN_403_CIRCUIT_OPEN_MS = "30000"
+# R2 modes when [[r2_buckets]] is bound: off | read_through (default) | r2_only
+R2_MODE = "read_through"
 # Rotation: put previous secret via `wrangler secret put IMAGE_EDGE_SECRET_PREVIOUS`
-# (not in [vars]; never commit secrets).
+# Prewarm auth: `wrangler secret put PREWARM_SECRET` (falls back to IMAGE_EDGE_SECRET)
+
+# Optional R2 Mode B2 (uncomment + create bucket before deploy):
+# [[r2_buckets]]
+# binding = "R2"
+# bucket_name = "random-image-pximg"
 
 # Optional custom domain (configure in dashboard or routes):
 # routes = [{ pattern = "img.example.com/*", zone_name = "example.com" }]

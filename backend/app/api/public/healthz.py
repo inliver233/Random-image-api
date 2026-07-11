@@ -151,6 +151,16 @@ async def healthz(request: Request) -> Any:
                 "base_url_count": len(cf_api_cfg.base_urls) if cf_api_cfg is not None else 0,
                 "has_secret": bool(cf_api_cfg.secret) if cf_api_cfg is not None else False,
             },
+            "r2_prewarm": {
+                "enabled_flag": bool(getattr(settings, "r2_prewarm_enabled", False)) if settings is not None else False,
+                "ready": bool(getattr(settings, "r2_prewarm_enabled", False))
+                and bool(str(getattr(settings, "r2_prewarm_url", "") or "").strip())
+                if settings is not None
+                else False,
+                "url_configured": bool(str(getattr(settings, "r2_prewarm_url", "") or "").strip())
+                if settings is not None
+                else False,
+            },
             "random_engine": {
                 "url_configured": bool(engine_url),
                 "enabled": bool(getattr(settings, "random_engine_enabled", False)) if settings is not None else False,

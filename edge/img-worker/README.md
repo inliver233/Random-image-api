@@ -71,15 +71,47 @@ npx wrangler secret put IMAGE_EDGE_SECRET_PREVIOUS # 旧
    或兼容单值：`FALLBACK_MIRROR_HOST=i.pixiv.re`
 2. 成功响应带 `X-Edge-Via` 标明实际出站 host
 3. 软熔断：连续 origin 403 达阈值后短时跳过 origin，直连镜像链（`X-Edge-Circuit: origin-open`）
-4. 或切换 R2 预取模式（后续迭代）
+4. 切换 R2 模式（可选）：
+
+```toml
+# wrangler.toml
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "random-image-pximg"
+```
+
+```
+R2_MODE=read_through   # Cache → R2 → origin；命中后异步 R2.put（默认）
+R2_MODE=r2_only        # 仅 R2（需预热；上游 403 高时 SLA 模式）
+R2_MODE=off            # 忽略 R2 binding
+```
+
+预热：
+
+```
+POST /v1/prewarm
+X-Prewarm-Secret: <PREWARM_SECRET 或 IMAGE_EDGE_SECRET>
+{ "paths": ["/img-original/img/.../x_p0.jpg"] }
+```
+
+对象键：`pximg{path}`。
+
+## 部署脚本
+
+```powershell
+# 仓库根
+.\scripts\edge\deploy-img-worker.ps1
+python scripts\edge\probe-img-edge.py --base-url https://… --secret … --path /img-original/… --twice --healthz
+```
 
 ## 观测（运维）
 
 | 信号 | 来源 |
 | --- | --- |
 | Cache HIT / MISS | 响应头 `X-Edge-Cache`（按 path 缓存，与签名无关） |
-| 上游 403 / 熔断 | `X-Edge-Via`、`X-Edge-Circuit`；Worker 内 soft circuit |
+| 上游 / R2 | `X-Edge-Via`、`X-Edge-Storage`、`X-Edge-Circuit`；soft circuit |
 | BFF 切流路径 | Prometheus `new_pixiv_image_delivery_total`（edge_redirect / local_*） |
 | 配置是否可签 URL | Admin `GET /admin/api/maintenance/image-edge` 或 `/healthz` → `modules.image_edge` |
+| Worker R2 | `/healthz` → `r2` / `r2_mode` |
 
-多地区 403 POC：部署后用固定已知 path 签 URL，在多 POP/地区 curl 记录 200 vs 403，再决定直连+Cache 或 R2 预热。
+多地区 403 POC：部署后用 `probe-img-edge.py` 固定 path 签 URL，记录 200 vs 403 与 `X-Edge-*`，再决定直连+Cache / read_through / r2_only。

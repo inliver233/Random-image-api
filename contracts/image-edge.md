@@ -26,7 +26,7 @@ GET|HEAD https://{edge-host}/u/{exp}/{sig}/{b64url(path)}
 Health:
 
 ```
-GET /healthz|/  →  {"ok":true,"service":"random-image-edge","dual_secret":bool,"origin_circuit_open":bool}
+GET /healthz|/  →  {"ok":true,"service":"random-image-edge","dual_secret":bool,"origin_circuit_open":bool,"r2":bool,"r2_mode":"off|read_through|r2_only"}
 ```
 
 Response headers of interest for ops (HIT rate / upstream diagnostics):
@@ -34,7 +34,8 @@ Response headers of interest for ops (HIT rate / upstream diagnostics):
 | Header | Meaning |
 | --- | --- |
 | `X-Edge-Cache` | `HIT` / `MISS` (path-keyed Cache API; ignores exp/sig) |
-| `X-Edge-Via` | origin host or emergency mirror host that served bytes |
+| `X-Edge-Via` | origin host, emergency mirror host, or `r2` that served bytes |
+| `X-Edge-Storage` | `r2` / `r2-prewarm` when bytes came from or were written via R2 path |
 | `X-Edge-Circuit` | `origin-open` when soft 403 circuit skips origin |
 | `Cache-Control` | `public, max-age=…, immutable` on successful image responses |
 
@@ -65,15 +66,33 @@ Reject: `..`, `\`, `://`, `@`, query string in path.
 
 ## Upstream
 
-1. `caches.default` key = `GET {origin}/pximg{path}` (ignores exp/sig so re-signs share cache)
-2. On miss: `fetch https://{ORIGIN_HOST}{path}` with  
+1. `caches.default` key = `GET {worker-origin}/pximg{path}` (ignores exp/sig so re-signs share cache)
+2. Optional **R2** (Mode B2 / read-through) when Worker binding `R2` is present:
+   - Object key: `pximg{path}` (same shape as Cache key path)
+   - `R2_MODE=read_through` (default): Cache miss → `R2.get` → origin; origin/mirror 200 → async `R2.put`
+   - `R2_MODE=r2_only`: Cache miss → R2 only; **never** hit pximg (requires prewarm)
+   - `R2_MODE=off`: ignore binding
+   - Response may include `X-Edge-Via: r2` and `X-Edge-Storage: r2`
+3. On Cache+R2 miss (or R2 off): `fetch https://{ORIGIN_HOST}{path}` with  
    `Referer: https://www.pixiv.net/`  
    browser-like `User-Agent`
-3. Optional emergency mirrors (ordered, unique):
+4. Optional emergency mirrors (ordered, unique):
    - `FALLBACK_MIRROR_HOSTS` CSV, then legacy single `FALLBACK_MIRROR_HOST`
    - each host ∈ `{i.pixiv.cat, i.pixiv.re, i.pixiv.nl}` or `*.workers.dev`
-4. Success response: `Cache-Control: public, max-age={CACHE_TTL_SECONDS}, immutable`  
-   Headers: `X-Edge-Via` = host that returned 200 (origin or mirror)
+5. Success response: `Cache-Control: public, max-age={CACHE_TTL_SECONDS}, immutable`  
+   Headers: `X-Edge-Via` = host that returned 200 (origin, mirror, or `r2`)
+6. **HEAD warm:** successful HEAD also fills Cache API (and R2 put when enabled) so probes do not leave the POP cold.
+
+### Prewarm (ops)
+
+```
+POST https://{edge-host}/v1/prewarm
+Header: X-Prewarm-Secret: {PREWARM_SECRET or IMAGE_EDGE_SECRET}
+Body: { "paths": ["/img-original/img/.../x_p0.jpg", ...] }   // max 50, allowlisted paths only
+```
+
+Fetches each path via the same origin/mirror chain and stores into R2 (+ warms Cache).  
+BFF hook `R2_PREWARM_URL` posts `{image_ids}` to an external consumer; map ids→paths in that consumer or call `/v1/prewarm` with paths directly.
 
 Backend note: pure edge **302** does **not** call `mark_image_ok` (bytes not verified). Local stream path still marks ok/fail.
 
@@ -115,9 +134,14 @@ Escape hatches:
 
 ## Mode decision (ops)
 
-| Mode | When |
-| --- | --- |
-| **B direct+Cache** | Worker→pximg success rate acceptable |
-| **B2 R2-only** | 403 rate high; prewarm bytes into R2, Worker serves R2 |
+| Mode | When | Worker config |
+| --- | --- | --- |
+| **B direct+Cache** | Worker→pximg success rate acceptable | No R2 binding, or `R2_MODE=off` |
+| **B + R2 read-through** | Want cross-POP persistence while still allowing origin | `[[r2_buckets]]` + `R2_MODE=read_through` |
+| **B2 R2-only** | 403 rate high; prewarm bytes into R2, Worker serves R2 | `[[r2_buckets]]` + `R2_MODE=r2_only` + prewarm |
 
-POC checklist: deploy Worker → sign one known path → measure multi-region status codes.
+POC checklist:
+
+1. `scripts/edge/deploy-img-worker.ps1` (or `npx wrangler deploy` in `edge/img-worker`)
+2. `python scripts/edge/probe-img-edge.py --base-url … --secret … --path … --twice --healthz`
+3. Multi-region status matrix → choose B / B+R2 / B2

@@ -78,6 +78,16 @@ type CfApiProxyStatusResponse = {
   request_id: string;
 };
 
+type R2PrewarmStatusResponse = {
+  ok: true;
+  enabled_flag: boolean;
+  ready: boolean;
+  url_configured: boolean;
+  url_preview: string;
+  missing: string[];
+  request_id: string;
+};
+
 type ApiKeyRateLimitStatusResponse = {
   ok: true;
   required: boolean;
@@ -120,6 +130,12 @@ export function MaintenancePage() {
   const cfApiProxyStatus = useQuery({
     queryKey: ["admin", "maintenance", "cf-api-proxy"],
     queryFn: () => apiJson<CfApiProxyStatusResponse>("/admin/api/maintenance/cf-api-proxy"),
+    refetchInterval: 30_000,
+  });
+
+  const r2PrewarmStatus = useQuery({
+    queryKey: ["admin", "maintenance", "r2-prewarm"],
+    queryFn: () => apiJson<R2PrewarmStatusResponse>("/admin/api/maintenance/r2-prewarm"),
     refetchInterval: 30_000,
   });
 
@@ -219,6 +235,7 @@ export function MaintenancePage() {
       : null;
   const edge = imageEdgeStatus.data;
   const cfApi = cfApiProxyStatus.data;
+  const r2 = r2PrewarmStatus.data;
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -293,6 +310,39 @@ export function MaintenancePage() {
         </QueryState>
 
         <Button onClick={() => void cfApiProxyStatus.refetch()} loading={cfApiProxyStatus.isFetching}>
+          刷新状态
+        </Button>
+      </Card>
+
+      <Card title="R2 Prewarm（Mode B2 钩子）">
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          只读配置状态。hydrate/import/heal 写库后 best-effort POST{" "}
+          <Typography.Text code>{"{image_ids}"}</Typography.Text> 到{" "}
+          <Typography.Text code>R2_PREWARM_URL/v1/prewarm</Typography.Text>
+          。Worker 侧 R2 binding / <Typography.Text code>R2_MODE</Typography.Text> 见{" "}
+          <Typography.Text code>edge/img-worker</Typography.Text>。默认关；不展示完整 URL。
+        </Typography.Paragraph>
+
+        <QueryState query={r2PrewarmStatus}>
+          {r2 ? (
+            <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
+              <Descriptions.Item label="开关 flag">
+                {r2.enabled_flag ? <Tag color="blue">ENABLED</Tag> : <Tag>OFF</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="可 enqueue">
+                {r2.ready ? <Tag color="green">ready</Tag> : <Tag color="orange">not ready</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="URL">
+                {r2.url_configured ? r2.url_preview || "已配置" : "（未配置）"}
+              </Descriptions.Item>
+              <Descriptions.Item label="缺失项">
+                {r2.missing?.length ? r2.missing.join(", ") : "—"}
+              </Descriptions.Item>
+            </Descriptions>
+          ) : null}
+        </QueryState>
+
+        <Button onClick={() => void r2PrewarmStatus.refetch()} loading={r2PrewarmStatus.isFetching}>
           刷新状态
         </Button>
       </Card>
