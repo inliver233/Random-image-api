@@ -5,7 +5,6 @@ from typing import Any
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import aliased
 
 from app.api.admin.deps import get_admin_claims
@@ -30,67 +29,6 @@ from app.db.models.token_proxy_bindings import TokenProxyBinding
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 
 router = APIRouter()
-
-
-
-def _fnv1a64(text: str) -> int:
-    h = 14695981039346656037
-    prime = 1099511628211
-    for b in text.encode("utf-8"):
-        h ^= b
-        h = (h * prime) & 0xFFFFFFFFFFFFFFFF
-    return h
-
-
-def _rendezvous_proxy_order(*, token_id: int, proxy_ids: list[int], salt: str) -> list[int]:
-    scored = [(_fnv1a64(f"{token_id}|{pid}|{salt}"), pid) for pid in proxy_ids]
-    scored.sort(key=lambda x: (-x[0], x[1]))
-    return [pid for _, pid in scored]
-
-
-def _compute_primary_assignments(
-    *,
-    token_ids: list[int],
-    proxy_ids: list[int],
-    capacity_by_proxy_id: dict[int, int],
-    salt: str,
-) -> dict[int, int]:
-    remaining = {pid: int(capacity_by_proxy_id.get(int(pid), 0)) for pid in proxy_ids}
-    out: dict[int, int] = {}
-    for token_id in token_ids:
-        for pid in _rendezvous_proxy_order(token_id=token_id, proxy_ids=proxy_ids, salt=salt):
-            if remaining.get(pid, 0) > 0:
-                out[token_id] = pid
-                remaining[pid] -= 1
-                break
-    return out
-
-
-def _compute_primary_assignments_soft(
-    *,
-    token_ids: list[int],
-    proxy_ids: list[int],
-    capacity_by_proxy_id: dict[int, int],
-    salt: str,
-) -> tuple[dict[int, int], int]:
-    out = _compute_primary_assignments(
-        token_ids=token_ids,
-        proxy_ids=proxy_ids,
-        capacity_by_proxy_id=capacity_by_proxy_id,
-        salt=salt,
-    )
-
-    over_capacity = 0
-    for token_id in token_ids:
-        if token_id in out:
-            continue
-        order = _rendezvous_proxy_order(token_id=token_id, proxy_ids=proxy_ids, salt=salt)
-        if not order:
-            continue
-        out[token_id] = int(order[0])
-        over_capacity += 1
-
-    return out, int(over_capacity)
 
 
 async def _load_recompute_json(request: Request) -> dict[str, Any]:
