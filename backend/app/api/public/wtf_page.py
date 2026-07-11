@@ -1077,26 +1077,32 @@ def _build_wtf_html(*, base_url: str) -> str:
       const effectiveType = conn && conn.effectiveType ? String(conn.effectiveType) : "";
       const slow = effectiveType.includes("2g") || effectiveType.includes("3g");
 
-      // Cap concurrent /random picks to cut N× amplification on the origin.
+      // Meta comes from /feed batches; maxInflight mainly caps concurrent image loads.
       let initial = mobile ? 10 : 14;
       let step = mobile ? 6 : 10;
       let maxInflight = mobile ? 6 : 10;
+      let feedBatch = mobile ? 10 : 14;
 
       if (viewMode === "masonry") {{
         initial = mobile ? 12 : 18;
         step = mobile ? 8 : 12;
         maxInflight = mobile ? 8 : 12;
+        feedBatch = mobile ? 12 : 18;
       }} else if (viewMode === "tiles") {{
         initial = mobile ? 12 : 18;
         step = mobile ? 8 : 10;
         maxInflight = mobile ? 8 : 12;
+        feedBatch = mobile ? 12 : 16;
       }}
 
       if (slow) {{
         maxInflight = Math.max(4, Math.floor(maxInflight * 0.6));
+        feedBatch = Math.max(6, Math.floor(feedBatch * 0.7));
       }}
 
-      return {{ initial: initial, step: step, maxInflight: maxInflight }};
+      // API hard-caps /feed limit at 32.
+      feedBatch = Math.max(1, Math.min(32, feedBatch));
+      return {{ initial: initial, step: step, maxInflight: maxInflight, feedBatch: feedBatch }};
     }}
 
     function applyView(mode, persist) {{
@@ -1183,11 +1189,18 @@ def _build_wtf_html(*, base_url: str) -> str:
       return p;
     }}
 
-    function buildRandomJsonUrl() {{
+    function buildFeedUrl(limit) {{
       const p = buildRandomParamsForRequest();
-      p.set("format", "simple_json");
+      // Strip single-pick-only knobs that /feed does not use.
+      p.delete("format");
+      p.delete("redirect");
+      p.delete("attempts");
+      let n = Number(limit);
+      if (!Number.isFinite(n)) n = cfg().feedBatch;
+      n = Math.max(1, Math.min(32, Math.floor(n)));
+      p.set("limit", String(n));
       p.set("t", String(Date.now()) + "_" + String(seq++));
-      return "/random?" + p.toString();
+      return "/feed?" + p.toString();
     }}
 
     function buildProxyQuery() {{
@@ -1473,8 +1486,13 @@ def _build_wtf_html(*, base_url: str) -> str:
       syncParamsFromControls({{ reset: false }});
     }} catch (e) {{}}
 
-    async function fetchRandomData() {{
-      const url = buildRandomJsonUrl();
+    // Client-side queue filled by /feed batches (kills N× /random amplification).
+    const feedQueue = [];
+    let feedFetchPromise = null;
+    let feedExhausted = false;
+
+    async function fetchFeedBatch(limit) {{
+      const url = buildFeedUrl(limit);
       const resp = await fetch(url, {{ cache: "no-store" }});
       if (resp.status === 404) {{
         const e = new Error("NO_MATCH");
@@ -1485,10 +1503,69 @@ def _build_wtf_html(*, base_url: str) -> str:
         throw new Error("HTTP_" + String(resp.status));
       }}
       const body = await resp.json();
-      if (!body || body.ok !== true || !body.data || !body.data.urls || !body.data.image) {{
+      if (!body || body.ok !== true || !body.data || !Array.isArray(body.data.items)) {{
         throw new Error("BAD_BODY");
       }}
-      return body.data;
+      return body.data.items;
+    }}
+
+    async function ensureFeedQueue(minCount) {{
+      const need = Math.max(1, Number(minCount) || 1);
+      if (feedQueue.length >= need) return;
+      if (feedExhausted) return;
+      if (feedFetchPromise) {{
+        await feedFetchPromise;
+        return;
+      }}
+      const batch = Math.max(need, cfg().feedBatch);
+      feedFetchPromise = (async () => {{
+        try {{
+          const items = await fetchFeedBatch(batch);
+          if (!items || !items.length) {{
+            feedExhausted = true;
+            return;
+          }}
+          for (const it of items) {{
+            if (it && it.image && it.urls) feedQueue.push(it);
+          }}
+          if (!feedQueue.length) feedExhausted = true;
+        }} finally {{
+          feedFetchPromise = null;
+        }}
+      }})();
+      await feedFetchPromise;
+    }}
+
+    async function fetchRandomData() {{
+      // Prefer queued /feed items; refill when empty. Shape matches simple_json data.
+      if (!feedQueue.length) {{
+        if (feedExhausted) {{
+          const e = new Error("NO_MATCH");
+          e.name = "NO_MATCH";
+          throw e;
+        }}
+        try {{
+          await ensureFeedQueue(1);
+        }} catch (err) {{
+          const name = err && err.name ? String(err.name) : "";
+          const msg = err && err.message ? String(err.message) : "";
+          if (name === "NO_MATCH" || msg === "NO_MATCH") {{
+            feedExhausted = true;
+          }}
+          throw err;
+        }}
+      }}
+      if (!feedQueue.length) {{
+        const e = new Error("NO_MATCH");
+        e.name = "NO_MATCH";
+        throw e;
+      }}
+      const data = feedQueue.shift();
+      // Speculatively top-up when low so scroll stays smooth without N hot picks.
+      if (feedQueue.length < Math.max(3, Math.floor(cfg().feedBatch / 3)) && !feedExhausted && !feedFetchPromise) {{
+        ensureFeedQueue(cfg().feedBatch).catch(() => {{}});
+      }}
+      return data;
     }}
 
     function updateSentinel() {{
@@ -1508,6 +1585,10 @@ def _build_wtf_html(*, base_url: str) -> str:
       rendered = 0;
       target = 0;
       failStreak = 0;
+
+      try {{ feedQueue.length = 0; }} catch (e) {{}}
+      feedFetchPromise = null;
+      feedExhausted = false;
 
       try {{ allItems.length = 0; }} catch (e) {{}}
       rebuildLayout();

@@ -43,3 +43,17 @@ def test_build_engine_pick_payload() -> None:
     assert body["seed"] == "x"
     assert body["quality"]["samples"] == 12
     assert body["filters"]["r18"] == 0
+
+
+def test_build_engine_pick_payload_batch_limit() -> None:
+    body = build_engine_pick_payload(
+        filters={"r18": 0},
+        strategy="random",
+        quality=None,
+        seed=None,
+        limit=12,
+        debug=False,
+    )
+    assert body["limit"] == 12
+    assert "quality" not in body
+    assert "seed" not in body

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.metrics import observe_random_engine_pick
 from app.core.random_engine_client import engine_pick
 from app.core.random_strategy import pick_by_quality, pick_by_random_key
-from app.db.images_get import get_image_by_id
+from app.db.images_get import get_image_by_id, get_images_by_ids
 
 
 def orientation_to_engine_str(orientation_code: int | None) -> str:
@@ -163,6 +163,55 @@ async def try_pick_via_engine(
     meta["engine_image_id"] = image_id
     meta["picked_by"] = "random_engine"
     return image, meta
+
+
+async def try_pick_many_via_engine(
+    *,
+    client: Any,
+    base_url: str,
+    session: AsyncSession,
+    payload: dict[str, Any],
+    timeout_s: float = 0.8,
+) -> tuple[list[Any], dict[str, Any]]:
+    """Batch variant of try_pick_via_engine for /feed (limit>1)."""
+    meta: dict[str, Any] = {"engine": True, "engine_url": base_url, "batch": True}
+    data = await engine_pick(client, base_url, payload=payload, timeout_s=timeout_s)
+    if data is None:
+        meta["engine_status"] = "unavailable"
+        return [], meta
+    meta["engine_code"] = data.get("code")
+    if data.get("debug") is not None:
+        meta["engine_debug"] = data.get("debug")
+    if not data.get("ok"):
+        meta["engine_status"] = "not_ok"
+        return [], meta
+    raw_items = data.get("items")
+    if not isinstance(raw_items, list) or not raw_items:
+        meta["engine_status"] = "no_match"
+        return [], meta
+
+    ids: list[int] = []
+    for it in raw_items:
+        if not isinstance(it, dict):
+            continue
+        try:
+            ids.append(int(it.get("id")))
+        except Exception:
+            continue
+    if not ids:
+        meta["engine_status"] = "bad_item"
+        return [], meta
+
+    images = await get_images_by_ids(session, image_ids=ids)
+    if not images:
+        meta["engine_status"] = "db_miss"
+        meta["engine_image_ids"] = ids
+        return [], meta
+    meta["engine_status"] = "ok"
+    meta["engine_image_ids"] = [int(im.id) for im in images]
+    meta["picked_by"] = "random_engine"
+    meta["engine_count"] = len(images)
+    return images, meta
 
 
 async def pick_with_strategy(
