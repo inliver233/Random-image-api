@@ -32,6 +32,7 @@ from app.core.errors import ApiError, ErrorCode, json_error_response
 from app.core.http_client import build_default_async_transport, build_shared_async_client
 from app.core.logging import configure_logging, get_logger
 from app.core.metrics import observe_random_result
+from app.core.random_engine_sync import maybe_warm_engine_snapshot_on_startup
 from app.core.random_request_persistence import load_persisted_random_totals, persist_random_totals
 from app.core.random_request_stats import RandomRequestStats
 from app.core.random_pick_context import build_random_service_factory
@@ -94,10 +95,41 @@ def create_app() -> FastAPI:
 
             app.state.random_totals_persist_task = asyncio.create_task(_loop())
 
+        # Best-effort: warm Go random-engine index when RANDOM_ENGINE_URL is set.
+        # Background task — never blocks readiness; failures are logged only.
+        engine_for_warm = getattr(app.state, "engine", None)
+        if engine_for_warm is not None and str(getattr(settings, "random_engine_url", "") or "").strip():
+
+            async def _warm_engine() -> None:
+                try:
+                    await maybe_warm_engine_snapshot_on_startup(
+                        engine_for_warm,
+                        settings=settings,
+                        client=getattr(app.state, "httpx_client", None),
+                        timeout_s=120.0,
+                    )
+                except Exception:
+                    pass
+
+            app.state.random_engine_warm_task = asyncio.create_task(_warm_engine())
+
         try:
             yield
         finally:
             # --- shutdown (same semantics as previous on_event("shutdown")) ---
+            warm_task = getattr(app.state, "random_engine_warm_task", None)
+            if warm_task is not None:
+                try:
+                    warm_task.cancel()
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(warm_task, timeout=2.0)
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
+
             engine = getattr(app.state, "engine", None)
             stats = getattr(app.state, "random_request_stats", None)
             if engine is not None and stats is not None:

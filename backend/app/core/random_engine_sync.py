@@ -155,6 +155,52 @@ async def push_engine_snapshot(
     return result
 
 
+async def maybe_warm_engine_snapshot_on_startup(
+    db_engine: AsyncEngine,
+    *,
+    settings: Settings | None = None,
+    client: Any | None = None,
+    timeout_s: float = 120.0,
+    limit: int | None = None,
+) -> dict[str, Any] | None:
+    """Best-effort full snapshot when RANDOM_ENGINE_URL is set.
+
+    No-op without URL. Never raises. Does **not** require RANDOM_ENGINE_ENABLED so the
+    index can warm before dual-run cutover (same gate as catalog event publish).
+    """
+    owned: httpx.AsyncClient | None = None
+    try:
+        from datetime import datetime, timezone
+
+        base, use_client, owned = await _resolve_publish_client(settings=settings, client=client)
+        if not base or use_client is None:
+            return None
+        revision = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        result = await push_engine_snapshot(
+            db_engine,
+            base_url=base,
+            client=use_client,
+            revision=revision,
+            limit=limit,
+            timeout_s=float(timeout_s),
+        )
+        if result is not None:
+            logger.info(
+                "random-engine startup snapshot ok revision=%s",
+                revision,
+            )
+        return result
+    except Exception as exc:
+        logger.warning("random-engine startup snapshot failed: %s", exc)
+        return None
+    finally:
+        if owned is not None:
+            try:
+                await owned.aclose()
+            except Exception:
+                pass
+
+
 async def _resolve_publish_client(
     *,
     settings: Settings | None,

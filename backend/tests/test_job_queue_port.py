@@ -64,3 +64,53 @@ VALUES ('noop','pending',0,NULL,'{}','2026-02-10T00:00:00.000Z','2026-02-10T00:0
         await engine.dispose()
 
     asyncio.run(_run())
+
+
+def test_sqlite_job_queue_enqueue_and_opportunistic(tmp_path: Path) -> None:
+    engine = create_engine(_sqlite_url(tmp_path / "q3.db"))
+
+    async def _run() -> None:
+        async with engine.begin() as conn:
+            await conn.exec_driver_sql(
+                """
+CREATE TABLE jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT,
+  updated_at TEXT,
+  type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  priority INTEGER NOT NULL DEFAULT 0,
+  run_after TEXT,
+  attempt INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  payload_json TEXT NOT NULL,
+  last_error TEXT,
+  locked_by TEXT,
+  locked_at TEXT,
+  ref_type TEXT,
+  ref_id TEXT
+);
+""".strip()
+            )
+            await conn.exec_driver_sql(
+                """
+CREATE UNIQUE INDEX uq_jobs_active_opportunistic_hydrate
+ON jobs(type, ref_type, ref_id)
+WHERE type = 'hydrate_metadata'
+  AND ref_type = 'opportunistic_hydrate'
+  AND status IN ('pending', 'running');
+""".strip()
+            )
+
+        q = build_job_queue(engine)
+        jid = await q.enqueue(type="noop", payload_json="{}", priority=1)
+        assert int(jid) >= 1
+
+        a = await q.enqueue_opportunistic_hydrate(illust_id=99, reason="test")
+        b = await q.enqueue_opportunistic_hydrate(illust_id=99, reason="again")
+        assert a is not None
+        assert b is None
+
+        await engine.dispose()
+
+    asyncio.run(_run())

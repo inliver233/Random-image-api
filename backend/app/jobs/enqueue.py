@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-import json
-
-import sqlalchemy as sa
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.metrics import RANDOM_OPPORTUNISTIC_HYDRATE_ENQUEUED_TOTAL
-from app.db.models.jobs import JobRow
-from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.jobs.queue import (
+    OPPORTUNISTIC_HYDRATE_PRIORITY,
+    OPPORTUNISTIC_HYDRATE_REF_TYPE,
+    build_job_queue,
+)
 
-OPPORTUNISTIC_HYDRATE_REF_TYPE = "opportunistic_hydrate"
-OPPORTUNISTIC_HYDRATE_PRIORITY = -10
+# Re-export constants for callers/tests that imported them from enqueue.
+__all__ = [
+    "OPPORTUNISTIC_HYDRATE_PRIORITY",
+    "OPPORTUNISTIC_HYDRATE_REF_TYPE",
+    "enqueue_opportunistic_hydrate_metadata",
+]
 
 
 async def enqueue_opportunistic_hydrate_metadata(
@@ -20,50 +23,9 @@ async def enqueue_opportunistic_hydrate_metadata(
     illust_id: int,
     reason: str,
 ) -> int | None:
-    if int(illust_id) <= 0:
-        return None
-
-    ref_id = str(int(illust_id))
-    Session = create_sessionmaker(engine)
-
-    payload_json = json.dumps(
-        {"illust_id": int(illust_id), "reason": str(reason or "random").strip() or "random"},
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-
-    async def _op() -> int | None:
-        async with Session() as session:
-            existing = await session.execute(
-                sa.select(JobRow.id).where(
-                    JobRow.type == "hydrate_metadata",
-                    JobRow.ref_type == OPPORTUNISTIC_HYDRATE_REF_TYPE,
-                    JobRow.ref_id == ref_id,
-                    JobRow.status.in_(("pending", "running")),
-                )
-            )
-            if existing.first() is not None:
-                return None
-
-            job = JobRow(
-                type="hydrate_metadata",
-                status="pending",
-                priority=int(OPPORTUNISTIC_HYDRATE_PRIORITY),
-                payload_json=payload_json,
-                ref_type=OPPORTUNISTIC_HYDRATE_REF_TYPE,
-                ref_id=ref_id,
-            )
-            session.add(job)
-            try:
-                await session.flush()
-                await session.commit()
-            except IntegrityError:
-                # Concurrent enqueue of the same active opportunistic hydrate job.
-                await session.rollback()
-                return None
-            return int(job.id)
-
-    job_id = await with_sqlite_busy_retry(_op)
+    """Best-effort enqueue via JobQueuePort (SQLite default; behavior unchanged)."""
+    queue = build_job_queue(engine)
+    job_id = await queue.enqueue_opportunistic_hydrate(illust_id=int(illust_id), reason=reason)
     if job_id is not None:
         RANDOM_OPPORTUNISTIC_HYDRATE_ENQUEUED_TOTAL.inc()
     return job_id
