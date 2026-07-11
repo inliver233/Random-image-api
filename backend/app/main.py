@@ -22,7 +22,12 @@ from app.api.public.random import router as random_router
 from app.api.public.tags import router as tags_router
 from app.api.public.version import router as version_router
 from app.core.config import load_settings
-from app.core.api_keys import ApiKeyAuthConfig, ApiKeyAuthenticator, ApiKeyRateLimiter, require_public_api_key
+from app.core.api_keys import (
+    ApiKeyAuthConfig,
+    ApiKeyAuthenticator,
+    build_api_key_rate_limiter,
+    require_public_api_key,
+)
 from app.core.errors import ApiError, ErrorCode, json_error_response
 from app.core.http_client import build_default_async_transport, build_shared_async_client
 from app.core.logging import configure_logging, get_logger
@@ -127,6 +132,15 @@ def create_app() -> FastAPI:
                 except Exception:
                     pass
 
+            limiter = getattr(app.state, "api_key_limiter", None)
+            if limiter is not None:
+                try:
+                    aclose = getattr(limiter, "aclose", None)
+                    if aclose is not None:
+                        await aclose()
+                except Exception:
+                    pass
+
             if engine is not None:
                 await engine.dispose()
 
@@ -180,7 +194,12 @@ def create_app() -> FastAPI:
         secret_key=str(settings.secret_key),
     )
     app.state.api_key_authenticator = ApiKeyAuthenticator(engine, api_key_cfg)
-    app.state.api_key_limiter = ApiKeyRateLimiter(rpm=int(api_key_cfg.rpm), burst=int(api_key_cfg.burst))
+    app.state.api_key_limiter = build_api_key_rate_limiter(
+        rpm=int(api_key_cfg.rpm),
+        burst=int(api_key_cfg.burst),
+        backend=str(getattr(settings, "public_api_key_rate_limit_backend", "memory") or "memory"),
+        redis_url=str(getattr(settings, "redis_url", "") or ""),
+    )
     app.state.random_request_stats = RandomRequestStats(window_seconds=60)
 
     @app.middleware("http")

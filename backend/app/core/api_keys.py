@@ -3,15 +3,54 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
-from dataclasses import dataclass, field
 from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.errors import ApiError, ErrorCode
+from app.core.logging import get_logger
 from app.db.models.api_keys import ApiKey
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+
+log = get_logger(__name__)
+
+# Redis token-bucket Lua: KEYS[1]=bucket, ARGV=capacity, refill_per_s, now_s, cost
+# Returns 1 if allowed, 0 if limited. Best-effort multi-instance rate limit.
+_REDIS_TOKEN_BUCKET_LUA = """
+local key = KEYS[1]
+local capacity = tonumber(ARGV[1])
+local refill = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local cost = tonumber(ARGV[4])
+local data = redis.call('HMGET', key, 'tokens', 'updated')
+local tokens = tonumber(data[1])
+local updated = tonumber(data[2])
+if tokens == nil then
+  tokens = capacity
+  updated = now
+end
+local elapsed = now - updated
+if elapsed < 0 then
+  elapsed = 0
+end
+tokens = math.min(capacity, tokens + elapsed * refill)
+local allowed = 0
+if tokens >= cost then
+  tokens = tokens - cost
+  allowed = 1
+end
+redis.call('HMSET', key, 'tokens', tokens, 'updated', now)
+-- Keep key around long enough for a full refill + slack.
+local ttl = math.ceil(capacity / refill) + 5
+if ttl < 60 then
+  ttl = 60
+end
+redis.call('EXPIRE', key, ttl)
+return allowed
+"""
 
 
 def _coerce_int(value: int, *, default: int = 0) -> int:
@@ -112,27 +151,45 @@ class ApiKeyAuthenticator:
         return int(entry.api_key_id) if bool(entry.enabled) else None
 
 
+@runtime_checkable
+class ApiKeyRateLimiterPort(Protocol):
+    """Public API key rate-limit port (process-local memory or Redis)."""
+
+    backend: str
+
+    async def allow(self, api_key_id: int) -> bool: ...
+
+    async def aclose(self) -> None: ...
+
+
 @dataclass(slots=True)
 class _Bucket:
     tokens: float
     updated_at_m: float
 
 
+def _token_bucket_params(*, rpm: int, burst: int) -> tuple[float, float]:
+    rpm_i = max(0, _coerce_int(rpm))
+    if rpm_i <= 0:
+        return 0.0, 0.0
+    capacity = max(1.0, float(_coerce_int(burst)) or float(rpm_i))
+    refill_per_s = float(rpm_i) / 60.0
+    return capacity, refill_per_s
+
+
 @dataclass(slots=True)
 class ApiKeyRateLimiter:
+    """Process-local token bucket (default backend)."""
+
     rpm: int
     burst: int
+    backend: str = "memory"
     _buckets: dict[int, _Bucket] = field(default_factory=dict)
 
     def _params(self) -> tuple[float, float]:
-        rpm = max(0, _coerce_int(self.rpm))
-        if rpm <= 0:
-            return 0.0, 0.0
-        capacity = max(1.0, float(_coerce_int(self.burst)) or float(rpm))
-        refill_per_s = float(rpm) / 60.0
-        return capacity, refill_per_s
+        return _token_bucket_params(rpm=self.rpm, burst=self.burst)
 
-    def allow(self, api_key_id: int) -> bool:
+    async def allow(self, api_key_id: int) -> bool:
         api_key_id_i = _coerce_int(api_key_id)
         if api_key_id_i <= 0:
             return False
@@ -155,6 +212,118 @@ class ApiKeyRateLimiter:
             return True
         return False
 
+    async def aclose(self) -> None:
+        return None
+
+
+@dataclass(slots=True)
+class RedisApiKeyRateLimiter:
+    """Cross-instance token bucket via Redis EVAL (optional; requires redis package + URL)."""
+
+    rpm: int
+    burst: int
+    redis_url: str
+    key_prefix: str = "np:api_key_rl:"
+    backend: str = "redis"
+    _client: Any = field(default=None, repr=False)
+    _script: Any = field(default=None, repr=False)
+    _fallback: ApiKeyRateLimiter = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._fallback = ApiKeyRateLimiter(rpm=int(self.rpm), burst=int(self.burst), backend="memory")
+
+    async def _get_client(self) -> Any | None:
+        if self._client is not None:
+            return self._client
+        try:
+            import redis.asyncio as redis_async  # type: ignore[import-not-found]
+        except Exception as exc:
+            log.warning("api_key_rate_limit_redis_import_failed err=%s", type(exc).__name__)
+            return None
+        try:
+            client = redis_async.from_url(
+                str(self.redis_url),
+                encoding="utf-8",
+                decode_responses=True,
+                socket_connect_timeout=0.4,
+                socket_timeout=0.4,
+            )
+            # Lazy connect; ping once to surface bad URLs early.
+            await client.ping()
+            self._client = client
+            return client
+        except Exception as exc:
+            log.warning("api_key_rate_limit_redis_connect_failed err=%s", type(exc).__name__)
+            return None
+
+    async def allow(self, api_key_id: int) -> bool:
+        api_key_id_i = _coerce_int(api_key_id)
+        if api_key_id_i <= 0:
+            return False
+
+        capacity, refill_per_s = _token_bucket_params(rpm=self.rpm, burst=self.burst)
+        if capacity <= 0.0 or refill_per_s <= 0.0:
+            return True
+
+        client = await self._get_client()
+        if client is None:
+            # Fail open to process-local bucket so Redis outage does not 500 public API.
+            return await self._fallback.allow(api_key_id_i)
+
+        key = f"{self.key_prefix}{api_key_id_i}"
+        now_s = time.time()
+        try:
+            allowed = await client.eval(
+                _REDIS_TOKEN_BUCKET_LUA,
+                1,
+                key,
+                float(capacity),
+                float(refill_per_s),
+                float(now_s),
+                1.0,
+            )
+            return int(allowed or 0) == 1
+        except Exception as exc:
+            log.warning("api_key_rate_limit_redis_eval_failed err=%s", type(exc).__name__)
+            return await self._fallback.allow(api_key_id_i)
+
+    async def aclose(self) -> None:
+        client = self._client
+        self._client = None
+        if client is None:
+            return
+        try:
+            await client.aclose()
+        except Exception:
+            try:
+                await client.close()
+            except Exception:
+                pass
+
+
+def normalize_rate_limit_backend(raw: str | None) -> str:
+    v = (raw or "memory").strip().lower()
+    if v in {"redis", "memory"}:
+        return v
+    return "memory"
+
+
+def build_api_key_rate_limiter(
+    *,
+    rpm: int,
+    burst: int,
+    backend: str = "memory",
+    redis_url: str = "",
+) -> ApiKeyRateLimiterPort:
+    """Build rate limiter. Redis only when backend=redis and redis_url set; else memory."""
+    backend_norm = normalize_rate_limit_backend(backend)
+    url = (redis_url or "").strip()
+    if backend_norm == "redis" and url:
+        return RedisApiKeyRateLimiter(rpm=int(rpm), burst=int(burst), redis_url=url, backend="redis")
+    if backend_norm == "redis" and not url:
+        log.warning("api_key_rate_limit_redis_url_missing fallback=memory")
+    return ApiKeyRateLimiter(rpm=int(rpm), burst=int(burst), backend="memory")
+
 
 def extract_api_key(headers: Mapping[str, str] | None) -> str | None:
     if not headers:
@@ -164,7 +333,7 @@ def extract_api_key(headers: Mapping[str, str] | None) -> str | None:
 
 async def require_public_api_key(
     authenticator: ApiKeyAuthenticator,
-    limiter: ApiKeyRateLimiter,
+    limiter: ApiKeyRateLimiterPort,
     *,
     headers: Mapping[str, str] | None,
 ) -> int:
@@ -176,7 +345,20 @@ async def require_public_api_key(
     if api_key_id is None:
         raise ApiError(code=ErrorCode.UNAUTHORIZED, message="Invalid API key", status_code=401)
 
-    if not limiter.allow(api_key_id):
+    if not await limiter.allow(api_key_id):
+        try:
+            from app.core.metrics import observe_api_key_rate_limit
+
+            observe_api_key_rate_limit(result="limited", backend=str(getattr(limiter, "backend", "memory") or "memory"))
+        except Exception:
+            pass
         raise ApiError(code=ErrorCode.RATE_LIMITED, message="Rate limited", status_code=429)
+
+    try:
+        from app.core.metrics import observe_api_key_rate_limit
+
+        observe_api_key_rate_limit(result="allowed", backend=str(getattr(limiter, "backend", "memory") or "memory"))
+    except Exception:
+        pass
 
     return int(api_key_id)

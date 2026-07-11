@@ -44,6 +44,9 @@ class Settings:
     public_api_key_required: bool
     public_api_key_rpm: int
     public_api_key_burst: int
+    # Rate-limit backend for public API keys: memory (default) | redis (needs REDIS_URL).
+    public_api_key_rate_limit_backend: str
+    redis_url: str
     random_totals_persist_interval_seconds: int
     # Optional Go random-engine BFF dual-run / cutover (empty = Python-only pick).
     random_engine_url: str
@@ -215,6 +218,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         max_v=10_000_000,
         env=env,
     )
+    # memory (default) | redis. Redis only activates when REDIS_URL is also set.
+    public_api_key_rate_limit_backend = _get(env, "PUBLIC_API_KEY_RATE_LIMIT_BACKEND", "memory").lower()
+    if public_api_key_rate_limit_backend not in {"memory", "redis"}:
+        public_api_key_rate_limit_backend = "memory"
+    redis_url = _get(env, "REDIS_URL", "") or _get(env, "PUBLIC_API_KEY_REDIS_URL", "")
 
     random_totals_persist_interval_seconds = parse_int_env(
         "RANDOM_TOTALS_PERSIST_INTERVAL_SECONDS",
@@ -270,6 +278,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         public_api_key_required=public_api_key_required,
         public_api_key_rpm=public_api_key_rpm,
         public_api_key_burst=public_api_key_burst,
+        public_api_key_rate_limit_backend=public_api_key_rate_limit_backend,
+        redis_url=redis_url,
         random_totals_persist_interval_seconds=random_totals_persist_interval_seconds,
         random_engine_url=random_engine_url,
         random_engine_enabled=random_engine_enabled,

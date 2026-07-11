@@ -79,6 +79,13 @@ IMAGE_DELIVERY_TOTAL = Counter(
     ["path"],
 )
 
+# Public API key rate-limit decisions (memory or redis backend).
+API_KEY_RATE_LIMIT_TOTAL = Counter(
+    "new_pixiv_api_key_rate_limit_total",
+    "Public API key rate-limit outcomes by result and backend.",
+    ["result", "backend"],
+)
+
 UPSTREAM_STREAM_ERRORS_TOTAL = Counter(
     "new_pixiv_upstream_stream_errors_total",
     "Total upstream stream failures (stream_url).",
@@ -165,6 +172,9 @@ def _init_labelsets() -> None:
         RANDOM_ENGINE_PICK_TOTAL.labels(status=status).inc(0)
     for path in IMAGE_DELIVERY_PATHS:
         IMAGE_DELIVERY_TOTAL.labels(path=path).inc(0)
+    for result in ("allowed", "limited"):
+        for backend in ("memory", "redis"):
+            API_KEY_RATE_LIMIT_TOTAL.labels(result=result, backend=backend).inc(0)
     UPSTREAM_STREAM_ERRORS_TOTAL.inc(0)
     JOBS_CLAIM_TOTAL.inc(0)
     JOBS_FAILED_TOTAL.inc(0)
@@ -207,6 +217,20 @@ def observe_random_engine_pick(*, status: str) -> None:
     if len(label) > 64:
         label = label[:64]
     RANDOM_ENGINE_PICK_TOTAL.labels(status=label).inc()
+
+
+def observe_api_key_rate_limit(*, result: str, backend: str) -> None:
+    """Count one public API key rate-limit decision (best-effort; never raises)."""
+    result_label = (result or "allowed").strip() or "allowed"
+    if result_label not in {"allowed", "limited"}:
+        result_label = "allowed"
+    backend_label = (backend or "memory").strip().lower() or "memory"
+    if backend_label not in {"memory", "redis"}:
+        backend_label = "memory"
+    try:
+        API_KEY_RATE_LIMIT_TOTAL.labels(result=result_label, backend=backend_label).inc()
+    except Exception:
+        pass
 
 
 def set_jobs_status_counts(counts: dict[str, int]) -> None:

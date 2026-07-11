@@ -32,6 +32,9 @@ def test_healthz_ok_includes_request_id() -> None:
     assert modules["image_edge"]["enabled_flag"] is False
     assert modules["random_engine"]["enabled"] is False
     assert modules["random_engine"]["url_configured"] is False
+    assert modules["api_key_rate_limit"]["backend"] == "memory"
+    assert modules["api_key_rate_limit"]["redis_url_configured"] is False
+    assert modules["api_key_rate_limit"]["required"] is False
 
 
 def test_healthz_uses_request_id_header_if_provided() -> None:

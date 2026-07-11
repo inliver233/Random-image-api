@@ -11,6 +11,25 @@ def test_load_settings_dev_defaults() -> None:
     assert s.secret_key
     assert s.admin_username == "admin"
     assert s.admin_password == "admin"
+    assert s.public_api_key_rate_limit_backend == "memory"
+    assert s.redis_url == ""
+
+
+def test_load_settings_api_key_rate_limit_backend() -> None:
+    s = load_settings(
+        {
+            "PUBLIC_API_KEY_RATE_LIMIT_BACKEND": "redis",
+            "REDIS_URL": "redis://127.0.0.1:6379/0",
+        }
+    )
+    assert s.public_api_key_rate_limit_backend == "redis"
+    assert s.redis_url == "redis://127.0.0.1:6379/0"
+
+    s2 = load_settings({"PUBLIC_API_KEY_RATE_LIMIT_BACKEND": "weird"})
+    assert s2.public_api_key_rate_limit_backend == "memory"
+
+    s3 = load_settings({"PUBLIC_API_KEY_REDIS_URL": "redis://alias:6379/1"})
+    assert s3.redis_url == "redis://alias:6379/1"
 
 
 def test_load_settings_prod_requires_secrets() -> None:

@@ -125,6 +125,14 @@ async def healthz(request: Request) -> Any:
         settings = getattr(request.app.state, "settings", None)
         edge_cfg = load_image_edge_config_from_settings(settings) if settings is not None else None
         engine_url = random_engine_base_url(settings) if settings is not None else None
+        rl_backend = (
+            str(getattr(settings, "public_api_key_rate_limit_backend", "memory") or "memory").lower()
+            if settings is not None
+            else "memory"
+        )
+        if rl_backend not in {"memory", "redis"}:
+            rl_backend = "memory"
+        redis_url_configured = bool(str(getattr(settings, "redis_url", "") or "").strip()) if settings is not None else False
         modules = {
             "image_edge": {
                 "enabled_flag": bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False,
@@ -137,6 +145,12 @@ async def healthz(request: Request) -> Any:
                 "traffic_percent": int(getattr(settings, "random_engine_traffic_percent", 100) or 0)
                 if settings is not None
                 else 0,
+            },
+            "api_key_rate_limit": {
+                # Config only — no outbound Redis probe on /healthz.
+                "backend": rl_backend if (rl_backend != "redis" or redis_url_configured) else "memory",
+                "redis_url_configured": redis_url_configured,
+                "required": bool(getattr(settings, "public_api_key_required", False)) if settings is not None else False,
             },
         }
 
