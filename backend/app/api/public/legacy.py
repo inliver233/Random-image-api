@@ -4,51 +4,11 @@ from fastapi import APIRouter, Request
 
 from app.core.admin_request import require_positive_id
 from app.core.errors import ApiError, ErrorCode
-from app.core.image_delivery import deliver_known_image
-from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
-from app.core.proxy_mirror import resolve_proxy_mirror
-from app.core.random_request import force_local_from_query
-from app.core.runtime_config_cache import resolve_runtime_for_request
+from app.core.image_delivery import deliver_public_image_from_request, normalize_image_ext
 from app.db.images_get_by_illust import get_image_by_illust_page
 from app.db.session import create_sessionmaker
 
 router = APIRouter()
-
-
-async def _deliver_legacy_image(
-    *,
-    request: Request,
-    image,
-    pixiv_cat: int,
-    pximg_mirror_host: str | None,
-    proxy: str | None,
-):
-    engine = request.app.state.engine
-    runtime = await resolve_runtime_for_request(request, engine)
-    resolved = resolve_proxy_mirror(
-        runtime=runtime,
-        headers=request.headers,
-        pixiv_cat=int(pixiv_cat),
-        pximg_mirror_host=pximg_mirror_host,
-        proxy=proxy,
-    )
-    force_local = force_local_from_query(request.query_params)
-    return await deliver_known_image(
-        request=request,
-        engine=engine,
-        settings=request.app.state.settings,
-        runtime=runtime,
-        image=image,
-        background_tasks=None,
-        proxy_override=resolved.proxy_override,
-        pixiv_cat=int(pixiv_cat),
-        pximg_mirror_host_override=resolved.pximg_mirror_host_override,
-        force_local=force_local,
-        use_pixiv_cat=resolved.use_pixiv_cat,
-        needs_hydrate=False,
-        should_mark_ok=False,
-        mark_fail_on_upstream=False,
-    )
 
 
 @router.get("/{illust_id}-{page}.{ext}")
@@ -63,10 +23,7 @@ async def legacy_multi(
 ):
     illust_id = require_positive_id(illust_id, invalid_message="Unsupported illust_id")
     page = require_positive_id(page, invalid_message="Unsupported page")
-
-    ext = (ext or "").lower()
-    if ext not in ALLOWED_IMAGE_EXTS:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported ext", status_code=400)
+    ext = normalize_image_ext(ext)
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
@@ -76,12 +33,16 @@ async def legacy_multi(
         if image is None or (image.ext or "").lower() != ext:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
 
-    return await _deliver_legacy_image(
+    return await deliver_public_image_from_request(
         request=request,
         image=image,
         pixiv_cat=pixiv_cat,
         pximg_mirror_host=pximg_mirror_host,
         proxy=proxy,
+        background_tasks=None,
+        needs_hydrate=False,
+        should_mark_ok=False,
+        mark_fail_on_upstream=False,
     )
 
 
@@ -95,10 +56,7 @@ async def legacy_single(
     proxy: str | None = None,
 ):
     illust_id = require_positive_id(illust_id, invalid_message="Unsupported illust_id")
-
-    ext = (ext or "").lower()
-    if ext not in ALLOWED_IMAGE_EXTS:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported ext", status_code=400)
+    ext = normalize_image_ext(ext)
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
@@ -108,10 +66,14 @@ async def legacy_single(
         if image is None or (image.ext or "").lower() != ext:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
 
-    return await _deliver_legacy_image(
+    return await deliver_public_image_from_request(
         request=request,
         image=image,
         pixiv_cat=pixiv_cat,
         pximg_mirror_host=pximg_mirror_host,
         proxy=proxy,
+        background_tasks=None,
+        needs_hydrate=False,
+        should_mark_ok=False,
+        mark_fail_on_upstream=False,
     )

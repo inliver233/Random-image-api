@@ -21,6 +21,7 @@ from app.core.recommendation import DEFAULT_RECOMMENDATION, DEFAULT_SCORE_WEIGHT
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_config_cache import invalidate_runtime_config_cache
 from app.core.runtime_settings import (
+    as_str_list,
     fetch_runtime_settings,
     runtime_config_from_values,
     set_runtime_setting,
@@ -56,22 +57,6 @@ _DEFAULT_SETTINGS = {
     },
     "proxy": {"allowlist_domains": []},
 }
-
-
-def _as_str_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    out: list[str] = []
-    seen: set[str] = set()
-    for item in value:
-        if not isinstance(item, str):
-            continue
-        v = item.strip()
-        if not v or v in seen:
-            continue
-        seen.add(v)
-        out.append(v)
-    return out
 
 
 def _normalize_dedup(value: Any, *, strict: bool) -> dict[str, Any]:
@@ -426,7 +411,7 @@ async def update_settings(
             updates.append(("proxy.route_mode", route_mode))
 
         if "allowlist_domains" in proxy:
-            domains = _as_str_list(proxy.get("allowlist_domains"))
+            domains = as_str_list(proxy.get("allowlist_domains"))
             if len(domains) > 200 or any(len(d) > 200 for d in domains):
                 raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid proxy.allowlist_domains", status_code=400)
             updates.append(("proxy.allowlist_domains", domains))
@@ -495,7 +480,7 @@ async def update_settings(
             else:
                 if not isinstance(raw, list):
                     raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image_proxy.extra_pximg_mirror_hosts", status_code=400)
-                candidates = _as_str_list(raw)
+                candidates = as_str_list(raw)
                 if len(candidates) > 200:
                     raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image_proxy.extra_pximg_mirror_hosts", status_code=400)
                 normalized: list[str] = []

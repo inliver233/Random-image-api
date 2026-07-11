@@ -6,13 +6,14 @@ from fastapi import APIRouter, BackgroundTasks, Query, Request
 
 from app.core.admin_request import require_positive_id
 from app.core.errors import ApiError, ErrorCode
-from app.core.image_delivery import deliver_known_image, needs_image_proxy_hydrate, should_mark_image_ok
-from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
-from app.core.proxy_mirror import resolve_proxy_mirror
+from app.core.image_delivery import (
+    deliver_public_image_from_request,
+    needs_image_proxy_hydrate,
+    normalize_image_ext,
+    should_mark_image_ok,
+)
 from app.core.public_json import public_cursor_list_json, public_ok_json, serialize_public_image
 from app.core.public_list_filters import parse_public_list_filters
-from app.core.random_request import force_local_from_query
-from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.db.images_get import get_image_by_id
 from app.db.images_list import list_images as db_list_images
 from app.db.session import create_sessionmaker
@@ -124,9 +125,8 @@ async def proxy_image(
     pximg_mirror_host: str | None = None,
     proxy: str | None = None,
 ):
-    ext = (ext or "").lower()
-    if ext not in ALLOWED_IMAGE_EXTS:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported ext", status_code=400)
+    image_id = require_positive_id(image_id, invalid_message="Unsupported image_id")
+    ext = normalize_image_ext(ext)
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
@@ -138,28 +138,13 @@ async def proxy_image(
         should_mark_ok = should_mark_image_ok(image)
         needs_hydrate = await needs_image_proxy_hydrate(session, image)
 
-    runtime = await resolve_runtime_for_request(request, engine)
-    resolved = resolve_proxy_mirror(
-        runtime=runtime,
-        headers=request.headers,
-        pixiv_cat=int(pixiv_cat),
+    return await deliver_public_image_from_request(
+        request=request,
+        image=image,
+        pixiv_cat=pixiv_cat,
         pximg_mirror_host=pximg_mirror_host,
         proxy=proxy,
-    )
-    force_local = force_local_from_query(request.query_params)
-
-    return await deliver_known_image(
-        request=request,
-        engine=engine,
-        settings=request.app.state.settings,
-        runtime=runtime,
-        image=image,
         background_tasks=background_tasks,
-        proxy_override=resolved.proxy_override,
-        pixiv_cat=int(pixiv_cat),
-        pximg_mirror_host_override=resolved.pximg_mirror_host_override,
-        force_local=force_local,
-        use_pixiv_cat=resolved.use_pixiv_cat,
         needs_hydrate=bool(needs_hydrate),
         should_mark_ok=bool(should_mark_ok),
         hydrate_reason="image_proxy",

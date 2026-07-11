@@ -8,6 +8,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.admin_request import parse_bool_optional
 from app.core.pximg_reverse_proxy import (
     DEFAULT_PXIMG_MIRROR_HOST,
     normalize_pximg_custom_mirror_host,
@@ -21,21 +22,8 @@ from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 log = get_logger(__name__)
 
 
-def _as_bool(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"true", "1", "yes", "y", "on"}:
-            return True
-        if v in {"false", "0", "no", "n", "off"}:
-            return False
-    return None
-
-
-def _as_str_list(value: Any) -> list[str]:
+def as_str_list(value: Any) -> list[str]:
+    """Strip non-empty strings from a list, de-duplicating first-seen order."""
     if not isinstance(value, list):
         return []
     out: list[str] = []
@@ -104,8 +92,8 @@ async def fetch_runtime_settings(engine: AsyncEngine) -> dict[str, Any]:
 def runtime_config_from_values(values: dict[str, Any]) -> RuntimeConfig:
     defaults = RuntimeConfig.defaults()
 
-    proxy_enabled = _as_bool(values.get("proxy.enabled"))
-    proxy_fail_closed = _as_bool(values.get("proxy.fail_closed"))
+    proxy_enabled = parse_bool_optional(values.get("proxy.enabled"))
+    proxy_fail_closed = parse_bool_optional(values.get("proxy.fail_closed"))
 
     proxy_route_mode_raw = values.get("proxy.route_mode")
     proxy_route_mode = defaults.proxy_route_mode
@@ -114,7 +102,7 @@ def runtime_config_from_values(values: dict[str, Any]) -> RuntimeConfig:
         if candidate in {"pixiv_only", "all", "allowlist", "off"}:
             proxy_route_mode = candidate
 
-    proxy_allowlist_domains = _as_str_list(values.get("proxy.allowlist_domains")) or defaults.proxy_allowlist_domains
+    proxy_allowlist_domains = as_str_list(values.get("proxy.allowlist_domains")) or defaults.proxy_allowlist_domains
 
     proxy_route_pools_raw = values.get("proxy.route_pools")
     proxy_route_pools: dict[str, int] = {}
@@ -141,12 +129,12 @@ def runtime_config_from_values(values: dict[str, Any]) -> RuntimeConfig:
         proxy_default_pool_id = candidate if candidate > 0 else None
 
     image_proxy_use_pixiv_cat_raw = values.get("image_proxy.use_pixiv_cat")
-    image_proxy_use_pixiv_cat = _as_bool(image_proxy_use_pixiv_cat_raw)
+    image_proxy_use_pixiv_cat = parse_bool_optional(image_proxy_use_pixiv_cat_raw)
 
     mirror_host_raw = values.get("image_proxy.pximg_mirror_host")
     mirror_host = normalize_pximg_mirror_host(mirror_host_raw)
 
-    extra_mirrors_raw = _as_str_list(values.get("image_proxy.extra_pximg_mirror_hosts"))
+    extra_mirrors_raw = as_str_list(values.get("image_proxy.extra_pximg_mirror_hosts"))
     extra_mirrors: list[str] = []
     seen_extra: set[str] = set()
     for item in extra_mirrors_raw:
@@ -162,7 +150,7 @@ def runtime_config_from_values(values: dict[str, Any]) -> RuntimeConfig:
         random_defaults = dict(random_defaults_raw)
 
     hide_origin_url_raw = values.get("security.hide_origin_url_in_public_json")
-    hide_origin_url = _as_bool(hide_origin_url_raw)
+    hide_origin_url = parse_bool_optional(hide_origin_url_raw)
 
     rate_limit: dict[str, Any] = {}
     for key, value in values.items():

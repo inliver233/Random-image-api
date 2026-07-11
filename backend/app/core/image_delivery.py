@@ -5,9 +5,11 @@ from typing import Any
 from fastapi import BackgroundTasks
 from fastapi.responses import RedirectResponse
 
+from app.core.errors import ApiError, ErrorCode
 from app.core.http_stream import stream_url
 from app.core.image_edge import resolve_image_edge_redirect_url
 from app.core.origin_stream import prepare_origin_stream
+from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
 from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.random_delivery import (
     attach_background,
@@ -15,8 +17,9 @@ from app.core.random_delivery import (
     build_edge_redirect_response,
     should_mark_image_ok,
 )
-from app.core.random_request import prefer_image_edge
+from app.core.random_request import force_local_from_query, prefer_image_edge
 from app.core.random_strategy import needs_opportunistic_hydrate
+from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.core.time import iso_utc_ms
 from app.db.images_mark import mark_image_failure, mark_image_ok
 from app.jobs.enqueue import enqueue_opportunistic_hydrate_metadata
@@ -24,9 +27,19 @@ from app.jobs.enqueue import enqueue_opportunistic_hydrate_metadata
 # Re-export for callers that import mark-ok helper from image_delivery.
 __all__ = (
     "deliver_known_image",
+    "deliver_public_image_from_request",
     "needs_image_proxy_hydrate",
+    "normalize_image_ext",
     "should_mark_image_ok",
 )
+
+
+def normalize_image_ext(ext: str | None) -> str:
+    """Lowercase image ext and reject values outside the public allowlist."""
+    normalized = (ext or "").lower()
+    if normalized not in ALLOWED_IMAGE_EXTS:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported ext", status_code=400)
+    return normalized
 
 
 async def needs_image_proxy_hydrate(session: Any, image: Any) -> bool:
@@ -41,6 +54,49 @@ async def needs_image_proxy_hydrate(session: Any, image: Any) -> bool:
         await session.execute(sa.select(ImageTag.image_id).where(ImageTag.image_id == int(image.id)).limit(1))
     ).scalar_one_or_none()
     return tag_row is None
+
+
+async def deliver_public_image_from_request(
+    *,
+    request: Any,
+    image: Any,
+    pixiv_cat: int = 0,
+    pximg_mirror_host: str | None = None,
+    proxy: str | None = None,
+    background_tasks: BackgroundTasks | None = None,
+    needs_hydrate: bool = False,
+    should_mark_ok: bool = False,
+    hydrate_reason: str = "image_proxy",
+    mark_fail_on_upstream: bool = False,
+) -> Any:
+    """Resolve runtime + proxy/mirror query flags, then deliver a known image row."""
+    engine = request.app.state.engine
+    runtime = await resolve_runtime_for_request(request, engine)
+    resolved = resolve_proxy_mirror(
+        runtime=runtime,
+        headers=request.headers,
+        pixiv_cat=int(pixiv_cat),
+        pximg_mirror_host=pximg_mirror_host,
+        proxy=proxy,
+    )
+    force_local = force_local_from_query(request.query_params)
+    return await deliver_known_image(
+        request=request,
+        engine=engine,
+        settings=request.app.state.settings,
+        runtime=runtime,
+        image=image,
+        background_tasks=background_tasks,
+        proxy_override=resolved.proxy_override,
+        pixiv_cat=int(pixiv_cat),
+        pximg_mirror_host_override=resolved.pximg_mirror_host_override,
+        force_local=force_local,
+        use_pixiv_cat=resolved.use_pixiv_cat,
+        needs_hydrate=bool(needs_hydrate),
+        should_mark_ok=bool(should_mark_ok),
+        hydrate_reason=str(hydrate_reason),
+        mark_fail_on_upstream=bool(mark_fail_on_upstream),
+    )
 
 
 async def deliver_known_image(
@@ -139,8 +195,6 @@ async def deliver_known_image(
         return resp
     except Exception as exc:
         if mark_fail_on_upstream:
-            from app.core.errors import ApiError, ErrorCode
-
             if isinstance(exc, ApiError) and exc.code in {
                 ErrorCode.UPSTREAM_STREAM_ERROR,
                 ErrorCode.UPSTREAM_403,
