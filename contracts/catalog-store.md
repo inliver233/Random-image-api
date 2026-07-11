@@ -25,6 +25,7 @@ Implementation:
 | `mark_image_ok` / `mark_image_failure` | Delivery quality feedback |
 | `heal_broken_images_for_illust` | After heal hydrate: status `3` → `1` for all pages of an illust; returns healed ids |
 | `delete_images_by_ids` | Admin hard-delete image rows by id; returns ids that existed (caller owns tags / commit / engine publish) |
+| `clear_all_images` | Admin wipe of all image rows; returns rowcount (caller owns tags / commit / empty engine snapshot) |
 
 Public delivery/get paths adopt the port progressively:
 
@@ -37,7 +38,8 @@ Public delivery/get paths adopt the port progressively:
 - `hydrate_metadata` page upsert → `catalog.upsert_hydrated_image_page`
 - `import_images` chunk image upsert → `catalog.bulk_upsert_import_rows` (tags + Import progress counters remain in handler)
 - `heal_url` status recovery → `catalog.heal_broken_images_for_illust`
-- Admin `DELETE /admin/api/images/{id}` + `POST /admin/api/images/bulk-delete` → `catalog.delete_images_by_ids` (image_tags + clear-all remain in handler)
+- Admin `DELETE /admin/api/images/{id}` + `POST /admin/api/images/bulk-delete` → `catalog.delete_images_by_ids` (image_tags remain in handler)
+- Admin `POST /admin/api/images/clear` → `catalog.clear_all_images` (image_tags / Tag wipe remain in handler)
 - Worker `build_default_dispatcher` builds one `CatalogStore` and injects into import/hydrate/heal
 
 Helpers remain available for non-public paths; injected store is preferred via `app.state.catalog_store`.

@@ -286,20 +286,28 @@ async def clear_admin_images(
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
+            # Tags stay outside CatalogStore; clear links (and optional Tag rows) first.
             result_links = await session.execute(sa.delete(ImageTag))
-            result_images = await session.execute(sa.delete(Image))
+            deleted_images = await catalog.clear_all_images(session)
             result_tags = None
             if delete_tags:
                 result_tags = await session.execute(sa.delete(Tag))
 
             await session.commit()
 
-        return admin_ok(request, payload={"deleted_image_tags": _safe_rowcount(result_links),
-            "deleted_images": _safe_rowcount(result_images),
-            "deleted_tags": _safe_rowcount(result_tags) if result_tags is not None else 0}, request_id=rid)
+        return admin_ok(
+            request,
+            payload={
+                "deleted_image_tags": _safe_rowcount(result_links),
+                "deleted_images": int(deleted_images),
+                "deleted_tags": _safe_rowcount(result_tags) if result_tags is not None else 0,
+            },
+            request_id=rid,
+        )
 
     result = await with_sqlite_busy_retry(_op)
     # Full catalog wipe → empty engine snapshot (best-effort).

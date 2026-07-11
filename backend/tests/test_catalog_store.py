@@ -535,6 +535,51 @@ def test_sqlite_catalog_store_list_images(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_sqlite_catalog_store_clear_all_images(tmp_path: Path) -> None:
+    engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_clear.db").as_posix())
+
+    async def _run() -> None:
+        import sqlalchemy as sa
+
+        from app.db.models.images import Image
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        store = build_catalog_store(database_url=str(engine.url))
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            session.add_all(
+                [
+                    Image(
+                        illust_id=1,
+                        page_index=0,
+                        ext="jpg",
+                        original_url="https://example.test/1.jpg",
+                        proxy_path="/i/1.jpg",
+                        random_key=0.1,
+                    ),
+                    Image(
+                        illust_id=2,
+                        page_index=0,
+                        ext="png",
+                        original_url="https://example.test/2.png",
+                        proxy_path="/i/2.png",
+                        random_key=0.2,
+                    ),
+                ]
+            )
+            await session.commit()
+            deleted = await store.clear_all_images(session)
+            await session.commit()
+            assert deleted == 2
+            remaining = int((await session.execute(sa.select(sa.func.count()).select_from(Image))).scalar_one())
+            assert remaining == 0
+            assert await store.clear_all_images(session) == 0
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_sqlite_catalog_store_delete_images_by_ids(tmp_path: Path) -> None:
     engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_delete.db").as_posix())
 

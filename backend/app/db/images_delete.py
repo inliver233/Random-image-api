@@ -29,3 +29,16 @@ async def delete_images_by_ids(
         if rows:
             await session.execute(delete(Image).where(Image.id.in_(chunk)))
     return found
+
+
+async def clear_all_images(session: AsyncSession) -> int:
+    """Delete all Image rows. Caller owns tags / commit.
+
+    Returns SQLAlchemy rowcount when available (0 if unknown).
+    """
+    result = await session.execute(delete(Image))
+    try:
+        rc = int(getattr(result, "rowcount", 0) or 0)
+    except Exception:
+        return 0
+    return rc if rc > 0 else 0
