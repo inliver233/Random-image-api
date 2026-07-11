@@ -7,7 +7,7 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
-from app.core.admin_cursor_query import parse_admin_int_cursor
+from app.core.admin_cursor_query import parse_admin_int_cursor, slice_id_cursor_page
 from app.core.admin_json import admin_cursor_list
 from app.core.request_id import get_or_create_request_id
 from app.db.models.admin_audit import AdminAudit
@@ -40,8 +40,7 @@ async def list_admin_audit(
     async with Session() as session:
         rows = (await session.execute(stmt)).scalars().all()
 
-    items_rows = rows[:limit]
-    next_cursor = int(items_rows[-1].id) if len(rows) > limit and items_rows else None
+    items_rows, next_cursor = slice_id_cursor_page(list(rows), limit)
 
     def _parse_detail(text: str | None) -> dict[str, Any] | None:
         raw = str(text or "").strip()

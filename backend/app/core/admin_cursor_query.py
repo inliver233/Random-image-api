@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from app.core.errors import ApiError, ErrorCode
 
@@ -32,3 +33,16 @@ def parse_admin_int_cursor(
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
 
     return ParsedAdminIntCursor(limit=int(limit), cursor_i=cursor_i)
+
+
+def slice_id_cursor_page(rows: list[Any], limit: int) -> tuple[list[Any], int | None]:
+    """
+    Split id-desc list query results into one page + next cursor id.
+
+    Callers query with limit+1; page is rows[:limit], next_cursor is last page id
+    when an overflow row exists.
+    """
+    page = list(rows[: int(limit)])
+    next_cursor = int(page[-1].id) if len(rows) > int(limit) and page else None
+    return page, next_cursor
+

@@ -4,6 +4,7 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useEffect, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { yesNo } from "../admin/format";
 import { PendingAlert } from "../admin/PendingAlert";
 import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
@@ -173,7 +174,7 @@ const columns = (actions: {
         "-"
       ),
   },
-  { title: "启用", dataIndex: "enabled", key: "enabled", render: (value) => (value ? "是" : "否") },
+  { title: "启用", dataIndex: "enabled", key: "enabled", render: (value) => yesNo(value) },
   {
     title: "状态",
     dataIndex: "status",

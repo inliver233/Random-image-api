@@ -8,13 +8,14 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.api.admin.deps import get_admin_claims
-from app.core.admin_cursor_query import parse_admin_int_cursor
+from app.core.admin_cursor_query import parse_admin_int_cursor, slice_id_cursor_page
 from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.admin_request import (
     load_json_object,
     load_json_object_optional,
     parse_choice,
     parse_int_in_range,
+    parse_max_tokens_per_proxy,
     parse_optional_str,
     parse_positive_int,
     parse_required_bool,
@@ -61,8 +62,7 @@ async def list_proxy_endpoints(
         if cursor_i is not None:
             stmt = stmt.where(ProxyEndpoint.id < int(cursor_i))
         rows = (await session.execute(stmt)).scalars().all()
-        endpoints = list(rows[: int(limit)])
-        next_cursor_i = int(endpoints[-1].id) if len(rows) > int(limit) and endpoints else None
+        endpoints, next_cursor_i = slice_id_cursor_page(list(rows), int(limit))
 
         endpoint_ids = [int(p.id) for p in endpoints]
 
@@ -264,13 +264,7 @@ async def _load_easy_import_json(request: Request) -> dict[str, Any]:
 
     max_tokens_per_proxy = 2
     if "max_tokens_per_proxy" in data:
-        max_tokens_per_proxy = parse_int_in_range(
-            data.get("max_tokens_per_proxy"),
-            field="max_tokens_per_proxy",
-            min_value=1,
-            max_value=1000,
-            invalid_message="Invalid max_tokens_per_proxy",
-        )
+        max_tokens_per_proxy = parse_max_tokens_per_proxy(data.get("max_tokens_per_proxy"))
 
     strict = True
     if "strict" in data:
@@ -347,13 +341,7 @@ async def _load_cleanup_invalid_hosts_json(request: Request) -> dict[str, Any]:
         )
 
     if "max_tokens_per_proxy" in data:
-        out["max_tokens_per_proxy"] = parse_int_in_range(
-            data.get("max_tokens_per_proxy"),
-            field="max_tokens_per_proxy",
-            min_value=1,
-            max_value=1000,
-            invalid_message="Invalid max_tokens_per_proxy",
-        )
+        out["max_tokens_per_proxy"] = parse_max_tokens_per_proxy(data.get("max_tokens_per_proxy"))
 
     return out
 

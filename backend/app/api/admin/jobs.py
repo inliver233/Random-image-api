@@ -6,9 +6,9 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
-from app.core.admin_cursor_query import parse_admin_int_cursor
+from app.core.admin_cursor_query import parse_admin_int_cursor, slice_id_cursor_page
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import parse_choice, parse_optional_str, require_positive_id
+from app.core.admin_request import parse_optional_choice_filter, parse_optional_str, require_positive_id
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.soft_json import soft_json_value
@@ -35,14 +35,12 @@ async def list_jobs(
     limit = parsed.limit
     cursor_i = parsed.cursor_i
 
-    status_norm: str | None = None
-    if status is not None and str(status).strip():
-        status_norm = parse_choice(
-            status,
-            field="status",
-            choices=_ALLOWED_JOB_STATUSES,
-            invalid_message="Unsupported status",
-        )
+    status_norm = parse_optional_choice_filter(
+        status,
+        field="status",
+        choices=_ALLOWED_JOB_STATUSES,
+        invalid_message="Unsupported status",
+    )
 
     # Job type filter is free-form (not an enum); only length is constrained.
     type_norm = parse_optional_str(type, max_len=100, field="type")
@@ -63,8 +61,7 @@ async def list_jobs(
     async with Session() as session:
         rows = ((await session.execute(stmt)).scalars().all())
 
-    items_rows = rows[:limit]
-    next_cursor = int(items_rows[-1].id) if len(rows) > limit and items_rows else None
+    items_rows, next_cursor = slice_id_cursor_page(list(rows), limit)
 
     items = [
         {

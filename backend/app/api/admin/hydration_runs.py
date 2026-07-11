@@ -7,9 +7,15 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
-from app.core.admin_cursor_query import parse_admin_int_cursor
+from app.core.admin_cursor_query import parse_admin_int_cursor, slice_id_cursor_page
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object, parse_choice, parse_positive_int, require_positive_id
+from app.core.admin_request import (
+    load_json_object,
+    parse_choice,
+    parse_optional_choice_filter,
+    parse_positive_int,
+    require_positive_id,
+)
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.soft_json import soft_json_object
@@ -144,14 +150,12 @@ async def list_hydration_runs(
     limit = parsed.limit
     cursor_i = parsed.cursor_i
 
-    status_norm: str | None = None
-    if status is not None and str(status).strip():
-        status_norm = parse_choice(
-            status,
-            field="status",
-            choices=_ALLOWED_RUN_STATUSES,
-            invalid_message="Unsupported status",
-        )
+    status_norm = parse_optional_choice_filter(
+        status,
+        field="status",
+        choices=_ALLOWED_RUN_STATUSES,
+        invalid_message="Unsupported status",
+    )
 
     rid = get_or_create_request_id(request)
     engine = request.app.state.engine
@@ -165,11 +169,10 @@ async def list_hydration_runs(
             stmt = stmt.where(HydrationRun.status == status_norm)
 
         rows = (await session.execute(stmt)).scalars().all()
-        current_rows = rows[:limit]
+        current_rows, next_cursor = slice_id_cursor_page(list(rows), limit)
         run_ids = [str(int(r.id)) for r in current_rows]
         jobs_by_run_id = await _latest_jobs_by_run_ids(session, run_ids=run_ids)
 
-    next_cursor = int(current_rows[-1].id) if len(rows) > limit and current_rows else None
     items = [_serialize_run(row, latest_job=jobs_by_run_id.get(str(int(row.id)))) for row in current_rows]
 
     return admin_cursor_list(request, items=items, next_cursor=next_cursor, request_id=rid)

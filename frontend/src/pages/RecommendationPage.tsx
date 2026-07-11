@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { ActionAlerts } from "../admin/ActionAlerts";
 import { PendingAlert } from "../admin/PendingAlert";
 import { QueryState } from "../admin/QueryState";
+import { asBool, asFloat, asInt, asObject } from "../admin/softCoerce";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 
@@ -93,40 +94,6 @@ const DEFAULTS: Omit<FormValues, "preview_seed"> = {
   dedup_image_penalty: 8.0,
   dedup_author_penalty: 2.5,
 };
-
-function asObject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return value as Record<string, unknown>;
-}
-
-function asBool(value: unknown, fallback: boolean): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number" && (value === 0 || value === 1)) return Boolean(value);
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") return true;
-    if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") return false;
-  }
-  return fallback;
-}
-
-function asInt(value: unknown, fallback: number): number {
-  if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
-  if (typeof value === "string") {
-    const parsed = Number.parseInt(value.trim(), 10);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return fallback;
-}
-
-function asFloat(value: unknown, fallback: number): number {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number.parseFloat(value.trim());
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return fallback;
-}
 
 function asLowerEnum<T extends string>(value: unknown, allowed: Set<T>, fallback: T): T {
   if (typeof value === "string") {

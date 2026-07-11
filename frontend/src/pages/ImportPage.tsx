@@ -12,6 +12,14 @@ import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
+function renderCopyableUrl(value: string) {
+  return (
+    <Typography.Text code copyable={{ text: String(value || "") }}>
+      {String(value || "")}
+    </Typography.Text>
+  );
+}
+
 type ImportFormValues = {
   text: string;
   dry_run: boolean;
@@ -64,11 +72,7 @@ const previewColumns: ColumnsType<ImportCreateResponse["preview"][number]> = [
     title: "URL",
     dataIndex: "url",
     key: "url",
-    render: (value: string) => (
-      <Typography.Text code copyable={{ text: String(value || "") }}>
-        {String(value || "")}
-      </Typography.Text>
-    ),
+    render: (value: string) => renderCopyableUrl(value),
   },
 ];
 
@@ -80,11 +84,7 @@ const errorColumns: ColumnsType<ImportCreateResponse["errors"][number]> = [
     title: "URL",
     dataIndex: "url",
     key: "url",
-    render: (value: string) => (
-      <Typography.Text code copyable={{ text: String(value || "") }}>
-        {String(value || "")}
-      </Typography.Text>
-    ),
+    render: (value: string) => renderCopyableUrl(value),
   },
 ];
 

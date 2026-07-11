@@ -4,6 +4,7 @@ import type { ColumnsType } from "antd/es/table";
 import React from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { yesNo } from "../admin/format";
 import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
@@ -77,7 +78,7 @@ const columns = (actions: {
   deletePendingId: string | null;
 }): ColumnsType<TokenItem> => [
   { title: "标签", dataIndex: "label", key: "label" },
-  { title: "启用", dataIndex: "enabled", key: "enabled", render: (value) => (value ? "是" : "否") },
+  { title: "启用", dataIndex: "enabled", key: "enabled", render: (value) => yesNo(value) },
   { title: "掩码令牌", dataIndex: "refresh_token_masked", key: "refresh_token_masked" },
   { title: "权重", dataIndex: "weight", key: "weight" },
   { title: "错误次数", dataIndex: "error_count", key: "error_count" },

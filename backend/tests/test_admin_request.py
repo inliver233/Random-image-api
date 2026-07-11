@@ -12,6 +12,8 @@ from app.core.admin_request import (
     parse_float_in_range,
     parse_int_clamped,
     parse_int_in_range,
+    parse_max_tokens_per_proxy,
+    parse_optional_choice_filter,
     parse_optional_str,
     parse_positive_int,
     parse_positive_int_list,
@@ -184,6 +186,26 @@ def test_parse_choice() -> None:
     with pytest.raises(ApiError) as ei_missing:
         parse_choice("", field="status", choices={"a", "b"})
     assert ei_missing.value.message == "Unsupported status"
+
+
+def test_parse_optional_choice_filter() -> None:
+    assert parse_optional_choice_filter(None, field="status", choices={"pending", "running"}) is None
+    assert parse_optional_choice_filter("  ", field="status", choices={"pending", "running"}) is None
+    assert parse_optional_choice_filter("PENDING", field="status", choices={"pending", "running"}) == "pending"
+    with pytest.raises(ApiError) as ei:
+        parse_optional_choice_filter("nope", field="status", choices={"pending"}, invalid_message="Unsupported status")
+    assert ei.value.message == "Unsupported status"
+
+
+def test_parse_max_tokens_per_proxy() -> None:
+    assert parse_max_tokens_per_proxy(2) == 2
+    assert parse_max_tokens_per_proxy("10") == 10
+    with pytest.raises(ApiError) as ei_low:
+        parse_max_tokens_per_proxy(0)
+    assert ei_low.value.message == "Invalid max_tokens_per_proxy"
+    with pytest.raises(ApiError) as ei_high:
+        parse_max_tokens_per_proxy(1001)
+    assert ei_high.value.message == "Invalid max_tokens_per_proxy"
 
 
 def test_load_json_object_optional() -> None:

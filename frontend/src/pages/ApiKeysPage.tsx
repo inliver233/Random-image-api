@@ -5,6 +5,7 @@ import React from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
 import { CursorTableCard } from "../admin/CursorTableCard";
+import { yesNo } from "../admin/format";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
@@ -131,7 +132,7 @@ export function ApiKeysPage() {
       dataIndex: "enabled",
       key: "enabled",
       width: 90,
-      render: (value) => (value ? "是" : "否"),
+      render: (value) => yesNo(value),
     },
     { title: "最近使用", dataIndex: "last_used_at", key: "last_used_at", width: 180, render: (v) => v || "-" },
     { title: "创建时间", dataIndex: "created_at", key: "created_at", width: 180 },

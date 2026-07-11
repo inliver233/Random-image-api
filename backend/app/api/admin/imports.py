@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from starlette.datastructures import UploadFile
 
 from app.api.admin.deps import get_admin_claims
-from app.core.admin_cursor_query import parse_admin_int_cursor
+from app.core.admin_cursor_query import parse_admin_int_cursor, slice_id_cursor_page
 from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.admin_request import load_json_object, parse_bool, require_positive_id
 from app.core.data_files import get_sqlite_db_dir, make_file_ref
@@ -32,6 +32,19 @@ from app.jobs.executor import execute_claimed_job
 from app.jobs.handlers.import_images import build_import_images_handler
 
 router = APIRouter()
+
+
+def _serialize_import_job(job: JobRow | None) -> dict[str, Any] | None:
+    if job is None:
+        return None
+    return {
+        "id": str(job.id),
+        "type": job.type,
+        "status": job.status,
+        "attempt": job.attempt,
+        "max_attempts": job.max_attempts,
+        "last_error": job.last_error,
+    }
 
 
 class ImportCreateRequest(BaseModel):
@@ -436,8 +449,7 @@ async def list_imports(
         if cursor_i is not None:
             stmt = stmt.where(Import.id < int(cursor_i))
         rows = (await session.execute(stmt)).scalars().all()
-        items_rows = list(rows[: int(limit)])
-        next_cursor_i = int(items_rows[-1].id) if len(rows) > int(limit) and items_rows else None
+        items_rows, next_cursor_i = slice_id_cursor_page(list(rows), int(limit))
 
         import_ids = [str(int(imp.id)) for imp in items_rows]
         jobs_by_import: dict[str, JobRow] = {}
@@ -471,18 +483,7 @@ async def list_imports(
                 "accepted": int(imp.accepted or 0),
                 "success": int(imp.success or 0),
                 "failed": int(imp.failed or 0),
-                "job": (
-                    {
-                        "id": str(job.id),
-                        "type": job.type,
-                        "status": job.status,
-                        "attempt": job.attempt,
-                        "max_attempts": job.max_attempts,
-                        "last_error": job.last_error,
-                    }
-                    if job is not None
-                    else None
-                ),
+                "job": _serialize_import_job(job),
             }
         )
 
@@ -534,17 +535,6 @@ async def get_import(
                 "success": int(imp.success or 0),
                 "failed": int(imp.failed or 0),
             },
-            "job": (
-                {
-                    "id": str(job.id),
-                    "type": job.type,
-                    "status": job.status,
-                    "attempt": job.attempt,
-                    "max_attempts": job.max_attempts,
-                    "last_error": job.last_error,
-                }
-                if job is not None
-                else None
-            ),
+            "job": _serialize_import_job(job),
             "detail": detail,
         }}, request_id=rid)

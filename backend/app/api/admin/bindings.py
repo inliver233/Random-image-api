@@ -14,6 +14,7 @@ from app.core.admin_request import (
     load_json_object,
     parse_bool,
     parse_int_in_range,
+    parse_max_tokens_per_proxy,
     parse_optional_str,
     parse_positive_int,
     require_positive_id,
@@ -35,13 +36,7 @@ async def _load_recompute_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
     pool_id = parse_positive_int(data.get("pool_id"), field="pool_id")
-    max_tokens_per_proxy = parse_int_in_range(
-        data.get("max_tokens_per_proxy", 2),
-        field="max_tokens_per_proxy",
-        min_value=1,
-        max_value=1000,
-        invalid_message="Invalid max_tokens_per_proxy",
-    )
+    max_tokens_per_proxy = parse_max_tokens_per_proxy(data.get("max_tokens_per_proxy", 2))
 
     strict = parse_bool(data.get("strict"), default=True)
 

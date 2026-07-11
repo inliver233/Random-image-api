@@ -5,6 +5,7 @@ import React, { useEffect } from "react";
 import { ActionAlerts } from "../admin/ActionAlerts";
 import { PendingAlert } from "../admin/PendingAlert";
 import { QueryState } from "../admin/QueryState";
+import { asBool, asInt, asObject } from "../admin/softCoerce";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 
@@ -49,31 +50,6 @@ type SettingsFormValues = {
   pixiv_hydrate_min_interval_ms: number;
   pixiv_hydrate_jitter_ms: number;
 };
-
-function asObject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return value as Record<string, unknown>;
-}
-
-function asBool(value: unknown, fallback: boolean): boolean {
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number" && (value === 0 || value === 1)) return Boolean(value);
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    if (normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on") return true;
-    if (normalized === "false" || normalized === "0" || normalized === "no" || normalized === "off") return false;
-  }
-  return fallback;
-}
-
-function asInt(value: unknown, fallback: number): number {
-  if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
-  if (typeof value === "string") {
-    const parsed = Number.parseInt(value.trim(), 10);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return fallback;
-}
 
 function asStrList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];

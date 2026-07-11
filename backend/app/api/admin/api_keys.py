@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.exc import IntegrityError
 
 from app.api.admin.deps import get_admin_claims
-from app.core.admin_cursor_query import parse_admin_int_cursor
+from app.core.admin_cursor_query import parse_admin_int_cursor, slice_id_cursor_page
 from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.admin_request import load_json_object, parse_bool_optional, parse_optional_str, parse_required_str, require_positive_id
 from app.core.api_keys import api_key_hint, hmac_sha256_hex
@@ -44,8 +44,7 @@ async def list_api_keys(
     async with Session() as session:
         rows = ((await session.execute(stmt)).scalars().all())
 
-    items_rows = rows[:limit]
-    next_cursor = int(items_rows[-1].id) if len(rows) > limit and items_rows else None
+    items_rows, next_cursor = slice_id_cursor_page(list(rows), limit)
 
     items = [
         {

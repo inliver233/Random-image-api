@@ -287,6 +287,41 @@ def parse_choice(
     return text
 
 
+def parse_optional_choice_filter(
+    value: Any,
+    *,
+    field: str,
+    choices: set[str] | frozenset[str] | tuple[str, ...],
+    invalid_message: str | None = None,
+    lower: bool = True,
+) -> str | None:
+    """
+    Optional list-filter choice: blank/missing → None; otherwise parse_choice.
+
+    Used by admin jobs/hydration-runs status query params.
+    """
+    if value is None or not str(value).strip():
+        return None
+    return parse_choice(
+        value,
+        field=field,
+        choices=choices,
+        invalid_message=invalid_message,
+        lower=lower,
+    )
+
+
+def parse_max_tokens_per_proxy(value: Any) -> int:
+    """Parse max_tokens_per_proxy in [1, 1000] with stable Invalid message."""
+    return parse_int_in_range(
+        value,
+        field="max_tokens_per_proxy",
+        min_value=1,
+        max_value=1000,
+        invalid_message="Invalid max_tokens_per_proxy",
+    )
+
+
 def parse_positive_int_list(
     raw: Any,
     *,
