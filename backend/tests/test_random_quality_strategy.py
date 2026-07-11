@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.api.public.random import _quality_score  # noqa: PLC2701
+from app.core.recommendation import quality_score as _quality_score
 from app.db.models.base import Base
 from app.db.models.images import Image
 from app.db.random_pick import pick_random_image

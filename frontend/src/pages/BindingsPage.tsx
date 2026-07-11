@@ -47,6 +47,26 @@ type ProxyPoolsListResponse = {
   request_id: string;
 };
 
+type ProxyEndpointListItem = {
+  id: string;
+  uri_masked: string;
+  enabled: boolean;
+  pools: Array<{
+    id: string;
+    name: string;
+    pool_enabled: boolean;
+    member_enabled: boolean;
+    weight: number;
+  }>;
+};
+
+type ProxyEndpointsResponse = {
+  ok: true;
+  items: ProxyEndpointListItem[];
+  next_cursor?: string | null;
+  request_id: string;
+};
+
 type RecomputeResponse = {
   ok: true;
   pool_id: string;
@@ -205,6 +225,43 @@ export function BindingsPage() {
     enabled: poolId != null && poolId > 0,
     queryFn: () => apiJson<BindingsListResponse>(`/admin/api/bindings?pool_id=${poolId}`),
   });
+
+  // Pool endpoints for override Select (page through cursor so large pools stay complete).
+  const [overrideEndpointOptions, setOverrideEndpointOptions] = useState<Array<{ value: number; label: string }>>([]);
+  React.useEffect(() => {
+    let cancelled = false;
+    async function loadEndpoints() {
+      if (poolId == null || poolId <= 0) {
+        setOverrideEndpointOptions([]);
+        return;
+      }
+      const options: Array<{ value: number; label: string }> = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 50; page += 1) {
+        const qs = new URLSearchParams({ limit: "200" });
+        if (cursor) qs.set("cursor", cursor);
+        const data = await apiJson<ProxyEndpointsResponse>(`/admin/api/proxies/endpoints?${qs.toString()}`);
+        for (const ep of data.items || []) {
+          const membership = (ep.pools || []).find((p) => String(p.id) === String(poolId));
+          if (!membership || !membership.member_enabled) continue;
+          if (!ep.enabled) continue;
+          const id = Number.parseInt(String(ep.id), 10);
+          if (!Number.isFinite(id) || id <= 0) continue;
+          options.push({ value: id, label: `#${id} ${ep.uri_masked || ""}`.trim() });
+        }
+        const next = String(data.next_cursor || "").trim();
+        if (!next) break;
+        cursor = next;
+      }
+      if (!cancelled) setOverrideEndpointOptions(options);
+    }
+    void loadEndpoints().catch(() => {
+      if (!cancelled) setOverrideEndpointOptions([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [poolId]);
 
   const recompute = useMutation({
     mutationFn: (vars: { strict?: boolean } | undefined) => {
@@ -439,12 +496,19 @@ export function BindingsPage() {
           }}
         >
           <Form.Item
-            label="覆盖代理节点ID"
+            label="覆盖代理节点"
             name="override_proxy_id"
-            rules={[{ required: true, message: "请输入代理节点ID" }]}
-            extra="必须在当前代理池内且处于启用状态。可在“代理管理”页面查看节点ID。"
+            rules={[{ required: true, message: "请选择代理节点" }]}
+            extra="仅列出当前代理池内已启用的成员节点。"
           >
-            <InputNumber min={1} placeholder="例如：10" style={{ width: "100%" }} />
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder={overrideEndpointOptions.length ? "选择节点" : "当前池暂无可用节点"}
+              options={overrideEndpointOptions}
+              style={{ width: "100%" }}
+              notFoundContent="暂无可用节点"
+            />
           </Form.Item>
 
           <Form.Item

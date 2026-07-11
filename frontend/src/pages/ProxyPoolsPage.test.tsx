@@ -26,7 +26,9 @@ describe("ProxyPoolsPage", () => {
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
-        if (url.endsWith("/admin/api/proxies/endpoints")) {
+        if (url.includes("/admin/api/proxies/endpoints")) {
+          const parsed = new URL(url, "http://localhost");
+          expect(parsed.searchParams.get("limit")).toBeTruthy();
           return new Response(
             JSON.stringify({
               ok: true,
@@ -38,6 +40,7 @@ describe("ProxyPoolsPage", () => {
                   pools: [{ id: "1", name: "默认代理池", pool_enabled: true, member_enabled: true, weight: 2 }],
                 },
               ],
+              next_cursor: "",
               request_id: "req_eps",
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },

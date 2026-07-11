@@ -11,7 +11,14 @@ from app.core.random_defaults import (
     resolve_recommendation_config,
     resolve_strategy,
 )
+from app.core.random_engine_pick import (
+    build_engine_filters,
+    build_engine_quality_params,
+    orientation_to_engine_str,
+)
 from app.core.random_query import normalize_iso_utc, parse_tag_filters, validate_tag_filters
+from app.core.random_request import parse_random_filters, prefer_image_edge
+from app.core.random_response import build_json_body, build_simple_json_body
 
 
 def test_parse_tag_filters_dedupes() -> None:
@@ -114,3 +121,135 @@ def test_resolve_recommendation_config_query_override() -> None:
     assert cfg.temperature == 2.5
     assert cfg.score_weights["bookmark"] == 9.0
     assert "rec_pick_mode" in cfg.query_override_keys
+
+
+def test_parse_random_filters_adaptive_mobile() -> None:
+    f = parse_random_filters(
+        format="json",
+        redirect=0,
+        seed=None,
+        r18=0,
+        ai_type="any",
+        illust_type="any",
+        orientation="any",
+        layout=None,
+        adaptive=1,
+        pixiv_cat=0,
+        pximg_mirror_host=None,
+        min_width=0,
+        min_height=0,
+        min_pixels=0,
+        min_bookmarks=0,
+        min_views=0,
+        min_comments=0,
+        included_tags=None,
+        excluded_tags=None,
+        user_id=None,
+        illust_id=None,
+        created_from=None,
+        created_to=None,
+        query_params={},
+        headers={"sec-ch-ua-mobile": "?1"},
+    )
+    assert f.layout_norm == "portrait"
+    assert f.min_pixels_i == 1_000_000
+
+
+def test_prefer_image_edge_escape_hatches() -> None:
+    assert prefer_image_edge(proxy_override=None, pixiv_cat=0, pximg_mirror_host_override=None) is True
+    assert prefer_image_edge(proxy_override="i.pixiv.cat", pixiv_cat=0, pximg_mirror_host_override=None) is False
+    assert prefer_image_edge(proxy_override=None, pixiv_cat=1, pximg_mirror_host_override=None) is False
+    assert prefer_image_edge(proxy_override=None, pixiv_cat=0, pximg_mirror_host_override="i.pixiv.re") is False
+    assert prefer_image_edge(proxy_override=None, pixiv_cat=0, pximg_mirror_host_override=None, force_local=True) is False
+
+
+def test_build_engine_filters_and_quality() -> None:
+    assert orientation_to_engine_str(1) == "portrait"
+    filters = build_engine_filters(
+        r18=0,
+        r18_strict=1,
+        ai_type_raw="any",
+        ai_type_i=None,
+        illust_type_i=None,
+        orientation_code=2,
+        min_width_i=0,
+        min_height_i=0,
+        min_pixels_i=0,
+        min_bookmarks_i=0,
+        min_views_i=0,
+        min_comments_i=0,
+        included=["a"],
+        excluded=[],
+        exclude_image_ids={1, 2},
+        user_id=9,
+    )
+    assert filters["orientation"] == "landscape"
+    assert filters["user_id"] == 9
+    assert set(filters["exclude_image_ids"]) == {1, 2}
+    assert build_engine_quality_params(
+        strategy_norm="random",
+        quality_samples_i=8,
+        pick_mode_raw="weighted",
+        temperature=1.0,
+        score_weights={},
+        multipliers={},
+        freshness_half_life_days=30.0,
+        velocity_smooth_days=7.0,
+    ) is None
+    q = build_engine_quality_params(
+        strategy_norm="quality",
+        quality_samples_i=8,
+        pick_mode_raw="weighted",
+        temperature=1.0,
+        score_weights={"bookmark": 1.0},
+        multipliers={},
+        freshness_half_life_days=30.0,
+        velocity_smooth_days=7.0,
+    )
+    assert q is not None
+    assert q["samples"] == 8
+
+
+class _Img:
+    id = 1
+    illust_id = 100
+    page_index = 0
+    ext = "jpg"
+    width = 100
+    height = 200
+    x_restrict = 0
+    ai_type = 0
+    illust_type = 0
+    bookmark_count = 1
+    view_count = 2
+    comment_count = 3
+    user_id = 9
+    user_name = "u"
+    title = "t"
+    created_at_pixiv = "2020-01-01T00:00:00Z"
+
+
+def test_build_json_bodies() -> None:
+    img = _Img()
+    simple = build_simple_json_body(
+        request_id="r1",
+        image=img,
+        proxy_url="/i/1.jpg",
+        origin_url=None,
+        imgproxy_url=None,
+        debug={"a": 1},
+    )
+    assert simple["ok"] is True
+    assert simple["data"]["urls"]["proxy"] == "/i/1.jpg"
+    assert "tags" not in simple["data"]
+    full = build_json_body(
+        request_id="r1",
+        image=img,
+        tags=["x"],
+        proxy_url="/i/1.jpg",
+        origin_url="https://i.pximg.net/x.jpg",
+        imgproxy_url=None,
+        debug={},
+    )
+    assert full["data"]["tags"] == ["x"]
+    assert full["data"]["image"]["title"] == "t"

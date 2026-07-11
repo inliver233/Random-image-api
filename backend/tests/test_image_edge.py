@@ -239,3 +239,98 @@ def test_random_simple_json_proxy_prefers_image_edge(tmp_path: Path, monkeypatch
         assert path == "/img-original/img/2021/02/03/04/05/06/999_p0.jpg"
         expect = _b64url(hmac.new(b"edge-secret", f"{exp}\n{path}".encode("utf-8"), hashlib.sha256).digest())
         assert sig == expect
+
+
+def test_proxy_image_route_prefers_image_edge(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "image_edge_i_route.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("IMAGE_EDGE_ENABLED", "true")
+    monkeypatch.setenv("IMAGE_EDGE_SECRET", "edge-secret")
+    monkeypatch.setenv("IMAGE_EDGE_BASE_URLS", "https://img.example.com")
+    monkeypatch.setenv("IMAGE_EDGE_SIGN_TTL_SECONDS", "3600")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            session.add(
+                Image(
+                    illust_id=42,
+                    page_index=0,
+                    ext="png",
+                    original_url="https://i.pximg.net/img-original/img/2021/02/03/04/05/06/42_p0.png",
+                    proxy_path="/i/1.png",
+                    random_key=0.5,
+                    x_restrict=0,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        resp = client.get("/i/1.png", headers={"X-Request-Id": "req_i_edge"}, follow_redirects=False)
+        assert resp.status_code == 302
+        loc = resp.headers.get("location") or ""
+        assert loc.startswith("https://img.example.com/u/")
+        assert resp.headers.get("x-image-edge") == "1"
+
+        local = client.get("/i/1.png?local=1", headers={"X-Request-Id": "req_i_local"}, follow_redirects=False)
+        # Local stream path may fail upstream in unit env; must NOT be edge 302.
+        assert local.headers.get("x-image-edge") != "1"
+        assert not (local.headers.get("location") or "").startswith("https://img.example.com/")
+
+
+def test_random_image_default_prefers_edge_redirect(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "image_edge_random_default.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("IMAGE_EDGE_ENABLED", "true")
+    monkeypatch.setenv("IMAGE_EDGE_SECRET", "edge-secret")
+    monkeypatch.setenv("IMAGE_EDGE_BASE_URLS", "https://img.example.com")
+    monkeypatch.setenv("IMAGE_EDGE_SIGN_TTL_SECONDS", "3600")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            session.add(
+                Image(
+                    illust_id=77,
+                    page_index=0,
+                    ext="jpg",
+                    original_url="https://i.pximg.net/img-original/img/2021/02/03/04/05/06/77_p0.jpg",
+                    proxy_path="/i/1.jpg",
+                    random_key=0.33,
+                    x_restrict=0,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        resp = client.get("/random?format=image", headers={"X-Request-Id": "req_edge_img"}, follow_redirects=False)
+        assert resp.status_code == 302
+        assert (resp.headers.get("location") or "").startswith("https://img.example.com/u/")
+        assert resp.headers.get("x-image-edge") == "1"
+
+        forced = client.get(
+            "/random?format=image&local=1",
+            headers={"X-Request-Id": "req_edge_local"},
+            follow_redirects=False,
+        )
+        assert forced.headers.get("x-image-edge") != "1"

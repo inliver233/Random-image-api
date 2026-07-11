@@ -63,7 +63,41 @@ describe("BindingsPage", () => {
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
-        if (url.endsWith("/admin/api/bindings?pool_id=1")) {
+        if (url.includes("/admin/api/proxy-pools")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              items: [{ id: "1", name: "pixiv", description: null, enabled: true }],
+              request_id: "req_pools_1",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.includes("/admin/api/proxies/endpoints")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              items: [
+                {
+                  id: "10",
+                  uri_masked: "http://1.2.3.4:8080",
+                  enabled: true,
+                  pools: [{ id: "1", name: "pixiv", pool_enabled: true, member_enabled: true, weight: 1 }],
+                },
+                {
+                  id: "11",
+                  uri_masked: "http://9.9.9.9:8080",
+                  enabled: true,
+                  pools: [{ id: "1", name: "pixiv", pool_enabled: true, member_enabled: true, weight: 1 }],
+                },
+              ],
+              next_cursor: "",
+              request_id: "req_eps_1",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.includes("/admin/api/bindings?pool_id=1") || url.endsWith("/admin/api/bindings?pool_id=1")) {
           listCalls += 1;
           return new Response(
             JSON.stringify({
@@ -154,7 +188,10 @@ describe("BindingsPage", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "设置覆盖" }));
     const dialog = await screen.findByRole("dialog", { name: /设置覆盖代理/ });
-    fireEvent.change(within(dialog).getByPlaceholderText("例如：10"), { target: { value: "11" } });
+    // Select override node #11 from pool endpoint options.
+    const nodeSelect = within(dialog).getByRole("combobox");
+    fireEvent.mouseDown(nodeSelect);
+    fireEvent.click(await screen.findByText(/#11/));
     fireEvent.change(within(dialog).getByPlaceholderText("例如：60"), { target: { value: "30" } });
     fireEvent.change(within(dialog).getByPlaceholderText("例如：临时切换节点排查问题"), { target: { value: "test" } });
 

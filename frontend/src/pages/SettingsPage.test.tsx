@@ -20,6 +20,16 @@ describe("SettingsPage", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
+        if (url.includes("/admin/api/proxy-pools")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              items: [{ id: "1", name: "pixiv", description: null, enabled: true }],
+              request_id: "req_pools",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
         if (url.endsWith("/admin/api/settings") && init?.method === "PUT") {
           const body = init.body ? JSON.parse(String(init.body)) : {};
           expect(body.settings.proxy.enabled).toBe(true);
@@ -33,8 +43,9 @@ describe("SettingsPage", () => {
           expect(body.settings.random.default_attempts).toBe(3);
           expect(body.settings.random.default_r18_strict).toBe(true);
           expect(body.settings.random.fail_cooldown_ms).toBe(600000);
-          expect(body.settings.random.strategy).toBe("quality");
-          expect(body.settings.random.quality_samples).toBe(12);
+          // Strategy / quality_samples ownership moved to Recommendation page.
+          expect(body.settings.random.strategy).toBeUndefined();
+          expect(body.settings.random.quality_samples).toBeUndefined();
           expect(body.settings.security.hide_origin_url_in_public_json).toBe(true);
           expect(body.settings.rate_limit.pixiv_hydrate_min_interval_ms).toBe(800);
           expect(body.settings.rate_limit.pixiv_hydrate_jitter_ms).toBe(200);
@@ -56,7 +67,7 @@ describe("SettingsPage", () => {
                   default_pool_id: "",
                 },
                 image_proxy: { use_pixiv_cat: false, pximg_mirror_host: "i.pixiv.cat", extra_pximg_mirror_hosts: [] },
-                random: { default_attempts: 3, default_r18_strict: true, fail_cooldown_ms: 600000, strategy: "quality", quality_samples: 12 },
+                random: { default_attempts: 3, default_r18_strict: true, fail_cooldown_ms: 600000 },
                 security: { hide_origin_url_in_public_json: true },
                 rate_limit: {},
               },
@@ -83,6 +94,7 @@ describe("SettingsPage", () => {
 
     expect(await screen.findByText("系统设置")).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:\s*req_settings/)).toBeInTheDocument();
+    expect(await screen.findByText(/推荐策略/)).toBeInTheDocument();
   });
 
   it("saves settings", async () => {

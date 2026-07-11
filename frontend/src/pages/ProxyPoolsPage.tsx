@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ApiError, apiJson } from "../api/client";
+import { useCursorList } from "../hooks/useCursorList";
 
 type ProxyPoolItem = {
   id: string;
@@ -47,6 +48,7 @@ type ProxyEndpointListItem = {
 type ProxyEndpointsResponse = {
   ok: true;
   items: ProxyEndpointListItem[];
+  next_cursor?: string | null;
   request_id: string;
 };
 
@@ -93,10 +95,18 @@ export function ProxyPoolsPage() {
     queryFn: () => apiJson<ProxyPoolsListResponse>("/admin/api/proxy-pools"),
   });
 
-  const endpoints = useQuery({
-    queryKey: ["admin", "proxies", "endpoints"],
-    queryFn: () => apiJson<ProxyEndpointsResponse>("/admin/api/proxies/endpoints"),
+  const ENDPOINT_PAGE_SIZE = 200;
+  const endpointsList = useCursorList<ProxyEndpointListItem, ProxyEndpointsResponse>({
+    queryKey: ["admin", "proxies", "endpoints", { limit: ENDPOINT_PAGE_SIZE }],
+    fetchPage: (cursor) => {
+      const qs = new URLSearchParams();
+      qs.set("limit", String(ENDPOINT_PAGE_SIZE));
+      if (cursor) qs.set("cursor", cursor);
+      return apiJson<ProxyEndpointsResponse>(`/admin/api/proxies/endpoints?${qs.toString()}`);
+    },
+    getItemId: (item) => String(item.id),
   });
+  const endpoints = endpointsList.query;
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm] = Form.useForm<CreatePoolFormValues>();
@@ -187,7 +197,7 @@ export function ProxyPoolsPage() {
     },
   });
 
-  const endpointRows = endpoints.data?.items || [];
+  const endpointRows = endpointsList.items;
 
   const endpointSelection = useMemo(() => {
     return {
@@ -207,12 +217,12 @@ export function ProxyPoolsPage() {
   }, [selectedEndpointIds]);
 
   useEffect(() => {
-    if (!configOpen || !configPool || !endpoints.data) return;
+    if (!configOpen || !configPool) return;
 
     const poolId = configPool.id;
     const selected: string[] = [];
     const cfg: Record<string, MemberConfig> = {};
-    for (const ep of endpoints.data.items) {
+    for (const ep of endpointsList.items) {
       const membership = (ep.pools || []).find((p) => String(p.id) === String(poolId));
       if (!membership) continue;
       selected.push(String(ep.id));
@@ -221,7 +231,22 @@ export function ProxyPoolsPage() {
 
     setSelectedEndpointIds(selected);
     setMemberConfig(cfg);
-  }, [configOpen, configPool, endpoints.data]);
+  }, [configOpen, configPool, endpointsList.items]);
+
+  // Auto-load remaining endpoint pages while config modal is open so membership save is complete.
+  useEffect(() => {
+    if (!configOpen) return;
+    if (!endpointsList.hasMore || endpointsList.isLoadingMore || endpoints.isLoading || endpoints.isFetching) return;
+    if (!endpointsList.nextCursor) return;
+    endpointsList.loadMore.mutate(endpointsList.nextCursor);
+  }, [
+    configOpen,
+    endpointsList.hasMore,
+    endpointsList.isLoadingMore,
+    endpointsList.nextCursor,
+    endpoints.isLoading,
+    endpoints.isFetching,
+  ]);
 
   const openEdit = (pool: ProxyPoolItem) => {
     setEditingPool(pool);
@@ -462,18 +487,23 @@ export function ProxyPoolsPage() {
         }
         destroyOnClose
       >
-        {endpoints.isLoading ? (
+        {endpoints.isLoading && endpointRows.length === 0 ? (
           <Skeleton active />
         ) : endpoints.isError ? (
           <Alert type="error" showIcon message="加载代理节点失败" description={requestIdFromError(endpoints.error) ? `请求ID: ${requestIdFromError(endpoints.error)}` : ""} />
+        ) : endpointRows.length === 0 ? (
+          <Alert type="info" showIcon message="暂无代理节点" description="请先在“代理管理”中导入或添加节点，再为代理池配置成员。" />
         ) : (
           <>
-            <Typography.Text type="secondary">请求ID: {endpoints.data?.request_id}</Typography.Text>
+            <Typography.Text type="secondary">
+              请求ID: {endpointsList.listRequestId || endpoints.data?.request_id || "-"}；已加载 {endpointRows.length} 个节点
+              {endpointsList.hasMore ? "（还有更多）" : ""}
+            </Typography.Text>
             <Alert
               type="info"
               showIcon
               message="提示"
-              description="勾选要加入该代理池的节点；未勾选的节点会从该池移除。成员启用/权重仅对当前代理池生效。"
+              description="勾选要加入该代理池的节点；未勾选的节点会从该池移除。成员启用/权重仅对当前代理池生效。列表会自动翻页加载，避免仅保存前 50 条。"
               style={{ marginTop: 12 }}
             />
             <Table<ProxyEndpointListItem>
@@ -486,6 +516,17 @@ export function ProxyPoolsPage() {
               scroll={{ x: 880 }}
               rowSelection={endpointSelection}
             />
+            {endpointsList.hasMore ? (
+              <Button
+                style={{ marginTop: 12 }}
+                loading={endpointsList.isLoadingMore}
+                onClick={() => {
+                  if (endpointsList.nextCursor) endpointsList.loadMore.mutate(endpointsList.nextCursor);
+                }}
+              >
+                加载更多节点
+              </Button>
+            ) : null}
           </>
         )}
       </Modal>

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
@@ -19,6 +18,12 @@ from app.core.pximg_reverse_proxy import (
     pick_pximg_mirror_host_for_request,
     rewrite_pximg_to_mirror,
 )
+from app.core.random_query import (
+    MAX_TAG_FILTERS,
+    normalize_iso_utc,
+    parse_tag_filters,
+    validate_tag_filters,
+)
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.runtime_config_cache import get_cached_runtime_config
 from app.core.time import iso_utc_ms
@@ -32,10 +37,6 @@ from app.db.tags_get import get_tag_names_for_image
 from app.jobs.enqueue import enqueue_opportunistic_hydrate_metadata
 
 router = APIRouter()
-
-_MAX_TAG_FILTERS = 50
-_MAX_TAG_OR_TERMS = 20
-_MAX_TAG_TOTAL_TERMS = 200
 
 
 @router.get("/images")
@@ -91,65 +92,25 @@ async def list_images(
     if min_width < 0 or min_height < 0 or min_pixels < 0:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported min_*", status_code=400)
 
-    def _parse_tag_filters(values: list[str] | None) -> list[str]:
-        out: list[str] = []
-        seen: set[str] = set()
-        for raw in values or []:
-            expr = str(raw or "").strip()
-            if not expr or expr in seen:
-                continue
-            seen.add(expr)
-            out.append(expr)
-        return out
-
-    def _validate_tag_filters(values: list[str]) -> None:
-        total_terms = 0
-        for expr in values:
-            parts: list[str] = []
-            seen_terms: set[str] = set()
-            for part in str(expr).split("|"):
-                term = part.strip()
-                if not term or term in seen_terms:
-                    continue
-                seen_terms.add(term)
-                parts.append(term)
-            if len(parts) > _MAX_TAG_OR_TERMS:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag terms in a group", status_code=400)
-            total_terms += len(parts)
-        if total_terms > _MAX_TAG_TOTAL_TERMS:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag terms", status_code=400)
-
-    included = _parse_tag_filters(included_tags)
-    excluded = _parse_tag_filters(excluded_tags)
-    if len(included) > _MAX_TAG_FILTERS or len(excluded) > _MAX_TAG_FILTERS:
+    included = parse_tag_filters(included_tags)
+    excluded = parse_tag_filters(excluded_tags)
+    if len(included) > MAX_TAG_FILTERS or len(excluded) > MAX_TAG_FILTERS:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag filters", status_code=400)
-    _validate_tag_filters(included)
-    _validate_tag_filters(excluded)
+    validate_tag_filters(included)
+    validate_tag_filters(excluded)
 
     if user_id is not None and int(user_id) <= 0:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported user_id", status_code=400)
     if illust_id is not None and int(illust_id) <= 0:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported illust_id", status_code=400)
 
-    def _normalize_iso_utc(value: str) -> str:
-        raw = (value or "").strip()
-        if not raw:
-            raise ValueError("empty datetime")
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        dt = datetime.fromisoformat(raw)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        dt = dt.astimezone(timezone.utc).replace(microsecond=0)
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
     created_from_norm: str | None = None
     created_to_norm: str | None = None
     try:
         if created_from is not None:
-            created_from_norm = _normalize_iso_utc(created_from)
+            created_from_norm = normalize_iso_utc(created_from)
         if created_to is not None:
-            created_to_norm = _normalize_iso_utc(created_to)
+            created_to_norm = normalize_iso_utc(created_to)
     except Exception:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported created_*", status_code=400)
 

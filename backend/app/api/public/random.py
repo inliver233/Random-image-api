@@ -13,21 +13,13 @@ from app.core.http_stream import stream_url
 from app.core.image_edge import resolve_image_edge_redirect_url, resolve_public_proxy_url
 from app.core.imgproxy import build_signed_processing_url, load_imgproxy_config_from_settings
 from app.core.pximg_reverse_proxy import (
-    normalize_pximg_mirror_host,
     normalize_pximg_proxy,
     pick_pximg_mirror_host_for_request,
     rewrite_pximg_to_mirror,
 )
 from app.core.proxy_routing import select_proxy_uri_for_url
-from app.core.recent_dedup import get_recent_lists, get_recent_sets, record_recent
-from app.core.recommendation import (
-    DEFAULT_RECOMMENDATION,
-    DEFAULT_SCORE_WEIGHTS,
-    as_bool,
-    as_float,
-    parse_recommendation_overrides_from_query,
-    quality_score,
-)
+from app.core.recent_dedup import get_recent_lists, record_recent
+from app.core.recommendation import quality_score
 from app.core.random_defaults import (
     resolve_attempts,
     resolve_dedup,
@@ -37,14 +29,15 @@ from app.core.random_defaults import (
     resolve_recommendation_config,
     resolve_strategy,
 )
-from app.core.random_engine_pick import build_engine_pick_payload, try_pick_via_engine
-from app.core.random_query import (
-    MAX_TAG_FILTERS as _MAX_TAG_FILTERS,
-    build_no_match_error,
-    normalize_iso_utc,
-    parse_tag_filters,
-    validate_tag_filters,
+from app.core.random_engine_pick import (
+    build_engine_filters,
+    build_engine_pick_payload,
+    build_engine_quality_params,
+    try_pick_via_engine,
 )
+from app.core.random_query import build_no_match_error
+from app.core.random_request import local_i_query_string, parse_random_filters, prefer_image_edge
+from app.core.random_response import build_json_body, build_simple_json_body
 from app.core.random_strategy import needs_opportunistic_hydrate, pick_by_quality, pick_by_random_key
 from app.core.runtime_config_cache import get_cached_runtime_config
 from app.core.time import iso_utc_ms
@@ -58,15 +51,8 @@ router = APIRouter()
 # Cap NOT IN size for SQLite plan quality; remaining recent ids still apply logit penalties.
 _RECENT_EXCLUDE_SQL_CAP = 512
 
-# Compatibility aliases for existing tests / internal callers.
-_DEFAULT_SCORE_WEIGHTS = DEFAULT_SCORE_WEIGHTS
-_DEFAULT_RECOMMENDATION = DEFAULT_RECOMMENDATION
-_as_bool = as_bool
-_as_float = as_float
+# Compatibility alias for existing tests (prefer app.core.recommendation.quality_score going forward).
 _quality_score = quality_score
-_parse_recommendation_overrides_from_query = parse_recommendation_overrides_from_query
-_get_recent_sets = get_recent_sets
-_record_recent = record_recent
 
 
 @router.get("/random")
@@ -102,135 +88,63 @@ async def random_image(
     created_from: str | None = None,
     created_to: str | None = None,
 ) -> Any:
-    if format not in {"image", "json", "simple_json"}:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported format", status_code=400)
-    if redirect not in {0, 1}:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported redirect", status_code=400)
-    seed_norm = (seed or "").strip()
-    if seed is not None and not seed_norm:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported seed", status_code=400)
-    if seed_norm and len(seed_norm) > 128:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported seed", status_code=400)
-
-    ai_type_raw = (ai_type or "any").strip().lower()
-    ai_type_i: int | None = None
-    if ai_type_raw in {"", "any"}:
-        ai_type_i = None
-    elif ai_type_raw in {"0", "1"}:
-        ai_type_i = int(ai_type_raw)
-    else:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported ai_type", status_code=400)
-
-    illust_type_raw = (illust_type or "any").strip().lower()
-    illust_type_i: int | None = None
-    if illust_type_raw in {"", "any"}:
-        illust_type_i = None
-    elif illust_type_raw in {"0", "illust", "illustration"}:
-        illust_type_i = 0
-    elif illust_type_raw in {"1", "manga"}:
-        illust_type_i = 1
-    elif illust_type_raw in {"2", "ugoira"}:
-        illust_type_i = 2
-    else:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported illust_type", status_code=400)
-
-    if r18 not in {0, 1, 2}:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported r18", status_code=400)
-
-    if adaptive not in {0, 1}:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported adaptive", status_code=400)
-
-    if pixiv_cat not in {0, 1}:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported pixiv_cat", status_code=400)
-
-    pximg_mirror_host_override: str | None = None
-    if pximg_mirror_host is not None:
-        raw = str(pximg_mirror_host or "").strip()
-        if raw:
-            pximg_mirror_host_override = normalize_pximg_mirror_host(raw)
-            if pximg_mirror_host_override is None:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported pximg_mirror_host", status_code=400)
-
-    layout_source = "orientation"
-    raw_layout = orientation
-    if layout is not None:
-        layout_source = "layout"
-        raw_layout = layout
-
-    layout_norm = (raw_layout or "").strip().lower()
-    alias_map = {"vertical": "portrait", "horizontal": "landscape"}
-    layout_norm = alias_map.get(layout_norm, layout_norm)
-    orientation_map = {"any": None, "portrait": 1, "landscape": 2, "square": 3}
-    if layout_norm not in orientation_map:
-        raise ApiError(
-            code=ErrorCode.BAD_REQUEST,
-            message="Unsupported layout" if layout_source == "layout" else "Unsupported orientation",
-            status_code=400,
-        )
-
-    min_width_i = int(min_width)
-    min_height_i = int(min_height)
-    min_pixels_i = int(min_pixels)
-    min_bookmarks_i = int(min_bookmarks)
-    min_views_i = int(min_views)
-    min_comments_i = int(min_comments)
-    if min_width_i < 0 or min_height_i < 0 or min_pixels_i < 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported min_*", status_code=400)
-    if min_bookmarks_i < 0 or min_views_i < 0 or min_comments_i < 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported min_*", status_code=400)
-
-    # 自适应：在用户没有显式指定的情况下，根据设备类型设置默认的方向/分辨率门槛。
-    # 注意：不会覆盖用户显式传入的 orientation/layout/min_*。
-    if int(adaptive) == 1:
-        qp = request.query_params
-        orientation_explicit = ("layout" in qp) or ("orientation" in qp)
-        min_explicit = ("min_width" in qp) or ("min_height" in qp) or ("min_pixels" in qp)
-
-        ch_mobile = (request.headers.get("sec-ch-ua-mobile") or request.headers.get("Sec-CH-UA-Mobile") or "").strip()
-        if ch_mobile == "?1":
-            is_mobile = True
-        elif ch_mobile == "?0":
-            is_mobile = False
-        else:
-            ua = (request.headers.get("user-agent") or request.headers.get("User-Agent") or "").lower()
-            is_mobile = any(x in ua for x in ("mobi", "android", "iphone", "ipad", "ipod"))
-
-        if not orientation_explicit and layout_norm == "any":
-            layout_norm = "portrait" if is_mobile else "landscape"
-
-        if not min_explicit and min_width_i == 0 and min_height_i == 0 and min_pixels_i == 0:
-            min_pixels_i = 1_000_000 if is_mobile else 2_000_000
-
-    included = parse_tag_filters(included_tags)
-    excluded = parse_tag_filters(excluded_tags)
-
-    if len(included) > _MAX_TAG_FILTERS or len(excluded) > _MAX_TAG_FILTERS:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag filters", status_code=400)
-    validate_tag_filters(included)
-    validate_tag_filters(excluded)
-    if user_id is not None and int(user_id) <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported user_id", status_code=400)
-    if illust_id is not None and int(illust_id) <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported illust_id", status_code=400)
-
-    created_from_norm: str | None = None
-    created_to_norm: str | None = None
-    try:
-        if created_from is not None:
-            created_from_norm = normalize_iso_utc(created_from)
-        if created_to is not None:
-            created_to_norm = normalize_iso_utc(created_to)
-    except Exception:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported created_*", status_code=400)
-
-    if created_from_norm is not None and created_to_norm is not None:
-        if created_from_norm > created_to_norm:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="created_from > created_to", status_code=400)
+    filters = parse_random_filters(
+        format=format,
+        redirect=redirect,
+        seed=seed,
+        r18=r18,
+        ai_type=ai_type,
+        illust_type=illust_type,
+        orientation=orientation,
+        layout=layout,
+        adaptive=adaptive,
+        pixiv_cat=pixiv_cat,
+        pximg_mirror_host=pximg_mirror_host,
+        min_width=min_width,
+        min_height=min_height,
+        min_pixels=min_pixels,
+        min_bookmarks=min_bookmarks,
+        min_views=min_views,
+        min_comments=min_comments,
+        included_tags=included_tags,
+        excluded_tags=excluded_tags,
+        user_id=user_id,
+        illust_id=illust_id,
+        created_from=created_from,
+        created_to=created_to,
+        query_params=request.query_params,
+        headers=request.headers,
+    )
+    format = filters.format
+    redirect = filters.redirect
+    seed_norm = filters.seed_norm
+    ai_type_raw = filters.ai_type_raw
+    ai_type_i = filters.ai_type_i
+    illust_type_raw = filters.illust_type_raw
+    illust_type_i = filters.illust_type_i
+    r18 = filters.r18
+    adaptive = filters.adaptive
+    pixiv_cat = filters.pixiv_cat
+    pximg_mirror_host_override = filters.pximg_mirror_host_override
+    layout_norm = filters.layout_norm
+    orientation_map = filters.orientation_map
+    min_width_i = filters.min_width_i
+    min_height_i = filters.min_height_i
+    min_pixels_i = filters.min_pixels_i
+    min_bookmarks_i = filters.min_bookmarks_i
+    min_views_i = filters.min_views_i
+    min_comments_i = filters.min_comments_i
+    included = filters.included
+    excluded = filters.excluded
+    user_id = filters.user_id
+    illust_id = filters.illust_id
+    created_from_norm = filters.created_from_norm
+    created_to_norm = filters.created_to_norm
 
     def _no_match_error() -> ApiError:
         return build_no_match_error(
             r18=r18,
-            r18_strict=int(r18_strict),
+            r18_strict=int(r18_strict) if r18_strict is not None else 1,
             ai_type_raw=ai_type_raw,
             illust_type_raw=illust_type_raw,
             adaptive=int(adaptive),
@@ -430,53 +344,38 @@ async def random_image(
             if bool(anti_repeat_enabled) and recent_exclude_image_ids:
                 exclude_set.update(int(x) for x in recent_exclude_image_ids)
 
-            orientation_str = "any"
-            ori = orientation_map[layout_norm]
-            if ori == 1:
-                orientation_str = "portrait"
-            elif ori == 2:
-                orientation_str = "landscape"
-            elif ori == 3:
-                orientation_str = "square"
-
-            engine_filters: dict[str, Any] = {
-                "r18": int(r18),
-                "r18_strict": int(r18_strict),
-                "ai_type": ai_type_raw if ai_type_i is not None else "any",
-                "illust_type": str(illust_type_i) if illust_type_i is not None else "any",
-                "orientation": orientation_str,
-                "min_width": int(min_width_i),
-                "min_height": int(min_height_i),
-                "min_pixels": int(min_pixels_i),
-                "min_bookmarks": int(min_bookmarks_i),
-                "min_views": int(min_views_i),
-                "min_comments": int(min_comments_i),
-                "included_tags": included,
-                "excluded_tags": excluded,
-                "exclude_image_ids": list(exclude_set),
-            }
-            if user_id is not None:
-                engine_filters["user_id"] = int(user_id)
-            if illust_id is not None:
-                engine_filters["illust_id"] = int(illust_id)
-            if created_from_norm is not None:
-                engine_filters["created_from"] = created_from_norm
-            if created_to_norm is not None:
-                engine_filters["created_to"] = created_to_norm
-            if fail_cooldown_before is not None:
-                engine_filters["fail_cooldown_before"] = fail_cooldown_before
-
-            quality_params: dict[str, Any] | None = None
-            if strategy_norm == "quality":
-                quality_params = {
-                    "samples": int(quality_samples_i),
-                    "pick_mode": pick_mode_raw,
-                    "temperature": float(temperature),
-                    "weights": score_weights,
-                    "multipliers": multipliers,
-                    "freshness_half_life_days": float(freshness_half_life_days),
-                    "velocity_smooth_days": float(velocity_smooth_days),
-                }
+            engine_filters = build_engine_filters(
+                r18=int(r18),
+                r18_strict=int(r18_strict),
+                ai_type_raw=ai_type_raw,
+                ai_type_i=ai_type_i,
+                illust_type_i=illust_type_i,
+                orientation_code=orientation_map[layout_norm],
+                min_width_i=int(min_width_i),
+                min_height_i=int(min_height_i),
+                min_pixels_i=int(min_pixels_i),
+                min_bookmarks_i=int(min_bookmarks_i),
+                min_views_i=int(min_views_i),
+                min_comments_i=int(min_comments_i),
+                included=included,
+                excluded=excluded,
+                exclude_image_ids=exclude_set,
+                user_id=user_id,
+                illust_id=illust_id,
+                created_from_norm=created_from_norm,
+                created_to_norm=created_to_norm,
+                fail_cooldown_before=fail_cooldown_before,
+            )
+            quality_params = build_engine_quality_params(
+                strategy_norm=strategy_norm,
+                quality_samples_i=int(quality_samples_i),
+                pick_mode_raw=pick_mode_raw,
+                temperature=float(temperature),
+                score_weights=score_weights,
+                multipliers=multipliers,
+                freshness_half_life_days=float(freshness_half_life_days),
+                velocity_smooth_days=float(velocity_smooth_days),
+            )
 
             payload = build_engine_pick_payload(
                 filters=engine_filters,
@@ -546,7 +445,7 @@ async def random_image(
 
         if bool(anti_repeat_enabled):
             try:
-                _record_recent(
+                record_recent(
                     now=time.monotonic(),
                     image_id=int(image.id),
                     user_id=int(image.user_id) if getattr(image, "user_id", None) is not None else None,
@@ -571,7 +470,11 @@ async def random_image(
             # Prefer CF image edge as primary public delivery when configured.
             # Explicit local mirror/proxy overrides keep the local /i/ fallback path.
             edge_url = None
-            if proxy_override is None and int(pixiv_cat) != 1 and pximg_mirror_host_override is None:
+            if prefer_image_edge(
+                proxy_override=proxy_override,
+                pixiv_cat=int(pixiv_cat),
+                pximg_mirror_host_override=pximg_mirror_host_override,
+            ):
                 edge_url = resolve_image_edge_redirect_url(
                     settings=request.app.state.settings,
                     original_url=str(image.original_url),
@@ -583,15 +486,11 @@ async def random_image(
                     headers={"Cache-Control": "no-store", "X-Image-Edge": "1"},
                 )
             else:
-                qp: list[tuple[str, str]] = []
-                if proxy_override is not None:
-                    qp.append(("proxy", str(proxy_override)))
-                else:
-                    if int(pixiv_cat) == 1:
-                        qp.append(("pixiv_cat", "1"))
-                    if pximg_mirror_host_override is not None:
-                        qp.append(("pximg_mirror_host", str(pximg_mirror_host_override)))
-                qs = ("?" + "&".join([f"{k}={v}" for k, v in qp])) if qp else ""
+                qs = local_i_query_string(
+                    proxy_override=proxy_override,
+                    pixiv_cat=int(pixiv_cat),
+                    pximg_mirror_host_override=pximg_mirror_host_override,
+                )
                 resp = RedirectResponse(
                     url=f"/i/{image.id}.{image.ext}{qs}",
                     status_code=302,
@@ -622,98 +521,43 @@ async def random_image(
             except Exception:
                 imgproxy_url = None
 
+        request_id = getattr(getattr(request, "state", None), "request_id", None) or "req_unknown"
+        proxy_url = resolve_public_proxy_url(
+            settings=request.app.state.settings,
+            original_url=str(image.original_url),
+            local_proxy_path=f"/i/{image.id}.{image.ext}",
+        )
         if format == "simple_json":
-            return {
-                "ok": True,
-                "code": "OK",
-                "request_id": getattr(getattr(request, "state", None), "request_id", None) or "req_unknown",
-                "data": {
-                    "image": {
-                        "id": str(image.id),
-                        "illust_id": str(image.illust_id),
-                        "page_index": image.page_index,
-                        "ext": image.ext,
-                        "width": image.width,
-                        "height": image.height,
-                        "x_restrict": image.x_restrict,
-                        "ai_type": image.ai_type,
-                        "illust_type": getattr(image, "illust_type", None),
-                        "bookmark_count": getattr(image, "bookmark_count", None),
-                        "view_count": getattr(image, "view_count", None),
-                        "comment_count": getattr(image, "comment_count", None),
-                        "user": {
-                            "id": str(image.user_id) if image.user_id is not None else None,
-                            "name": image.user_name,
-                        },
-                    },
-                    "urls": {
-                        "proxy": resolve_public_proxy_url(
-                            settings=request.app.state.settings,
-                            original_url=str(image.original_url),
-                            local_proxy_path=f"/i/{image.id}.{image.ext}",
-                        ),
-                        "origin": origin_url,
-                        "imgproxy": imgproxy_url,
-                    },
-                    "debug": {
-                        **debug,
-                    },
-                },
-            }
+            return build_simple_json_body(
+                request_id=request_id,
+                image=image,
+                proxy_url=proxy_url,
+                origin_url=origin_url,
+                imgproxy_url=imgproxy_url,
+                debug=debug,
+            )
 
-        return {
-            "ok": True,
-            "code": "OK",
-            "request_id": getattr(getattr(request, "state", None), "request_id", None) or "req_unknown",
-            "data": {
-                "image": {
-                    "id": str(image.id),
-                    "illust_id": str(image.illust_id),
-                    "page_index": image.page_index,
-                    "ext": image.ext,
-                    "width": image.width,
-                    "height": image.height,
-                    "x_restrict": image.x_restrict,
-                    "ai_type": image.ai_type,
-                    "illust_type": getattr(image, "illust_type", None),
-                    "bookmark_count": getattr(image, "bookmark_count", None),
-                    "view_count": getattr(image, "view_count", None),
-                    "comment_count": getattr(image, "comment_count", None),
-                    "user": {
-                        "id": str(image.user_id) if image.user_id is not None else None,
-                        "name": image.user_name,
-                    },
-                    "title": image.title,
-                    "created_at_pixiv": image.created_at_pixiv,
-                },
-                "tags": tags,
-                "urls": {
-                    "proxy": resolve_public_proxy_url(
-                        settings=request.app.state.settings,
-                        original_url=str(image.original_url),
-                        local_proxy_path=f"/i/{image.id}.{image.ext}",
-                    ),
-                    "origin": origin_url,
-                    "imgproxy": imgproxy_url,
-                    "legacy_single": f"/{image.illust_id}.{image.ext}",
-                    "legacy_multi": f"/{image.illust_id}-{image.page_index + 1}.{image.ext}",
-                },
-                "debug": {
-                    **debug,
-                },
-            },
-        }
+        return build_json_body(
+            request_id=request_id,
+            image=image,
+            tags=tags,
+            proxy_url=proxy_url,
+            origin_url=origin_url,
+            imgproxy_url=imgproxy_url,
+            debug=debug,
+        )
 
     tried_ids: set[int] = set()
     last_error: ApiError | None = None
     attempts_i = int(attempts)
     runtime_stream = runtime
     # When edge is enabled and client did not force local mirror/proxy, hand bytes off to CF.
-    prefer_edge_redirect = (
-        proxy_override is None
-        and int(pixiv_cat) != 1
-        and pximg_mirror_host_override is None
-        and str(request.query_params.get("local") or "").strip() not in {"1", "true", "yes"}
+    force_local = str(request.query_params.get("local") or "").strip().lower() in {"1", "true", "yes"}
+    prefer_edge_redirect = prefer_image_edge(
+        proxy_override=proxy_override,
+        pixiv_cat=int(pixiv_cat),
+        pximg_mirror_host_override=pximg_mirror_host_override,
+        force_local=force_local,
     )
 
     for _ in range(attempts_i):
@@ -737,7 +581,7 @@ async def random_image(
             if edge_url:
                 if bool(anti_repeat_enabled):
                     try:
-                        _record_recent(
+                        record_recent(
                             now=time.monotonic(),
                             image_id=int(image_id),
                             user_id=user_id_for_recent,
@@ -795,7 +639,7 @@ async def random_image(
             )
             if bool(anti_repeat_enabled):
                 try:
-                    _record_recent(
+                    record_recent(
                         now=time.monotonic(),
                         image_id=int(image_id),
                         user_id=user_id_for_recent,
