@@ -541,7 +541,8 @@ def build_hydrate_metadata_handler(
                 run.failed = int(run.failed or 0) + int(failed_inc)
                 run.updated_at = now_iso
                 if last_error is not None:
-                    run.last_error = (str(last_error) or "")[:500]
+                    # Admin-visible field: keep same redact/truncate order as proxy last_error sinks.
+                    run.last_error = truncate_text(redact_text(str(last_error) or ""), max_len=500)
                 await session.commit()
 
         await with_sqlite_busy_retry(_op)
