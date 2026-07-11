@@ -5,8 +5,10 @@ import pytest
 from app.core.errors import ApiError
 from app.core.random_defaults import (
     resolve_attempts,
+    resolve_dedup,
     resolve_quality_samples,
     resolve_r18_strict,
+    resolve_recommendation_config,
     resolve_strategy,
 )
 from app.core.random_query import normalize_iso_utc, parse_tag_filters, validate_tag_filters
@@ -69,3 +71,46 @@ def test_resolve_quality_samples_hard_cap() -> None:
             r18=0,
             anti_repeat_enabled=False,
         )
+
+
+def test_resolve_dedup_runtime_override() -> None:
+    cfg = resolve_dedup(
+        {
+            "dedup": {
+                "enabled": False,
+                "window_s": 120,
+                "max_images": 10,
+                "max_authors": 5,
+                "strict": True,
+                "image_penalty": 3.5,
+                "author_penalty": 1.25,
+            }
+        }
+    )
+    assert cfg.enabled is False
+    assert cfg.window_s == 120.0
+    assert cfg.max_images == 10
+    assert cfg.max_authors == 5
+    assert cfg.strict is True
+    assert cfg.image_penalty == 3.5
+    assert cfg.author_penalty == 1.25
+
+
+def test_resolve_recommendation_config_query_override() -> None:
+    class QP(dict):
+        def get(self, key, default=None):  # type: ignore[no-untyped-def]
+            return super().get(key, default)
+
+        def keys(self):  # type: ignore[no-untyped-def]
+            return super().keys()
+
+    qp = QP({"rec_pick_mode": "best", "rec_temperature": "2.5", "rec_w_bookmark": "9"})
+    cfg = resolve_recommendation_config(
+        random_defaults={"recommendation": {"pick_mode": "weighted", "temperature": 1.0}},
+        query_params=qp,
+    )
+    assert cfg.source == "query"
+    assert cfg.pick_mode == "best"
+    assert cfg.temperature == 2.5
+    assert cfg.score_weights["bookmark"] == 9.0
+    assert "rec_pick_mode" in cfg.query_override_keys

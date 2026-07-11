@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import random
-import math
 import time
 from typing import Any
 
@@ -31,9 +30,11 @@ from app.core.recommendation import (
 )
 from app.core.random_defaults import (
     resolve_attempts,
+    resolve_dedup,
     resolve_fail_cooldown_ms,
     resolve_quality_samples,
     resolve_r18_strict,
+    resolve_recommendation_config,
     resolve_strategy,
 )
 from app.core.random_engine_pick import build_engine_pick_payload, try_pick_via_engine
@@ -316,61 +317,14 @@ async def random_image(
 
     rng = random.Random(seed_norm) if seed_norm else random
     time_boost_enabled = not bool(seed_norm)
-    dedup_enabled_setting = True
-    dedup_window_s = 20.0 * 60.0
-    dedup_max_images = 5000
-    dedup_max_authors = 2000
-    dedup_strict = False
-    dedup_image_penalty = 8.0
-    dedup_author_penalty = 2.5
-    dedup_raw = random_defaults.get("dedup")
-    if isinstance(dedup_raw, dict):
-        v = _as_bool(dedup_raw.get("enabled"))
-        if v is not None:
-            dedup_enabled_setting = bool(v)
-
-        window_raw = dedup_raw.get("window_s")
-        if window_raw is not None:
-            try:
-                dedup_window_s = float(max(0.0, min(float(window_raw), 24.0 * 60.0 * 60.0)))
-            except Exception:
-                pass
-
-        max_images_raw = dedup_raw.get("max_images")
-        if max_images_raw is not None:
-            try:
-                dedup_max_images = int(max(1, min(int(max_images_raw), 200_000)))
-            except Exception:
-                pass
-
-        max_authors_raw = dedup_raw.get("max_authors")
-        if max_authors_raw is not None:
-            try:
-                dedup_max_authors = int(max(1, min(int(max_authors_raw), 200_000)))
-            except Exception:
-                pass
-
-        v = _as_bool(dedup_raw.get("strict"))
-        if v is not None:
-            dedup_strict = bool(v)
-
-        image_pen_raw = dedup_raw.get("image_penalty")
-        if image_pen_raw is not None:
-            try:
-                v = float(image_pen_raw)
-                if math.isfinite(v):
-                    dedup_image_penalty = float(max(0.0, min(v, 1000.0)))
-            except Exception:
-                pass
-
-        author_pen_raw = dedup_raw.get("author_penalty")
-        if author_pen_raw is not None:
-            try:
-                v = float(author_pen_raw)
-                if math.isfinite(v):
-                    dedup_author_penalty = float(max(0.0, min(v, 1000.0)))
-            except Exception:
-                pass
+    dedup = resolve_dedup(random_defaults)
+    dedup_enabled_setting = bool(dedup.enabled)
+    dedup_window_s = float(dedup.window_s)
+    dedup_max_images = int(dedup.max_images)
+    dedup_max_authors = int(dedup.max_authors)
+    dedup_strict = bool(dedup.strict)
+    dedup_image_penalty = float(dedup.image_penalty)
+    dedup_author_penalty = float(dedup.author_penalty)
 
     anti_repeat_enabled = bool(dedup_enabled_setting) and bool(time_boost_enabled) and user_id is None and illust_id is None
     recent_image_ids: set[int] = set()
@@ -418,63 +372,18 @@ async def random_image(
     quality_samples_scaled = bool(quality_plan.scaled)
     quality_samples_source = quality_plan.source
 
-    recommendation_raw = random_defaults.get("recommendation")
-    recommendation_source = "fallback"
-    recommendation_obj: dict[str, Any] = {}
-    if isinstance(recommendation_raw, dict):
-        recommendation_source = "runtime"
-        recommendation_obj = dict(recommendation_raw)
-
-    rec_overrides, rec_override_keys = _parse_recommendation_overrides_from_query(getattr(request, "query_params", None))
-    if rec_overrides:
-        recommendation_source = "query"
-        # Shallow merge: keep unspecified runtime defaults, override only what user passes.
-        recommendation_obj = dict(recommendation_obj)
-        for k, v in rec_overrides.items():
-            if k in {"score_weights", "multipliers"}:
-                base_raw = recommendation_obj.get(k)
-                base = dict(base_raw) if isinstance(base_raw, dict) else {}
-                if isinstance(v, dict):
-                    base.update(v)
-                recommendation_obj[k] = base
-            else:
-                recommendation_obj[k] = v
-
-    pick_mode_raw = str(recommendation_obj.get("pick_mode") or _DEFAULT_RECOMMENDATION["pick_mode"]).strip().lower()
-    if pick_mode_raw not in {"best", "weighted"}:
-        pick_mode_raw = str(_DEFAULT_RECOMMENDATION["pick_mode"])
-
-    temperature_raw = _as_float(recommendation_obj.get("temperature"), default=float(_DEFAULT_RECOMMENDATION["temperature"]))
-    temperature = float(max(0.05, min(float(temperature_raw), 100.0)))
-
-    score_weights_raw = recommendation_obj.get("score_weights")
-    score_weights_obj = score_weights_raw if isinstance(score_weights_raw, dict) else {}
-    score_weights: dict[str, float] = {}
-    for key, default_value in _DEFAULT_SCORE_WEIGHTS.items():
-        v = _as_float(score_weights_obj.get(key), default=float(default_value))
-        score_weights[key] = float(max(-100.0, min(float(v), 100.0)))
-
-    multipliers_default = _DEFAULT_RECOMMENDATION["multipliers"]
-    multipliers_raw = recommendation_obj.get("multipliers")
-    multipliers_obj = multipliers_raw if isinstance(multipliers_raw, dict) else {}
-    multipliers: dict[str, float] = {}
-    for key, default_value in multipliers_default.items():
-        v = _as_float(multipliers_obj.get(key), default=float(default_value))
-        multipliers[key] = float(max(0.0, min(float(v), 100.0)))
-
-    freshness_half_life_days_default = float(_DEFAULT_RECOMMENDATION["freshness_half_life_days"])
-    freshness_half_life_days = freshness_half_life_days_default
-    if "freshness_half_life_days" in recommendation_obj:
-        v = _as_float(recommendation_obj.get("freshness_half_life_days"), default=float("nan"))
-        if math.isfinite(float(v)):
-            freshness_half_life_days = float(max(0.1, min(float(v), 3650.0)))
-
-    velocity_smooth_days_default = float(_DEFAULT_RECOMMENDATION["velocity_smooth_days"])
-    velocity_smooth_days = velocity_smooth_days_default
-    if "velocity_smooth_days" in recommendation_obj:
-        v = _as_float(recommendation_obj.get("velocity_smooth_days"), default=float("nan"))
-        if math.isfinite(float(v)):
-            velocity_smooth_days = float(max(0.0, min(float(v), 3650.0)))
+    rec_cfg = resolve_recommendation_config(
+        random_defaults=random_defaults,
+        query_params=getattr(request, "query_params", None),
+    )
+    recommendation_source = rec_cfg.source
+    rec_override_keys = rec_cfg.query_override_keys
+    pick_mode_raw = rec_cfg.pick_mode
+    temperature = float(rec_cfg.temperature)
+    score_weights = rec_cfg.score_weights
+    multipliers = rec_cfg.multipliers
+    freshness_half_life_days = float(rec_cfg.freshness_half_life_days)
+    velocity_smooth_days = float(rec_cfg.velocity_smooth_days)
 
     debug_base = {
         "attempts": int(attempts),
