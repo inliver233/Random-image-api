@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import random
-import os
 import math
 import time
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
@@ -33,7 +31,21 @@ from app.core.recommendation import (
     quality_score,
     score_image_with_time_boosts,
 )
+from app.core.random_defaults import (
+    resolve_attempts,
+    resolve_fail_cooldown_ms,
+    resolve_quality_samples,
+    resolve_r18_strict,
+    resolve_strategy,
+)
 from app.core.random_engine_pick import build_engine_pick_payload, try_pick_via_engine
+from app.core.random_query import (
+    MAX_TAG_FILTERS as _MAX_TAG_FILTERS,
+    build_no_match_error,
+    normalize_iso_utc,
+    parse_tag_filters,
+    validate_tag_filters,
+)
 from app.core.runtime_config_cache import get_cached_runtime_config
 from app.core.time import iso_utc_ms
 from app.db.images_mark import mark_image_failure, mark_image_ok
@@ -44,9 +56,6 @@ from app.jobs.enqueue import enqueue_opportunistic_hydrate_metadata
 
 router = APIRouter()
 
-_MAX_TAG_FILTERS = 50
-_MAX_TAG_OR_TERMS = 20
-_MAX_TAG_TOTAL_TERMS = 200
 # Cap NOT IN size for SQLite plan quality; remaining recent ids still apply logit penalties.
 _RECENT_EXCLUDE_SQL_CAP = 512
 
@@ -193,73 +202,25 @@ async def random_image(
         if not min_explicit and min_width_i == 0 and min_height_i == 0 and min_pixels_i == 0:
             min_pixels_i = 1_000_000 if is_mobile else 2_000_000
 
-    def _parse_tag_filters(values: list[str] | None) -> list[str]:
-        """
-        Tag filters support "AND of groups" where each query param is one group.
-
-        Examples:
-        - included_tags=girl&included_tags=boy  -> girl AND boy
-        - included_tags=girl|boy               -> girl OR boy
-        - included_tags=girl|boy&included_tags=white|black -> (girl OR boy) AND (white OR black)
-        """
-        out: list[str] = []
-        seen: set[str] = set()
-        for raw in values or []:
-            expr = str(raw or "").strip()
-            if not expr or expr in seen:
-                continue
-            seen.add(expr)
-            out.append(expr)
-        return out
-
-    included = _parse_tag_filters(included_tags)
-    excluded = _parse_tag_filters(excluded_tags)
-
-    def _validate_tag_filters(values: list[str]) -> None:
-        total_terms = 0
-        for expr in values:
-            parts: list[str] = []
-            seen_terms: set[str] = set()
-            for part in str(expr).split("|"):
-                term = part.strip()
-                if not term or term in seen_terms:
-                    continue
-                seen_terms.add(term)
-                parts.append(term)
-            if len(parts) > _MAX_TAG_OR_TERMS:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag terms in a group", status_code=400)
-            total_terms += len(parts)
-        if total_terms > _MAX_TAG_TOTAL_TERMS:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag terms", status_code=400)
+    included = parse_tag_filters(included_tags)
+    excluded = parse_tag_filters(excluded_tags)
 
     if len(included) > _MAX_TAG_FILTERS or len(excluded) > _MAX_TAG_FILTERS:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many tag filters", status_code=400)
-    _validate_tag_filters(included)
-    _validate_tag_filters(excluded)
+    validate_tag_filters(included)
+    validate_tag_filters(excluded)
     if user_id is not None and int(user_id) <= 0:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported user_id", status_code=400)
     if illust_id is not None and int(illust_id) <= 0:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported illust_id", status_code=400)
 
-    def _normalize_iso_utc(value: str) -> str:
-        raw = (value or "").strip()
-        if not raw:
-            raise ValueError("empty datetime")
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        dt = datetime.fromisoformat(raw)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        dt = dt.astimezone(timezone.utc).replace(microsecond=0)
-        return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
     created_from_norm: str | None = None
     created_to_norm: str | None = None
     try:
         if created_from is not None:
-            created_from_norm = _normalize_iso_utc(created_from)
+            created_from_norm = normalize_iso_utc(created_from)
         if created_to is not None:
-            created_to_norm = _normalize_iso_utc(created_to)
+            created_to_norm = normalize_iso_utc(created_to)
     except Exception:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported created_*", status_code=400)
 
@@ -268,64 +229,27 @@ async def random_image(
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="created_from > created_to", status_code=400)
 
     def _no_match_error() -> ApiError:
-        applied_filters: dict[str, Any] = {
-            "r18": r18,
-            "r18_strict": int(r18_strict),
-            "ai_type": ai_type_raw,
-            "illust_type": illust_type_raw,
-            "adaptive": int(adaptive),
-            "orientation": layout_norm,
-            "min_width": int(min_width_i),
-            "min_height": int(min_height_i),
-            "min_pixels": int(min_pixels_i),
-            "min_bookmarks": int(min_bookmarks_i),
-            "min_views": int(min_views_i),
-            "min_comments": int(min_comments_i),
-        }
-        if included:
-            applied_filters["included_tags"] = included
-        if excluded:
-            applied_filters["excluded_tags"] = excluded
-        if user_id is not None:
-            applied_filters["user_id"] = int(user_id)
-        if illust_id is not None:
-            applied_filters["illust_id"] = int(illust_id)
-        if created_from_norm is not None:
-            applied_filters["created_from"] = created_from_norm
-        if created_to_norm is not None:
-            applied_filters["created_to"] = created_to_norm
-
-        suggestions: list[str] = ["运行元数据补全任务以提升元数据覆盖率"]
-        if r18 == 0 and int(r18_strict) == 1:
-            suggestions.append("将 r18_strict=0 以允许未知 x_restrict（冷启动阶段更容易命中）")
-        if layout_norm != "any":
-            suggestions.append("将 orientation=any（取消方向限制）")
-        if int(min_width_i) > 0 or int(min_height_i) > 0 or int(min_pixels_i) > 0:
-            suggestions.append("降低 min_width/min_height/min_pixels（放宽分辨率门槛）")
-        if int(min_bookmarks_i) > 0 or int(min_views_i) > 0 or int(min_comments_i) > 0:
-            suggestions.append("降低 min_bookmarks/min_views/min_comments（放宽热度门槛）")
-        if included:
-            suggestions.append("放宽 included_tags（减少必须包含的标签）")
-        if excluded:
-            suggestions.append("放宽 excluded_tags（减少必须排除的标签）")
-        if user_id is not None:
-            suggestions.append("移除 user_id 过滤")
-        if illust_id is not None:
-            suggestions.append("移除 illust_id 过滤")
-        if ai_type_i is not None:
-            suggestions.append("将 ai_type=any（取消 AI 限制）")
-        if illust_type_i is not None:
-            suggestions.append("将 illust_type=any（取消作品类型限制）")
-        if created_from_norm is not None or created_to_norm is not None:
-            suggestions.append("扩大 created_from/created_to 时间范围")
-        if int(adaptive) == 1:
-            suggestions.append("若自适应导致过滤过严，可尝试 adaptive=0 或显式设置 min_*")
-
-        return ApiError(
-            code=ErrorCode.NO_MATCH,
-            message="没有匹配的图片。",
-            status_code=404,
-            details={"hints": {"applied_filters": applied_filters, "suggestions": suggestions}},
+        return build_no_match_error(
+            r18=r18,
+            r18_strict=int(r18_strict),
+            ai_type_raw=ai_type_raw,
+            illust_type_raw=illust_type_raw,
+            adaptive=int(adaptive),
+            layout_norm=layout_norm,
+            min_width_i=int(min_width_i),
+            min_height_i=int(min_height_i),
+            min_pixels_i=int(min_pixels_i),
+            min_bookmarks_i=int(min_bookmarks_i),
+            min_views_i=int(min_views_i),
+            min_comments_i=int(min_comments_i),
+            included=included,
+            excluded=excluded,
+            user_id=user_id,
+            illust_id=illust_id,
+            created_from_norm=created_from_norm,
+            created_to_norm=created_to_norm,
+            ai_type_i=ai_type_i,
+            illust_type_i=illust_type_i,
         )
 
     engine = request.app.state.engine
@@ -361,83 +285,15 @@ async def random_image(
 
     random_defaults = runtime.random_defaults if isinstance(runtime.random_defaults, dict) else {}
 
-    attempts_source = "query"
-    attempts_i = 3
-    if attempts is not None:
-        try:
-            attempts_i = int(attempts)
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported attempts", status_code=400) from exc
-    else:
-        raw = random_defaults.get("default_attempts")
-        if raw is None:
-            attempts_source = "fallback"
-            attempts_i = 3
-        else:
-            attempts_source = "runtime"
-            try:
-                attempts_i = int(raw)
-            except Exception:
-                attempts_i = 3
-    if attempts_i < 1 or attempts_i > 10:
-        if attempts_source == "query":
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported attempts", status_code=400)
-        attempts_source = "fallback"
-        attempts_i = 3
-    attempts = int(attempts_i)
+    attempts_resolved = resolve_attempts(attempts, random_defaults)
+    attempts_source = attempts_resolved.source
+    attempts = int(attempts_resolved.value)
 
-    r18_strict_source = "query"
-    r18_strict_i = 1
-    if r18_strict is not None:
-        try:
-            r18_strict_i = int(r18_strict)
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported r18_strict", status_code=400) from exc
-    else:
-        raw = random_defaults.get("default_r18_strict")
-        if raw is None:
-            r18_strict_source = "fallback"
-            r18_strict_i = 1
-        elif isinstance(raw, bool):
-            r18_strict_source = "runtime"
-            r18_strict_i = 1 if raw else 0
-        else:
-            r18_strict_source = "runtime"
-            try:
-                r18_strict_i = int(raw)
-            except Exception:
-                r18_strict_i = 1
-    if r18_strict_i not in {0, 1}:
-        if r18_strict_source == "query":
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported r18_strict", status_code=400)
-        r18_strict_source = "fallback"
-        r18_strict_i = 1
-    r18_strict = int(r18_strict_i)
+    r18_strict_resolved = resolve_r18_strict(r18_strict, random_defaults)
+    r18_strict_source = r18_strict_resolved.source
+    r18_strict = int(r18_strict_resolved.value)
 
-    fail_cooldown_source = "runtime"
-    fail_cooldown_ms = random_defaults.get("fail_cooldown_ms")
-    try:
-        fail_cooldown_ms_i = int(fail_cooldown_ms) if fail_cooldown_ms is not None else None
-    except Exception:
-        fail_cooldown_ms_i = None
-
-    if fail_cooldown_ms_i is None:
-        fail_cooldown_source = "fallback"
-        cooldown_s_raw = (os.environ.get("RANDOM_FAIL_COOLDOWN_SECONDS") or "600").strip()
-        try:
-            cooldown_s = int(cooldown_s_raw)
-        except Exception:
-            cooldown_s = 600
-        cooldown_s = max(0, min(int(cooldown_s), 24 * 60 * 60))
-        fail_cooldown_ms_i = int(cooldown_s) * 1000
-    fail_cooldown_ms_i = max(0, min(int(fail_cooldown_ms_i), 24 * 60 * 60 * 1000))
-
-    request_now = datetime.now(timezone.utc)
-    fail_cooldown_before = (
-        iso_utc_ms(request_now - timedelta(milliseconds=int(fail_cooldown_ms_i)))
-        if int(fail_cooldown_ms_i) > 0
-        else None
-    )
+    fail_cooldown_ms_i, fail_cooldown_source, fail_cooldown_before = resolve_fail_cooldown_ms(random_defaults)
 
     pick_kwargs: dict[str, Any] = {
         "r18": r18,
@@ -535,96 +391,34 @@ async def random_image(
             # Prefer newest ids for hard SQL exclusion.
             recent_exclude_image_ids = list(dict.fromkeys(int(x) for x in recent_image_list[-_RECENT_EXCLUDE_SQL_CAP:]))
 
-    strategy_raw = (strategy or "").strip().lower()
-    strategy_source = "query"
-    if not strategy_raw:
-        strategy_source = "runtime"
-        strategy_raw = str(random_defaults.get("strategy") or "").strip().lower()
-    if not strategy_raw:
-        strategy_source = "fallback"
-        strategy_raw = "quality"
-    if strategy_raw not in {"quality", "random"}:
-        if strategy_source == "query":
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported strategy", status_code=400)
-        strategy_source = "fallback"
-        strategy_raw = "quality"
+    strategy_norm, strategy_source = resolve_strategy(strategy, random_defaults)
 
-    strategy_norm = strategy_raw
-
-    quality_samples_i: int
-    quality_samples_source = "query"
-    if quality_samples is not None:
-        try:
-            quality_samples_i = int(quality_samples)
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported quality_samples", status_code=400) from exc
-    else:
-        raw = random_defaults.get("quality_samples")
-        if raw is None:
-            quality_samples_source = "fallback"
-            quality_samples_i = 12
-        else:
-            quality_samples_source = "runtime"
-            try:
-                quality_samples_i = int(raw)
-            except Exception:
-                quality_samples_i = 12
-    # Hard cap keeps latency/CPU bounded on SQLite even under strict multi-filter loads.
-    # Explicit query values may still request higher (up to 200) for debugging.
-    _QUALITY_SAMPLES_MAX_QUERY = 200
-    _QUALITY_SAMPLES_MAX_AUTO = 64
-    if quality_samples_i < 1 or quality_samples_i > _QUALITY_SAMPLES_MAX_QUERY:
-        if quality_samples_source == "query":
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported quality_samples", status_code=400)
-        quality_samples_source = "fallback"
-        quality_samples_i = 12
-    elif quality_samples_source != "query" and quality_samples_i > _QUALITY_SAMPLES_MAX_AUTO:
-        quality_samples_i = _QUALITY_SAMPLES_MAX_AUTO
-
-    quality_samples_base = int(quality_samples_i)
-    quality_samples_multiplier = 1
-    if quality_samples is None and strategy_norm == "quality" and bool(time_boost_enabled):
-        strictness = 0
-        strictness += 3 * int(len(included))
-        strictness += 2 * int(len(excluded))
-        if int(min_bookmarks_i) > 0:
-            strictness += 2
-        if int(min_views_i) > 0:
-            strictness += 1
-        if int(min_comments_i) > 0:
-            strictness += 1
-        if int(min_pixels_i) > 0:
-            strictness += 1
-        if int(min_width_i) > 0 or int(min_height_i) > 0:
-            strictness += 1
-        if ai_type_i is not None:
-            strictness += 1
-        if illust_type_i is not None:
-            strictness += 1
-        if orientation_map[layout_norm] is not None:
-            strictness += 1
-        if created_from_norm is not None or created_to_norm is not None:
-            strictness += 1
-        if int(r18) == 1:
-            strictness += 1
-        if bool(anti_repeat_enabled):
-            strictness += 1
-
-        if strictness >= 9:
-            quality_samples_multiplier = 4
-        elif strictness >= 6:
-            quality_samples_multiplier = 3
-        elif strictness >= 3:
-            quality_samples_multiplier = 2
-        else:
-            quality_samples_multiplier = 1
-
-        quality_samples_i = min(
-            _QUALITY_SAMPLES_MAX_AUTO,
-            int(max(1, int(quality_samples_base) * int(quality_samples_multiplier))),
-        )
-
-    quality_samples_scaled = bool(quality_samples_i != quality_samples_base)
+    quality_plan = resolve_quality_samples(
+        quality_samples=quality_samples,
+        random_defaults=random_defaults,
+        strategy_norm=strategy_norm,
+        time_boost_enabled=bool(time_boost_enabled),
+        included=included,
+        excluded=excluded,
+        min_bookmarks_i=int(min_bookmarks_i),
+        min_views_i=int(min_views_i),
+        min_comments_i=int(min_comments_i),
+        min_pixels_i=int(min_pixels_i),
+        min_width_i=int(min_width_i),
+        min_height_i=int(min_height_i),
+        ai_type_i=ai_type_i,
+        illust_type_i=illust_type_i,
+        orientation_set=orientation_map[layout_norm] is not None,
+        created_from_norm=created_from_norm,
+        created_to_norm=created_to_norm,
+        r18=int(r18),
+        anti_repeat_enabled=bool(anti_repeat_enabled),
+    )
+    quality_samples_i = int(quality_plan.samples)
+    quality_samples_base = int(quality_plan.base)
+    quality_samples_multiplier = int(quality_plan.multiplier)
+    quality_samples_scaled = bool(quality_plan.scaled)
+    quality_samples_source = quality_plan.source
 
     recommendation_raw = random_defaults.get("recommendation")
     recommendation_source = "fallback"
@@ -685,9 +479,9 @@ async def random_image(
             velocity_smooth_days = float(max(0.0, min(float(v), 3650.0)))
 
     debug_base = {
-        "attempts": int(attempts_i),
+        "attempts": int(attempts),
         "attempts_source": attempts_source,
-        "r18_strict": int(r18_strict_i),
+        "r18_strict": int(r18_strict),
         "r18_strict_source": r18_strict_source,
         "fail_cooldown_ms": int(fail_cooldown_ms_i),
         "fail_cooldown_source": fail_cooldown_source,
