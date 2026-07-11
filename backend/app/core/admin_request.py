@@ -158,6 +158,33 @@ def parse_float_in_range(
     return f
 
 
+def parse_choice(
+    value: Any,
+    *,
+    field: str,
+    choices: set[str] | frozenset[str] | tuple[str, ...],
+    default: str | None = None,
+    invalid_message: str | None = None,
+    lower: bool = True,
+) -> str:
+    """
+    Parse a string choice from a fixed set.
+
+    Empty/missing uses default when provided; otherwise raises with invalid_message.
+    """
+    invalid = invalid_message or f"Unsupported {field}"
+    text = str(value or "").strip()
+    if lower:
+        text = text.lower()
+    if not text:
+        if default is not None:
+            return default
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+    if text not in choices:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+    return text
+
+
 def parse_positive_int_list(
     raw: Any,
     *,

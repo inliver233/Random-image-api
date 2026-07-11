@@ -14,6 +14,7 @@ from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.admin_request import (
     load_json_object,
     parse_bool_optional,
+    parse_choice,
     parse_int_in_range,
     parse_optional_str,
     parse_positive_int,
@@ -215,24 +216,32 @@ async def list_proxy_endpoints(
 
 
 def _parse_conflict_policy(value: Any) -> str:
-    v = str(value or "").strip().lower() or "skip"
-    if v not in {"skip", "overwrite"}:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported conflict_policy", status_code=400)
-    return v
+    return parse_choice(
+        value,
+        field="conflict_policy",
+        choices=frozenset({"skip", "overwrite"}),
+        default="skip",
+    )
 
 
 def _parse_easy_conflict_policy(value: Any) -> str:
-    v = str(value or "").strip().lower() or "skip_non_easy_proxies"
-    if v not in {"skip_non_easy_proxies", "skip", "overwrite"}:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported conflict_policy", status_code=400)
-    return v
+    return parse_choice(
+        value,
+        field="conflict_policy",
+        choices=frozenset({"skip_non_easy_proxies", "skip", "overwrite"}),
+        default="skip_non_easy_proxies",
+    )
 
 
 
 async def _load_import_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
-    text = parse_required_str(data.get("text"), field="text")
+    # Preserve raw text (line endings / trailing spaces); only emptiness uses strip.
+    text = str(data.get("text") or "")
+    if not text.strip():
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing text", status_code=400)
+
     source = parse_optional_str(data.get("source"), field="source") or "manual"
     conflict_policy = _parse_conflict_policy(data.get("conflict_policy"))
 
@@ -377,11 +386,8 @@ async def _load_cleanup_invalid_hosts_json(request: Request) -> dict[str, Any]:
         out[key] = bool(v)
 
     if "max_tokens_per_proxy" in data:
-        try:
-            n = int(data.get("max_tokens_per_proxy"))
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid max_tokens_per_proxy", status_code=400) from exc
-        if n <= 0 or n > 1000:
+        n = parse_positive_int(data.get("max_tokens_per_proxy"), field="max_tokens_per_proxy")
+        if n > 1000:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid max_tokens_per_proxy", status_code=400)
         out["max_tokens_per_proxy"] = int(n)
 

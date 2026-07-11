@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object, parse_positive_int
+from app.core.admin_request import load_json_object, parse_choice, parse_positive_int
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
@@ -104,9 +104,13 @@ async def _latest_jobs_by_run_ids(session, *, run_ids: list[str]) -> dict[str, J
 async def _load_create_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
-    run_type = str(data.get("type") or "backfill").strip().lower() or "backfill"
-    if run_type not in {"backfill", "manual"}:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid type", status_code=400)
+    run_type = parse_choice(
+        data.get("type"),
+        field="type",
+        choices=frozenset({"backfill", "manual"}),
+        default="backfill",
+        invalid_message="Invalid type",
+    )
 
     criteria = data.get("criteria")
     if criteria is None:
@@ -152,9 +156,14 @@ async def list_hydration_runs(
     limit = parsed.limit
     cursor_i = parsed.cursor_i
 
-    status_norm = str(status or "").strip().lower() or None
-    if status_norm is not None and status_norm not in _ALLOWED_RUN_STATUSES:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported status", status_code=400)
+    status_norm: str | None = None
+    if status is not None and str(status).strip():
+        status_norm = parse_choice(
+            status,
+            field="status",
+            choices=_ALLOWED_RUN_STATUSES,
+            invalid_message="Unsupported status",
+        )
 
     rid = get_or_create_request_id(request)
     engine = request.app.state.engine

@@ -5,6 +5,7 @@ import pytest
 from app.core.admin_request import (
     parse_bool,
     parse_bool_optional,
+    parse_choice,
     parse_float_in_range,
     parse_int_in_range,
     parse_optional_str,
@@ -93,6 +94,17 @@ def test_parse_float_in_range() -> None:
     with pytest.raises(ApiError) as ei_bad:
         parse_float_in_range("x", field="weight", min_value=0.0, max_value=100.0)
     assert ei_bad.value.message == "Unsupported weight"
+
+
+def test_parse_choice() -> None:
+    assert parse_choice(None, field="conflict_policy", choices={"skip", "overwrite"}, default="skip") == "skip"
+    assert parse_choice(" OVERWRITE ", field="conflict_policy", choices={"skip", "overwrite"}, default="skip") == "overwrite"
+    with pytest.raises(ApiError) as ei:
+        parse_choice("merge", field="conflict_policy", choices={"skip", "overwrite"}, default="skip")
+    assert ei.value.message == "Unsupported conflict_policy"
+    with pytest.raises(ApiError) as ei_missing:
+        parse_choice("", field="status", choices={"a", "b"})
+    assert ei_missing.value.message == "Unsupported status"
 
 
 def test_parse_positive_int_list() -> None:
