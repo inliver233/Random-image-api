@@ -1,35 +1,21 @@
 from __future__ import annotations
 
-import random
-import time
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
 from fastapi.responses import RedirectResponse
 
-from app.core.errors import ApiError, ErrorCode
+from app.core.errors import ApiError
 from app.core.image_edge import resolve_image_edge_redirect_url, resolve_public_proxy_url
 from app.core.imgproxy import build_signed_processing_url, load_imgproxy_config_from_settings
 from app.core.proxy_mirror import resolve_proxy_mirror
-from app.core.recent_dedup import get_recent_lists
-from app.core.random_defaults import (
-    build_pick_kwargs,
-    build_random_debug_base,
-    resolve_attempts,
-    resolve_dedup,
-    resolve_fail_cooldown_ms,
-    resolve_quality_samples,
-    resolve_r18_strict,
-    resolve_recommendation_config,
-    resolve_strategy,
-)
 from app.core.random_delivery import (
     attach_background,
     build_edge_redirect_response,
     deliver_random_image_stream,
     schedule_edge_side_effects,
 )
-from app.core.random_engine_pick import pick_with_strategy
+from app.core.random_pick_context import build_random_pick_context
 from app.core.random_query import build_no_match_error
 from app.core.random_request import local_i_query_string, parse_random_filters, prefer_image_edge
 from app.core.random_response import build_json_body, build_simple_json_body
@@ -39,9 +25,6 @@ from app.db.tags_get import get_tag_names_for_image
 from app.db.session import create_sessionmaker
 
 router = APIRouter()
-
-# Cap NOT IN size for SQLite plan quality; remaining recent ids still apply logit penalties.
-_RECENT_EXCLUDE_SQL_CAP = 512
 
 
 @router.get("/random")
@@ -106,7 +89,6 @@ async def random_image(
     )
     format = filters.format
     redirect = filters.redirect
-    seed_norm = filters.seed_norm
     ai_type_raw = filters.ai_type_raw
     ai_type_i = filters.ai_type_i
     illust_type_raw = filters.illust_type_raw
@@ -116,7 +98,6 @@ async def random_image(
     pixiv_cat = filters.pixiv_cat
     pximg_mirror_host_override = filters.pximg_mirror_host_override
     layout_norm = filters.layout_norm
-    orientation_map = filters.orientation_map
     min_width_i = filters.min_width_i
     min_height_i = filters.min_height_i
     min_pixels_i = filters.min_pixels_i
@@ -178,185 +159,28 @@ async def random_image(
     mirror_host = resolved_proxy.mirror_host
 
     random_defaults = runtime.random_defaults if isinstance(runtime.random_defaults, dict) else {}
-
-    attempts_resolved = resolve_attempts(attempts, random_defaults)
-    attempts_source = attempts_resolved.source
-    attempts = int(attempts_resolved.value)
-
-    r18_strict_resolved = resolve_r18_strict(r18_strict, random_defaults)
-    r18_strict_source = r18_strict_resolved.source
-    r18_strict = int(r18_strict_resolved.value)
-
-    fail_cooldown_ms_i, fail_cooldown_source, fail_cooldown_before = resolve_fail_cooldown_ms(random_defaults)
-
-    pick_kwargs: dict[str, Any] = build_pick_kwargs(
-        r18=int(r18),
-        r18_strict=int(r18_strict),
-        ai_type_i=ai_type_i,
-        illust_type_i=illust_type_i,
-        orientation=orientation_map[layout_norm],
-        min_width_i=int(min_width_i),
-        min_height_i=int(min_height_i),
-        min_pixels_i=int(min_pixels_i),
-        min_bookmarks_i=int(min_bookmarks_i),
-        min_views_i=int(min_views_i),
-        min_comments_i=int(min_comments_i),
-        included=included,
-        excluded=excluded,
-        user_id=user_id,
-        illust_id=illust_id,
-        created_from_norm=created_from_norm,
-        created_to_norm=created_to_norm,
-        fail_cooldown_before=fail_cooldown_before,
-    )
-
-    rng = random.Random(seed_norm) if seed_norm else random
-    time_boost_enabled = not bool(seed_norm)
-    dedup = resolve_dedup(random_defaults)
-    dedup_enabled_setting = bool(dedup.enabled)
-    dedup_window_s = float(dedup.window_s)
-    dedup_max_images = int(dedup.max_images)
-    dedup_max_authors = int(dedup.max_authors)
-    dedup_strict = bool(dedup.strict)
-    dedup_image_penalty = float(dedup.image_penalty)
-    dedup_author_penalty = float(dedup.author_penalty)
-
-    anti_repeat_enabled = bool(dedup_enabled_setting) and bool(time_boost_enabled) and user_id is None and illust_id is None
-    recent_image_ids: set[int] = set()
-    recent_author_ids: set[int] = set()
-    recent_exclude_image_ids: list[int] = []
-    if anti_repeat_enabled:
-        recent_image_list, recent_author_list = get_recent_lists(
-            time.monotonic(),
-            window_s=float(dedup_window_s),
-            max_images=int(dedup_max_images),
-            max_authors=int(dedup_max_authors),
-        )
-        recent_image_ids = set(int(x) for x in recent_image_list)
-        recent_author_ids = set(int(x) for x in recent_author_list)
-        if recent_image_list:
-            # Prefer newest ids for hard SQL exclusion.
-            recent_exclude_image_ids = list(dict.fromkeys(int(x) for x in recent_image_list[-_RECENT_EXCLUDE_SQL_CAP:]))
-
-    strategy_norm, strategy_source = resolve_strategy(strategy, random_defaults)
-
-    quality_plan = resolve_quality_samples(
+    pick_ctx = build_random_pick_context(
+        filters=filters,
+        random_defaults=random_defaults,
+        attempts=attempts,
+        r18_strict=r18_strict,
+        strategy=strategy,
         quality_samples=quality_samples,
-        random_defaults=random_defaults,
-        strategy_norm=strategy_norm,
-        time_boost_enabled=bool(time_boost_enabled),
-        included=included,
-        excluded=excluded,
-        min_bookmarks_i=int(min_bookmarks_i),
-        min_views_i=int(min_views_i),
-        min_comments_i=int(min_comments_i),
-        min_pixels_i=int(min_pixels_i),
-        min_width_i=int(min_width_i),
-        min_height_i=int(min_height_i),
-        ai_type_i=ai_type_i,
-        illust_type_i=illust_type_i,
-        orientation_set=orientation_map[layout_norm] is not None,
-        created_from_norm=created_from_norm,
-        created_to_norm=created_to_norm,
-        r18=int(r18),
-        anti_repeat_enabled=bool(anti_repeat_enabled),
+        query_params=request.query_params,
     )
-    quality_samples_i = int(quality_plan.samples)
-    quality_samples_base = int(quality_plan.base)
-    quality_samples_multiplier = int(quality_plan.multiplier)
-    quality_samples_scaled = bool(quality_plan.scaled)
-    quality_samples_source = quality_plan.source
-
-    rec_cfg = resolve_recommendation_config(
-        random_defaults=random_defaults,
-        query_params=getattr(request, "query_params", None),
-    )
-    recommendation_source = rec_cfg.source
-    rec_override_keys = rec_cfg.query_override_keys
-    pick_mode_raw = rec_cfg.pick_mode
-    temperature = float(rec_cfg.temperature)
-    score_weights = rec_cfg.score_weights
-    multipliers = rec_cfg.multipliers
-    freshness_half_life_days = float(rec_cfg.freshness_half_life_days)
-    velocity_smooth_days = float(rec_cfg.velocity_smooth_days)
-
-    debug_base = build_random_debug_base(
-        attempts=int(attempts),
-        attempts_source=attempts_source,
-        r18_strict=int(r18_strict),
-        r18_strict_source=r18_strict_source,
-        fail_cooldown_ms=int(fail_cooldown_ms_i),
-        fail_cooldown_source=fail_cooldown_source,
-        strategy_norm=strategy_norm,
-        strategy_source=strategy_source,
-        quality_samples_i=int(quality_samples_i),
-        quality_samples_base=int(quality_samples_base),
-        quality_samples_multiplier=int(quality_samples_multiplier),
-        quality_samples_scaled=bool(quality_samples_scaled),
-        quality_samples_source=quality_samples_source,
-        anti_repeat_enabled=bool(anti_repeat_enabled),
-        dedup_enabled_setting=bool(dedup_enabled_setting),
-        dedup_window_s=float(dedup_window_s),
-        dedup_max_images=int(dedup_max_images),
-        dedup_max_authors=int(dedup_max_authors),
-        dedup_strict=bool(dedup_strict),
-        dedup_image_penalty=float(dedup_image_penalty),
-        dedup_author_penalty=float(dedup_author_penalty),
-        time_boost_enabled=bool(time_boost_enabled),
-        recommendation_source=recommendation_source,
-        rec_override_keys=list(rec_override_keys or []),
-        freshness_half_life_days=float(freshness_half_life_days),
-        velocity_smooth_days=float(velocity_smooth_days),
-    )
+    # Keep no-match filter summary in sync with resolved default when query omits r18_strict.
+    r18_strict = int(pick_ctx.r18_strict)
 
     async def _pick_with_strategy(
         *,
         session: Any,
         exclude_image_ids: list[int] | None = None,
     ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
-        return await pick_with_strategy(
+        return await pick_ctx.pick(
             session=session,
             settings=getattr(request.app.state, "settings", None),
             httpx_client=getattr(request.app.state, "httpx_client", None),
-            rng=rng,
-            pick_kwargs=pick_kwargs,
-            debug_base=debug_base,
-            strategy_norm=strategy_norm,
-            seed_norm=seed_norm,
-            r18=int(r18),
-            r18_strict=int(r18_strict),
-            ai_type_raw=ai_type_raw,
-            ai_type_i=ai_type_i,
-            illust_type_i=illust_type_i,
-            orientation_code=orientation_map[layout_norm],
-            min_width_i=int(min_width_i),
-            min_height_i=int(min_height_i),
-            min_pixels_i=int(min_pixels_i),
-            min_bookmarks_i=int(min_bookmarks_i),
-            min_views_i=int(min_views_i),
-            min_comments_i=int(min_comments_i),
-            included=included,
-            excluded=excluded,
-            user_id=user_id,
-            illust_id=illust_id,
-            created_from_norm=created_from_norm,
-            created_to_norm=created_to_norm,
-            fail_cooldown_before=fail_cooldown_before,
-            quality_samples_i=int(quality_samples_i),
-            pick_mode_raw=pick_mode_raw,
-            temperature=float(temperature),
-            score_weights=score_weights,
-            multipliers=multipliers,
-            freshness_half_life_days=float(freshness_half_life_days),
-            velocity_smooth_days=float(velocity_smooth_days),
-            time_boost_enabled=bool(time_boost_enabled),
-            anti_repeat_enabled=bool(anti_repeat_enabled),
-            recent_exclude_image_ids=recent_exclude_image_ids,
-            recent_image_ids=recent_image_ids,
-            recent_author_ids=recent_author_ids,
-            dedup_strict=bool(dedup_strict),
-            dedup_image_penalty=float(dedup_image_penalty),
-            dedup_author_penalty=float(dedup_author_penalty),
+            filters=filters,
             exclude_image_ids=exclude_image_ids,
         )
 
@@ -377,10 +201,10 @@ async def random_image(
             image_id=int(image.id),
             illust_id=int(image.illust_id),
             user_id=int(image.user_id) if getattr(image, "user_id", None) is not None else None,
-            anti_repeat_enabled=bool(anti_repeat_enabled),
-            dedup_window_s=float(dedup_window_s),
-            dedup_max_images=int(dedup_max_images),
-            dedup_max_authors=int(dedup_max_authors),
+            anti_repeat_enabled=bool(pick_ctx.anti_repeat_enabled),
+            dedup_window_s=float(pick_ctx.dedup_window_s),
+            dedup_max_images=int(pick_ctx.dedup_max_images),
+            dedup_max_authors=int(pick_ctx.dedup_max_authors),
             needs_hydrate=needs_opportunistic_hydrate(image),
             hydrate_reason="random",
             mark_ok_on_edge=False,
@@ -484,14 +308,14 @@ async def random_image(
         httpx_transport=getattr(request.app.state, "httpx_transport", None),
         httpx_client=getattr(request.app.state, "httpx_client", None),
         range_header=request.headers.get("Range"),
-        attempts=int(attempts),
+        attempts=int(pick_ctx.attempts),
         prefer_edge_redirect=prefer_edge_redirect,
         use_pixiv_cat=use_pixiv_cat,
         mirror_host=mirror_host,
-        anti_repeat_enabled=bool(anti_repeat_enabled),
-        dedup_window_s=float(dedup_window_s),
-        dedup_max_images=int(dedup_max_images),
-        dedup_max_authors=int(dedup_max_authors),
+        anti_repeat_enabled=bool(pick_ctx.anti_repeat_enabled),
+        dedup_window_s=float(pick_ctx.dedup_window_s),
+        dedup_max_images=int(pick_ctx.dedup_max_images),
+        dedup_max_authors=int(pick_ctx.dedup_max_authors),
         background_tasks=background_tasks,
         no_match_error=_no_match_error,
     )
