@@ -51,7 +51,9 @@ def test_image_proxy_streams_bytes(tmp_path: Path, monkeypatch) -> None:
         assert req.headers.get("Referer") == "https://www.pixiv.net/"
         return httpx.Response(200, headers={"Content-Type": "image/jpeg"}, content=b"img-bytes")
 
-    app.state.httpx_transport = httpx.MockTransport(handler)
+    transport = httpx.MockTransport(handler)
+    app.state.httpx_transport = transport
+    app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
 
     with TestClient(app) as client:
         resp = client.get(f"/i/{image_id}.jpg", headers={"X-Request-Id": "req_test"})
@@ -110,7 +112,9 @@ def test_image_proxy_range_passthrough_returns_206(tmp_path: Path, monkeypatch) 
             content=b"abc",
         )
 
-    app.state.httpx_transport = httpx.MockTransport(handler)
+    transport = httpx.MockTransport(handler)
+    app.state.httpx_transport = transport
+    app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
 
     with TestClient(app) as client:
         resp = client.get(
@@ -246,7 +250,9 @@ def test_image_proxy_upstream_404_marks_failure(tmp_path: Path, monkeypatch) -> 
         assert req.headers.get("Referer") == "https://www.pixiv.net/"
         return httpx.Response(404, headers={"Content-Type": "text/plain"}, content=b"not found")
 
-    app.state.httpx_transport = httpx.MockTransport(handler)
+    transport = httpx.MockTransport(handler)
+    app.state.httpx_transport = transport
+    app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
 
     with TestClient(app) as client:
         resp = client.get(f"/i/{image_id}.jpg", headers={"X-Request-Id": "req_test"})

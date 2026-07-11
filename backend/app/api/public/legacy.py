@@ -1,20 +1,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from fastapi.responses import RedirectResponse
 
 from app.core.errors import ApiError, ErrorCode
-from app.core.http_stream import stream_url
-from app.core.image_edge import resolve_image_edge_redirect_url
+from app.core.image_delivery import deliver_known_image
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
 from app.core.pximg_reverse_proxy import (
     normalize_pximg_mirror_host,
     normalize_pximg_proxy,
-    pick_pximg_mirror_host_for_request,
-    rewrite_pximg_to_mirror,
 )
-from app.core.proxy_routing import select_proxy_uri_for_url
-from app.core.random_request import prefer_image_edge
 from app.core.runtime_config_cache import get_cached_runtime_config
 from app.db.images_get_by_illust import get_image_by_illust_page
 from app.db.session import create_sessionmaker
@@ -36,7 +30,7 @@ def _parse_proxy_overrides(
     pximg_mirror_host: str | None,
     proxy: str | None,
 ) -> tuple[str | None, str | None, bool]:
-    """Return (proxy_override, pximg_mirror_host_override, use_pixiv_cat_base)."""
+    """Return (proxy_override, pximg_mirror_host_override, use_pixiv_cat)."""
     if pixiv_cat not in {0, 1}:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported pixiv_cat", status_code=400)
 
@@ -76,54 +70,22 @@ async def _deliver_legacy_image(
         pximg_mirror_host=pximg_mirror_host,
         proxy=proxy,
     )
-
     force_local = str(request.query_params.get("local") or "").strip().lower() in {"1", "true", "yes"}
-    # Prefer CF signed edge when configured; keep local stream for local=/mirrors/proxy.
-    if prefer_image_edge(
+    return await deliver_known_image(
+        request=request,
+        engine=engine,
+        settings=request.app.state.settings,
+        runtime=runtime,
+        image=image,
+        background_tasks=None,
         proxy_override=proxy_override,
         pixiv_cat=int(pixiv_cat),
         pximg_mirror_host_override=pximg_mirror_host_override,
         force_local=force_local,
-    ) and not use_pixiv_cat:
-        edge_url = resolve_image_edge_redirect_url(
-            settings=request.app.state.settings,
-            original_url=str(image.original_url),
-        )
-        if edge_url:
-            return RedirectResponse(
-                url=edge_url,
-                status_code=302,
-                headers={"Cache-Control": "public, max-age=300", "X-Image-Edge": "1"},
-            )
-
-    mirror_host_override = proxy_override or pximg_mirror_host_override
-    runtime_mirror_host = str(getattr(runtime, "image_proxy_pximg_mirror_host", "") or "").strip() or "i.pixiv.cat"
-    mirror_host = mirror_host_override or (
-        pick_pximg_mirror_host_for_request(headers=request.headers, fallback_host=runtime_mirror_host)
-        if use_pixiv_cat
-        else runtime_mirror_host
-    )
-    proxy_uri = None
-    source_url = rewrite_pximg_to_mirror(str(image.original_url), mirror_host=mirror_host) if use_pixiv_cat else str(image.original_url)
-    if not use_pixiv_cat:
-        picked = await select_proxy_uri_for_url(
-            engine,
-            request.app.state.settings,
-            runtime,
-            url=str(image.original_url),
-        )
-        if picked is not None:
-            proxy_uri = picked.uri
-
-    transport = getattr(request.app.state, "httpx_transport", None)
-    shared_client = getattr(request.app.state, "httpx_client", None)
-    return await stream_url(
-        source_url,
-        transport=transport,
-        client=shared_client if not proxy_uri else None,
-        proxy=proxy_uri,
-        cache_control="public, max-age=31536000, immutable",
-        range_header=request.headers.get("Range"),
+        use_pixiv_cat=use_pixiv_cat,
+        needs_hydrate=False,
+        should_mark_ok=False,
+        mark_fail_on_upstream=False,
     )
 
 

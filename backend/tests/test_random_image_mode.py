@@ -13,6 +13,9 @@ from app.main import create_app
 
 
 def test_random_image_streams_bytes(tmp_path: Path, monkeypatch) -> None:
+    from app.core.recent_dedup import clear_recent
+
+    clear_recent()
     db_path = tmp_path / "random_image.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
 
@@ -47,7 +50,9 @@ def test_random_image_streams_bytes(tmp_path: Path, monkeypatch) -> None:
         assert req.headers.get("Referer") == "https://www.pixiv.net/"
         return httpx.Response(200, headers={"Content-Type": "image/jpeg"}, content=b"img-bytes")
 
-    app.state.httpx_transport = httpx.MockTransport(handler)
+    transport = httpx.MockTransport(handler)
+    app.state.httpx_transport = transport
+    app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
 
     with TestClient(app) as client:
         resp = client.get("/random", headers={"X-Request-Id": "req_test"})

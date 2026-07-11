@@ -39,6 +39,13 @@ def get_recent_lists(now: float, *, window_s: float, max_images: int, max_author
     return recent_images, recent_authors
 
 
+def clear_recent() -> None:
+    """Drop process-local recent windows (tests / admin maintenance)."""
+    with _RECENT_LOCK:
+        _RECENT_IMAGES.clear()
+        _RECENT_AUTHORS.clear()
+
+
 def record_recent(
     *,
     now: float,

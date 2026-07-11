@@ -13,6 +13,9 @@ from app.main import create_app
 
 
 def test_fail_cooldown_skips_recent_failures(tmp_path: Path, monkeypatch) -> None:
+    from app.core.recent_dedup import clear_recent
+
+    clear_recent()
     db_path = tmp_path / "random_fail_cooldown.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
 
@@ -62,7 +65,9 @@ def test_fail_cooldown_skips_recent_failures(tmp_path: Path, monkeypatch) -> Non
             return httpx.Response(404, request=req)
         return httpx.Response(200, headers={"Content-Type": "image/jpeg"}, content=b"ok", request=req)
 
-    app.state.httpx_transport = httpx.MockTransport(handler)
+    transport = httpx.MockTransport(handler)
+    app.state.httpx_transport = transport
+    app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
 
     with TestClient(app) as client:
         first = client.get("/random?attempts=1", headers={"X-Request-Id": "req_test"})
