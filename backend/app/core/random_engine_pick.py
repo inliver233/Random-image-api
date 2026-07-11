@@ -4,6 +4,7 @@ from typing import Any, Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.metrics import observe_random_engine_pick
 from app.core.random_engine_client import engine_pick
 from app.core.random_strategy import pick_by_quality, pick_by_random_key
 from app.db.images_get import get_image_by_id
@@ -268,11 +269,20 @@ async def pick_with_strategy(
             timeout_s=timeout_s,
         )
         if image is not None:
+            try:
+                observe_random_engine_pick(status="ok")
+            except Exception:
+                pass
             return image, {**debug_base, "attempts_used": 1, **eng_meta}
         # Keep engine miss meta so dual-run ops can see why Python took over.
+        engine_status = str((eng_meta or {}).get("engine_status") or "fallback")
+        try:
+            observe_random_engine_pick(status=engine_status)
+        except Exception:
+            pass
         engine_fallback_meta = {
             "picked_by": "python",
-            "engine_status": str((eng_meta or {}).get("engine_status") or "fallback"),
+            "engine_status": engine_status,
             **{k: v for k, v in (eng_meta or {}).items() if k not in {"picked_by"}},
         }
         debug_base = {**debug_base, **engine_fallback_meta}

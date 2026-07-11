@@ -46,6 +46,12 @@ RANDOM_OPPORTUNISTIC_HYDRATE_ENQUEUED_TOTAL = Counter(
     "Total opportunistic hydrate_metadata enqueues from /random.",
 )
 
+RANDOM_ENGINE_PICK_TOTAL = Counter(
+    "new_pixiv_random_engine_pick_total",
+    "Go random-engine dual-run pick outcomes (ok / fallback statuses).",
+    ["status"],
+)
+
 RANDOM_LATENCY_SECONDS = Histogram(
     "new_pixiv_random_latency_seconds",
     "Latency for /random endpoint (seconds).",
@@ -128,6 +134,17 @@ def _init_labelsets() -> None:
         RANDOM_REQUESTS_TOTAL.labels(result=result).inc(0)
     RANDOM_NO_MATCH_TOTAL.inc(0)
     RANDOM_OPPORTUNISTIC_HYDRATE_ENQUEUED_TOTAL.inc(0)
+    for status in (
+        "ok",
+        "unavailable",
+        "not_ok",
+        "no_match",
+        "bad_item",
+        "bad_id",
+        "db_miss",
+        "fallback",
+    ):
+        RANDOM_ENGINE_PICK_TOTAL.labels(status=status).inc(0)
     UPSTREAM_STREAM_ERRORS_TOTAL.inc(0)
     JOBS_CLAIM_TOTAL.inc(0)
     JOBS_FAILED_TOTAL.inc(0)
@@ -151,6 +168,14 @@ def observe_random_result(*, result: str, duration_s: float | None) -> None:
         RANDOM_NO_MATCH_TOTAL.inc()
     if duration_s is not None and duration_s >= 0:
         RANDOM_LATENCY_SECONDS.observe(duration_s)
+
+
+def observe_random_engine_pick(*, status: str) -> None:
+    """Record dual-run engine attempt outcome (process-local Prometheus counter)."""
+    label = (status or "fallback").strip() or "fallback"
+    if len(label) > 64:
+        label = label[:64]
+    RANDOM_ENGINE_PICK_TOTAL.labels(status=label).inc()
 
 
 def set_jobs_status_counts(counts: dict[str, int]) -> None:
