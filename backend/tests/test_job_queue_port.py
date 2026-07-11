@@ -22,6 +22,11 @@ def test_build_job_queue_defaults_to_sqlite(tmp_path: Path) -> None:
     q2 = build_job_queue(engine, backend="redis")
     assert q2.backend == "sqlite"
 
+    # memory is an implemented alias: same SqliteJobQueue, honest backend label.
+    q_mem = build_job_queue(engine, backend="memory")
+    assert isinstance(q_mem, SqliteJobQueue)
+    assert q_mem.backend == "memory"
+
     # resolve prefers injected port.
     assert resolve_job_queue(q, engine) is q
     assert resolve_job_queue(None, engine).backend == "sqlite"

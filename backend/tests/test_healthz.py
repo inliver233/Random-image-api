@@ -84,6 +84,38 @@ def test_healthz_job_queue_reports_settings_fallback(tmp_path: Path, monkeypatch
         assert jq.get("using_sqlite_fallback") is True
 
 
+def test_healthz_job_queue_memory_alias_label(tmp_path: Path, monkeypatch) -> None:
+    """JOB_QUEUE_BACKEND=memory → active backend label memory (implemented, no fallback)."""
+    from app.main import create_app
+
+    db_path = tmp_path / "healthz_job_queue_memory.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
+    monkeypatch.setenv("JOB_QUEUE_BACKEND", "memory")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        resp = client.get("/healthz", headers={"X-Request-Id": "req_test"})
+        assert resp.status_code == 200
+        modules = resp.json().get("modules") or {}
+        jq = modules.get("job_queue") or {}
+        assert jq.get("backend") == "memory"
+        assert jq.get("requested") == "memory"
+        assert jq.get("implemented") is True
+        assert jq.get("using_sqlite_fallback") is False
+
+
 def test_healthz_recent_dedup_reports_settings_fallback(tmp_path: Path, monkeypatch) -> None:
     """RECENT_DEDUP_BACKEND=redis without REDIS_URL → memory active + fallback honesty."""
     from app.main import create_app
