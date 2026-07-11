@@ -5,12 +5,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.core.errors import ApiError, ErrorCode
 from app.core.http_stream import stream_url
 import sqlalchemy as sa
 
+from app.core.image_edge import resolve_image_edge_redirect_url
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
 from app.core.pximg_reverse_proxy import (
     normalize_pximg_mirror_host,
@@ -355,6 +356,40 @@ async def proxy_image(
             await asyncio.wait_for(fn(*args, **kwargs), timeout=float(timeout_s))
         except Exception:
             pass
+
+    force_local = str(request.query_params.get("local") or "").strip().lower() in {"1", "true", "yes"}
+    # Primary path: CF image edge. Keep local stream for forced local, mirrors, or edge-disabled.
+    if not force_local and not use_pixiv_cat and proxy_override is None:
+        edge_url = resolve_image_edge_redirect_url(
+            settings=request.app.state.settings,
+            original_url=str(image.original_url),
+        )
+        if edge_url:
+            now = iso_utc_ms()
+            if should_mark_ok:
+                background_tasks.add_task(
+                    _best_effort, mark_image_ok, engine, image_id=int(image.id), now=now, timeout_s=1.5
+                )
+            if needs_hydrate:
+                background_tasks.add_task(
+                    _best_effort,
+                    enqueue_opportunistic_hydrate_metadata,
+                    engine,
+                    illust_id=int(image.illust_id),
+                    reason="image_proxy",
+                    timeout_s=2.5,
+                )
+            resp = RedirectResponse(
+                url=edge_url,
+                status_code=302,
+                headers={"Cache-Control": "public, max-age=300", "X-Image-Edge": "1"},
+            )
+            try:
+                if getattr(resp, "background", None) is None:
+                    resp.background = background_tasks
+            except Exception:
+                pass
+            return resp
 
     source_url = rewrite_pximg_to_mirror(str(image.original_url), mirror_host=mirror_host) if use_pixiv_cat else str(image.original_url)
     proxy_uri = None

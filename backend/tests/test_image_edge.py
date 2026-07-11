@@ -115,6 +115,80 @@ def test_build_image_edge_url_rejects_non_pximg() -> None:
     assert build_image_edge_url(cfg, original_url="https://cdn.example/x.jpg") is None
 
 
+def test_pick_image_edge_base_url_is_sticky() -> None:
+    from app.core.image_edge import pick_image_edge_base_url
+
+    cfg = ImageEdgeConfig(
+        enabled=True,
+        base_urls=["https://img-a.example.com", "https://img-b.example.com", "https://img-c.example.com"],
+        secret="s",
+        sign_ttl_seconds=60,
+    )
+    path = "/img-original/img/2020/01/01/00/00/00/1_p0.jpg"
+    a = pick_image_edge_base_url(cfg, path)
+    b = pick_image_edge_base_url(cfg, path)
+    assert a == b
+    assert a in cfg.base_urls
+    other = pick_image_edge_base_url(cfg, "/img-original/img/2020/01/01/00/00/00/2_p0.jpg")
+    assert other in cfg.base_urls
+
+
+def test_sign_rejects_disallowed_path() -> None:
+    cfg = ImageEdgeConfig(
+        enabled=True,
+        base_urls=["https://img.example.com"],
+        secret="s",
+        sign_ttl_seconds=60,
+    )
+    try:
+        sign_image_edge_path(cfg, "/etc/passwd.jpg")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+
+
+def test_random_image_redirect_prefers_image_edge(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "image_edge_redirect.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("IMAGE_EDGE_ENABLED", "true")
+    monkeypatch.setenv("IMAGE_EDGE_SECRET", "edge-secret")
+    monkeypatch.setenv("IMAGE_EDGE_BASE_URLS", "https://img.example.com")
+    monkeypatch.setenv("IMAGE_EDGE_SIGN_TTL_SECONDS", "3600")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            session.add(
+                Image(
+                    illust_id=1001,
+                    page_index=0,
+                    ext="jpg",
+                    original_url="https://i.pximg.net/img-original/img/2021/02/03/04/05/06/1001_p0.jpg",
+                    proxy_path="/i/1.jpg",
+                    random_key=0.11,
+                    x_restrict=0,
+                )
+            )
+            await session.commit()
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        resp = client.get("/random?format=image&redirect=1", headers={"X-Request-Id": "req_edge_redir"}, follow_redirects=False)
+        assert resp.status_code == 302
+        loc = resp.headers.get("location") or ""
+        assert loc.startswith("https://img.example.com/u/")
+        assert resp.headers.get("x-image-edge") == "1"
+
+
 def test_random_simple_json_proxy_prefers_image_edge(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "image_edge_random.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()

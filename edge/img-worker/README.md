@@ -35,8 +35,12 @@ IMAGE_EDGE_SECRET=<same as wrangler secret>
 IMAGE_EDGE_SIGN_TTL_SECONDS=604800
 ```
 
-启用后，`/random?format=json|simple_json` 的 `urls.proxy` 优先返回签名边缘 URL；  
-本地 `/i/{id}.{ext}` 与垃圾代理/镜像仅作 fallback。
+启用后（公开主路径）：
+- `/random?format=json|simple_json` 的 `urls.proxy` → 签名边缘 URL
+- `/random?format=image` / `redirect=1` → 302 到签名边缘 URL
+- `/i/{id}.{ext}` → 302 到签名边缘 URL（`?local=1` 强制本地流）
+
+本地 `/i` 流式反代、垃圾代理池、第三方镜像仅作 **fallback / 应急**（`FALLBACK_MIRROR_HOST` 默认空）。
 
 ## 安全
 

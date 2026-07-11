@@ -76,7 +76,8 @@ function validPath(path) {
     return false;
   }
   if (path.includes("://") || path.includes("@") || path.includes("?")) return false;
-  const okPrefix = ALLOWED_PREFIXES.some((p) => path.startsWith(p) || path.startsWith("/img-"));
+  // Contract allowlist only — do not accept arbitrary /img-* beyond documented prefixes.
+  const okPrefix = ALLOWED_PREFIXES.some((p) => path.startsWith(p));
   if (!okPrefix) return false;
   const ext = path.split(".").pop()?.toLowerCase() || "";
   return ALLOWED_EXT.has(ext);
@@ -105,10 +106,9 @@ function jsonError(status, message, extraHeaders = {}) {
 async function fetchOrigin(path, env) {
   const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
   const url = `https://${originHost}${path}`;
-  const res = await fetch(url, {
+  const init = {
     method: "GET",
     headers: {
-      Host: originHost,
       Referer: REFERER,
       "User-Agent": UA,
       Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
@@ -116,10 +116,20 @@ async function fetchOrigin(path, env) {
     redirect: "follow",
     cf: {
       cacheEverything: true,
-      cacheTtlByStatus: { "200-299": Number(env.CACHE_TTL_SECONDS || 604800), "404": 60, "400-499": 30, "500-599": 0 },
+      cacheTtlByStatus: {
+        "200-299": Number(env.CACHE_TTL_SECONDS || 604800),
+        "404": 60,
+        "400-499": 30,
+        "500-599": 0,
+      },
     },
-  });
-  return res;
+  };
+  try {
+    return await fetch(url, init);
+  } catch {
+    // One retry for transient network errors on cold POP / origin blip.
+    return await fetch(url, init);
+  }
 }
 
 async function fetchFallbackMirror(path, env) {
@@ -168,7 +178,8 @@ export default {
     }
 
     const now = Math.floor(Date.now() / 1000);
-    if (parsed.exp < now) {
+    // Contract: now >= exp → 403 (expired at exact second boundary).
+    if (parsed.exp <= now) {
       return jsonError(403, "URL expired");
     }
 
@@ -233,11 +244,16 @@ export default {
     headers.set("Content-Type", contentType);
     const contentLength = upstream.headers.get("content-length");
     if (contentLength) headers.set("Content-Length", contentLength);
+    const etag = upstream.headers.get("etag");
+    if (etag) headers.set("ETag", etag);
+    const lastModified = upstream.headers.get("last-modified");
+    if (lastModified) headers.set("Last-Modified", lastModified);
     headers.set("Cache-Control", `public, max-age=${Math.max(60, ttl)}, immutable`);
     headers.set("Access-Control-Allow-Origin", "*");
     headers.set("X-Content-Type-Options", "nosniff");
     headers.set("Cross-Origin-Resource-Policy", "cross-origin");
     headers.set("X-Edge-Cache", "MISS");
+    headers.set("X-Edge-Origin", String(env.ORIGIN_HOST || DEFAULT_ORIGIN));
     headers.set("X-Proxied-By", "random-image-edge");
 
     const body = request.method === "HEAD" ? null : upstream.body;

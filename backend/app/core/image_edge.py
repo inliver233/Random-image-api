@@ -10,6 +10,10 @@ from urllib.parse import urlparse
 
 from app.core.config import Settings
 
+# Keep aligned with edge/img-worker path allowlist (contract: contracts/image-edge.md).
+_ALLOWED_EDGE_PREFIXES = ("/img-original/", "/img-master/", "/img-/", "/c/")
+_ALLOWED_EDGE_EXTS = frozenset({"jpg", "jpeg", "png", "gif", "webp"})
+
 
 @dataclass(frozen=True, slots=True)
 class ImageEdgeConfig:
@@ -90,11 +94,41 @@ def pximg_path_from_original_url(original_url: str) -> str | None:
     return path
 
 
+def is_edge_allowed_path(path: str) -> bool:
+    """Match Worker allowlist so we never mint signed URLs the edge will reject."""
+    p = (path or "").strip()
+    if not p.startswith("/") or ".." in p or "\\" in p or p.startswith("//"):
+        return False
+    if "://" in p or "@" in p or "?" in p:
+        return False
+    if not any(p.startswith(prefix) for prefix in _ALLOWED_EDGE_PREFIXES):
+        return False
+    ext = p.rsplit(".", 1)[-1].lower() if "." in p else ""
+    return ext in _ALLOWED_EDGE_EXTS
+
+
+def pick_image_edge_base_url(cfg: ImageEdgeConfig, path: str) -> str:
+    """Sticky multi-base selection for egress diversity (ds2api-style multi-deploy).
+
+    Same path always maps to the same base (cache locality + stable client URLs within TTL).
+    """
+    bases = list(cfg.base_urls or [])
+    if not bases:
+        raise ValueError("base_urls is empty")
+    if len(bases) == 1:
+        return bases[0]
+    digest = hashlib.sha256((path or "").encode("utf-8")).digest()
+    idx = int.from_bytes(digest[:8], "big") % len(bases)
+    return bases[idx]
+
+
 def sign_image_edge_path(cfg: ImageEdgeConfig, path: str, *, now: int | None = None, base_url: str | None = None) -> str:
     path = (path or "").strip()
     if not path.startswith("/"):
         raise ValueError("path must start with '/'")
-    base = (base_url or cfg.primary_base_url or "").rstrip("/")
+    if not is_edge_allowed_path(path):
+        raise ValueError("path not allowed by image edge contract")
+    base = (base_url or pick_image_edge_base_url(cfg, path) or "").rstrip("/")
     if not base:
         raise ValueError("base_url is required")
     exp = int(now if now is not None else time.time()) + int(cfg.sign_ttl_seconds)
@@ -134,3 +168,15 @@ def resolve_public_proxy_url(
         if edge:
             return edge
     return local_proxy_path
+
+
+def resolve_image_edge_redirect_url(
+    *,
+    settings: Settings,
+    original_url: str,
+) -> str | None:
+    """Return absolute signed edge URL for 302, or None to keep local stream/proxy."""
+    cfg = load_image_edge_config_from_settings(settings)
+    if cfg is None:
+        return None
+    return build_image_edge_url(cfg, original_url=original_url)

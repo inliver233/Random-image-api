@@ -13,7 +13,7 @@ from fastapi.responses import RedirectResponse
 
 from app.core.errors import ApiError, ErrorCode
 from app.core.http_stream import stream_url
-from app.core.image_edge import resolve_public_proxy_url
+from app.core.image_edge import resolve_image_edge_redirect_url, resolve_public_proxy_url
 from app.core.imgproxy import build_signed_processing_url, load_imgproxy_config_from_settings
 from app.core.pximg_reverse_proxy import (
     normalize_pximg_mirror_host,
@@ -927,20 +927,35 @@ async def random_image(
             )
 
         if format == "image" and redirect == 1:
-            qp: list[tuple[str, str]] = []
-            if proxy_override is not None:
-                qp.append(("proxy", str(proxy_override)))
+            # Prefer CF image edge as primary public delivery when configured.
+            # Explicit local mirror/proxy overrides keep the local /i/ fallback path.
+            edge_url = None
+            if proxy_override is None and int(pixiv_cat) != 1 and pximg_mirror_host_override is None:
+                edge_url = resolve_image_edge_redirect_url(
+                    settings=request.app.state.settings,
+                    original_url=str(image.original_url),
+                )
+            if edge_url:
+                resp = RedirectResponse(
+                    url=edge_url,
+                    status_code=302,
+                    headers={"Cache-Control": "no-store", "X-Image-Edge": "1"},
+                )
             else:
-                if int(pixiv_cat) == 1:
-                    qp.append(("pixiv_cat", "1"))
-                if pximg_mirror_host_override is not None:
-                    qp.append(("pximg_mirror_host", str(pximg_mirror_host_override)))
-            qs = ("?" + "&".join([f"{k}={v}" for k, v in qp])) if qp else ""
-            resp = RedirectResponse(
-                url=f"/i/{image.id}.{image.ext}{qs}",
-                status_code=302,
-                headers={"Cache-Control": "no-store"},
-            )
+                qp: list[tuple[str, str]] = []
+                if proxy_override is not None:
+                    qp.append(("proxy", str(proxy_override)))
+                else:
+                    if int(pixiv_cat) == 1:
+                        qp.append(("pixiv_cat", "1"))
+                    if pximg_mirror_host_override is not None:
+                        qp.append(("pximg_mirror_host", str(pximg_mirror_host_override)))
+                qs = ("?" + "&".join([f"{k}={v}" for k, v in qp])) if qp else ""
+                resp = RedirectResponse(
+                    url=f"/i/{image.id}.{image.ext}{qs}",
+                    status_code=302,
+                    headers={"Cache-Control": "no-store"},
+                )
             try:
                 if getattr(resp, "background", None) is None:
                     resp.background = background_tasks
@@ -1052,6 +1067,13 @@ async def random_image(
     last_error: ApiError | None = None
     attempts_i = int(attempts)
     runtime_stream = runtime
+    # When edge is enabled and client did not force local mirror/proxy, hand bytes off to CF.
+    prefer_edge_redirect = (
+        proxy_override is None
+        and int(pixiv_cat) != 1
+        and pximg_mirror_host_override is None
+        and str(request.query_params.get("local") or "").strip() not in {"1", "true", "yes"}
+    )
 
     for _ in range(attempts_i):
         async with Session() as session:
@@ -1065,6 +1087,49 @@ async def random_image(
             needs_hydrate = _needs_opportunistic_hydrate(image)
             should_mark_ok = image.last_ok_at is None or image.last_error_code is not None
             user_id_for_recent = int(image.user_id) if getattr(image, "user_id", None) is not None else None
+
+        if prefer_edge_redirect:
+            edge_url = resolve_image_edge_redirect_url(
+                settings=request.app.state.settings,
+                original_url=origin_url,
+            )
+            if edge_url:
+                if bool(anti_repeat_enabled):
+                    try:
+                        _record_recent(
+                            now=time.monotonic(),
+                            image_id=int(image_id),
+                            user_id=user_id_for_recent,
+                            window_s=float(dedup_window_s),
+                            max_images=int(dedup_max_images),
+                            max_authors=int(dedup_max_authors),
+                        )
+                    except Exception:
+                        pass
+                if should_mark_ok:
+                    background_tasks.add_task(
+                        _best_effort, mark_image_ok, engine, image_id=image_id, now=iso_utc_ms(), timeout_s=1.5
+                    )
+                if needs_hydrate:
+                    background_tasks.add_task(
+                        _best_effort,
+                        enqueue_opportunistic_hydrate_metadata,
+                        engine,
+                        illust_id=illust_id_for_hydrate,
+                        reason="random",
+                        timeout_s=2.5,
+                    )
+                resp = RedirectResponse(
+                    url=edge_url,
+                    status_code=302,
+                    headers={"Cache-Control": "no-store", "X-Image-Edge": "1"},
+                )
+                try:
+                    if getattr(resp, "background", None) is None:
+                        resp.background = background_tasks
+                except Exception:
+                    pass
+                return resp
 
         transport = getattr(request.app.state, "httpx_transport", None)
         shared_client = getattr(request.app.state, "httpx_client", None)

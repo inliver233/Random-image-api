@@ -5,7 +5,10 @@ Implementation:
 
 - Worker: `edge/img-worker`
 - Python signer: `backend/app/core/image_edge.py`
-- Public wiring: `/random` `urls.proxy` via `resolve_public_proxy_url`
+- Public wiring:
+  - `/random` `urls.proxy` via `resolve_public_proxy_url`
+  - `/random?format=image` and `redirect=1` → 302 to signed edge when enabled
+  - `/i/{id}.{ext}` → 302 to signed edge when enabled (`?local=1` forces origin stream)
 
 ## URL
 
@@ -69,12 +72,16 @@ Reject: `..`, `\`, `://`, `@`, query string in path.
 
 | Env | Role |
 | --- | --- |
-| `IMAGE_EDGE_ENABLED` | `true` to prefer edge URLs in public JSON |
-| `IMAGE_EDGE_BASE_URLS` | CSV of edge bases (first is primary) |
+| `IMAGE_EDGE_ENABLED` | `true` to prefer edge for public image delivery |
+| `IMAGE_EDGE_BASE_URLS` | CSV of edge bases (sticky hash pick; multi-deploy pool) |
 | `IMAGE_EDGE_SECRET` | HMAC secret (must match Worker) |
 | `IMAGE_EDGE_SIGN_TTL_SECONDS` | default `604800` |
 
-When disabled or non-pximg `original_url`, public API falls back to local `/i/{id}.{ext}`.
+When disabled or non-pximg `original_url`, public API falls back to local `/i/{id}.{ext}` stream (proxy pool / mirrors).
+
+Escape hatches:
+- `?local=1` on `/i/...` or `/random?format=image` forces origin-side stream (admin/debug).
+- Explicit `proxy=` / `pixiv_cat=1` / `pximg_mirror_host=` keep local mirror path.
 
 ## Mode decision (ops)
 
