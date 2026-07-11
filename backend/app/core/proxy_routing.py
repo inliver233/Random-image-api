@@ -4,13 +4,13 @@ import random
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
-from urllib.parse import quote
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import Settings
 from app.core.crypto import FieldEncryptor
 from app.core.errors import ApiError, ErrorCode
+from app.core.proxy_uri import build_proxy_uri
 from app.core.runtime_settings import RuntimeConfig
 from app.core.time import iso_utc_ms
 from app.db.session import with_sqlite_busy_retry
@@ -310,41 +310,6 @@ LIMIT 1;
     return await with_sqlite_busy_retry(_op)
 
 
-def _build_proxy_uri(
-    encryptor: FieldEncryptor | None,
-    *,
-    scheme: str,
-    host: str,
-    port: int,
-    username: str,
-    password_enc: str,
-) -> str:
-    scheme = (scheme or "").strip().lower()
-    host = (host or "").strip()
-    username = (username or "").strip()
-    password_enc = (password_enc or "").strip()
-    if not scheme or not host or int(port) <= 0:
-        raise ValueError("invalid proxy endpoint")
-
-    password = ""
-    if password_enc:
-        if encryptor is None:
-            raise ValueError("FIELD_ENCRYPTION_KEY is required to decrypt proxy password")
-        password = encryptor.decrypt_text(password_enc) if password_enc else ""
-
-    host_part = host
-    if ":" in host_part and not host_part.startswith("["):
-        host_part = f"[{host_part}]"
-
-    auth = ""
-    if username:
-        user_q = quote(username, safe="")
-        pass_q = quote(password or "", safe="")
-        auth = f"{user_q}:{pass_q}@"
-
-    return f"{scheme}://{auth}{host_part}:{int(port)}"
-
-
 def _proxy_uri_from_endpoint_row(
     settings: Settings,
     *,
@@ -364,7 +329,7 @@ def _proxy_uri_from_endpoint_row(
             raise ApiError(code=ErrorCode.INTERNAL_ERROR, message="Encryption not configured", status_code=500) from exc
 
     try:
-        uri = _build_proxy_uri(
+        uri = build_proxy_uri(
             encryptor,
             scheme=scheme,
             host=host,

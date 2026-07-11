@@ -5,7 +5,6 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
-from urllib.parse import quote
 
 import httpx
 import sqlalchemy as sa
@@ -15,6 +14,7 @@ from app.core.coerce import truncate_text
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor
 from app.core.metrics import PROXY_PROBE_LATENCY_MS
+from app.core.proxy_uri import build_proxy_uri
 from app.core.redact import redact_text
 from app.core.time import iso_utc_ms
 from app.db.models.proxy_endpoints import ProxyEndpoint
@@ -51,37 +51,6 @@ class ProbeResult:
 
 
 ProbeFunc = Callable[[ProbeTarget, ProbeConfig], Awaitable[ProbeResult]]
-
-
-def _build_proxy_uri(
-    encryptor: FieldEncryptor,
-    *,
-    scheme: str,
-    host: str,
-    port: int,
-    username: str,
-    password_enc: str,
-) -> str:
-    scheme = (scheme or "").strip().lower()
-    host = (host or "").strip()
-    username = (username or "").strip()
-    password_enc = (password_enc or "").strip()
-    if not scheme or not host or int(port) <= 0:
-        raise ValueError("invalid proxy endpoint")
-
-    password = encryptor.decrypt_text(password_enc) if password_enc else ""
-
-    host_part = host
-    if ":" in host_part and not host_part.startswith("["):
-        host_part = f"[{host_part}]"
-
-    auth = ""
-    if username:
-        user_q = quote(username, safe="")
-        pass_q = quote(password or "", safe="")
-        auth = f"{user_q}:{pass_q}@"
-
-    return f"{scheme}://{auth}{host_part}:{int(port)}"
 
 
 async def _default_probe(target: ProbeTarget, cfg: ProbeConfig) -> ProbeResult:
@@ -161,7 +130,7 @@ def build_proxy_probe_handler(
         immediate_results: list[ProbeResult] = []
         for ep in endpoints:
             try:
-                proxy_uri = _build_proxy_uri(
+                proxy_uri = build_proxy_uri(
                     encryptor,
                     scheme=str(ep.scheme),
                     host=str(ep.host),

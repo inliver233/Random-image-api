@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from urllib.parse import unquote
+from typing import Any
+from urllib.parse import quote, unquote
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +15,46 @@ class ProxyUriParts:
 
 
 _ALLOWED_PROXY_SCHEMES = {"http", "https", "socks4", "socks5"}
+
+
+def build_proxy_uri(
+    encryptor: Any | None,
+    *,
+    scheme: str,
+    host: str,
+    port: int,
+    username: str,
+    password_enc: str,
+) -> str:
+    """
+    Build an absolute proxy URI from stored endpoint fields.
+
+    encryptor may be None only when password_enc is empty; otherwise decrypt requires it.
+    """
+    scheme_n = (scheme or "").strip().lower()
+    host_n = (host or "").strip()
+    username_n = (username or "").strip()
+    password_enc_n = (password_enc or "").strip()
+    if not scheme_n or not host_n or int(port) <= 0:
+        raise ValueError("invalid proxy endpoint")
+
+    password = ""
+    if password_enc_n:
+        if encryptor is None:
+            raise ValueError("FIELD_ENCRYPTION_KEY is required to decrypt proxy password")
+        password = encryptor.decrypt_text(password_enc_n)
+
+    host_part = host_n
+    if ":" in host_part and not host_part.startswith("["):
+        host_part = f"[{host_part}]"
+
+    auth = ""
+    if username_n:
+        user_q = quote(username_n, safe="")
+        pass_q = quote(password or "", safe="")
+        auth = f"{user_q}:{pass_q}@"
+
+    return f"{scheme_n}://{auth}{host_part}:{int(port)}"
 
 
 def _strip_authority(rest: str) -> str:
