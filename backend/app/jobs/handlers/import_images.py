@@ -17,6 +17,7 @@ from app.core.coerce import as_optional_int, as_str, derive_orientation
 from app.core.config import load_settings
 from app.core.data_files import get_sqlite_db_dir, resolve_file_ref
 from app.core.pixiv_urls import parse_pixiv_original_url
+from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.db.models.image_tags import ImageTag
 from app.db.models.images import Image
 from app.db.models.imports import Import
@@ -172,11 +173,11 @@ def build_import_images_handler(engine: AsyncEngine):
             success_v: int,
             failed_v: int,
             tags_by_key: dict[tuple[int, int], list[str]] | None = None,
-        ) -> None:
+        ) -> list[int]:
             if not rows:
-                return
+                return []
 
-            async def _op() -> None:
+            async def _op() -> list[int]:
                 async with Session() as session:
                     now_expr = sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
 
@@ -314,9 +315,23 @@ def build_import_images_handler(engine: AsyncEngine):
                             failed=sa.func.max(Import.failed, int(failed_v)),
                         )
                     )
+                    # Resolve image ids before commit for engine publish.
+                    published_ids: list[int] = []
+                    if keys:
+                        id_rows = (
+                            await session.execute(
+                                sa.select(Image.id).where(sa.tuple_(Image.illust_id, Image.page_index).in_(keys))
+                            )
+                        ).scalars().all()
+                        published_ids = [int(x) for x in id_rows]
                     await session.commit()
+                    return published_ids
 
-            await with_sqlite_busy_retry(_op)
+            image_ids = await with_sqlite_busy_retry(_op)
+            if image_ids:
+                # Best-effort: warm random-engine index after each import chunk.
+                await maybe_publish_engine_upserts(engine, image_ids=list(image_ids), settings=load_settings())
+            return list(image_ids or [])
 
         if input_format == "pixiv_batch_downloader_json":
             try:

@@ -62,7 +62,7 @@ def build_simple_json_body(
     proxy_url: str,
     origin_url: str | None,
     imgproxy_url: str | None,
-    debug: dict[str, Any],
+    debug: dict[str, Any] | None = None,
     local_url: str | None = None,
 ) -> dict[str, Any]:
     return {
@@ -88,7 +88,7 @@ def build_json_body(
     proxy_url: str,
     origin_url: str | None,
     imgproxy_url: str | None,
-    debug: dict[str, Any],
+    debug: dict[str, Any] | None = None,
     local_url: str | None = None,
 ) -> dict[str, Any]:
     image_obj = serialize_public_image_core(
@@ -98,25 +98,27 @@ def build_json_body(
         include_created_at=True,
     )
     local = local_url or f"/i/{image.id}.{image.ext}"
+    data: dict[str, Any] = {
+        "image": image_obj,
+        "tags": tags,
+        "urls": build_public_urls_block(
+            proxy_url=proxy_url,
+            origin_url=origin_url,
+            imgproxy_url=imgproxy_url,
+            local_url=local,
+            include_legacy=True,
+            illust_id=image.illust_id,
+            page_index=image.page_index,
+            ext=image.ext,
+        ),
+    }
+    if debug is not None:
+        data["debug"] = {**debug}
     return {
         "ok": True,
         "code": "OK",
         "request_id": request_id,
-        "data": {
-            "image": image_obj,
-            "tags": tags,
-            "urls": build_public_urls_block(
-                proxy_url=proxy_url,
-                origin_url=origin_url,
-                imgproxy_url=imgproxy_url,
-                local_url=local,
-                include_legacy=True,
-                illust_id=image.illust_id,
-                page_index=image.page_index,
-                ext=image.ext,
-            ),
-            "debug": {**debug},
-        },
+        "data": data,
     }
 
 

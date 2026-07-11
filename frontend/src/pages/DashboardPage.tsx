@@ -226,13 +226,14 @@ export function DashboardPage() {
               errorMessages={["加载设置失败", "加载总览失败"]}
             >
               <Space direction="vertical">
-                <Typography.Text>代理总开关: {proxyEnabled ? "开启" : "关闭"}</Typography.Text>
-                <Typography.Text>默认代理池ID: {defaultPoolId || "（未设置）"}</Typography.Text>
-                <Typography.Text>代理节点: {proxyEnabledCount}/{proxyCount} 启用</Typography.Text>
-                <Typography.Text>代理池: {proxyPoolEnabledCount}/{proxyPoolCount} 启用</Typography.Text>
+                <Typography.Text>补全代理总开关: {proxyEnabled ? "开启" : "关闭"}</Typography.Text>
+                <Typography.Text>默认补全代理池ID: {defaultPoolId || "（未设置）"}</Typography.Text>
+                <Typography.Text>补全代理节点: {proxyEnabledCount}/{proxyCount} 启用</Typography.Text>
+                <Typography.Text>补全代理池: {proxyPoolEnabledCount}/{proxyPoolCount} 启用</Typography.Text>
                 <Typography.Text>绑定关系: {bindingCount}</Typography.Text>
+                <Typography.Text type="secondary">仅服务 Hydrate/OAuth，不用于用户出图</Typography.Text>
                 <Button size="small" onClick={() => navigate("/admin/proxies")}>
-                  打开代理列表
+                  打开补全代理列表
                 </Button>
               </Space>
             </QueryState>

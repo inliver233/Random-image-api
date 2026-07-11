@@ -146,6 +146,7 @@ def test_random_quality_strategy_picks_weighted_by_score(tmp_path: Path, monkeyp
                 "seed": seed,
                 "strategy": "quality",
                 "quality_samples": samples,
+                "debug": 1,
             },
         )
         assert resp.status_code == 200
@@ -296,7 +297,10 @@ def test_random_strategy_random_key_matches_pick_random_image(tmp_path: Path, mo
     expected_id = asyncio.run(_compute_expected())
 
     with TestClient(app) as client:
-        resp = client.get("/random", params={"format": "simple_json", "attempts": 1, "seed": seed, "strategy": "random"})
+        resp = client.get(
+            "/random",
+            params={"format": "simple_json", "attempts": 1, "seed": seed, "strategy": "random", "debug": 1},
+        )
         assert resp.status_code == 200
         body = resp.json()
         assert body["ok"] is True
@@ -304,8 +308,8 @@ def test_random_strategy_random_key_matches_pick_random_image(tmp_path: Path, mo
         assert body["data"]["debug"]["picked_by"] == "random_key"
 
 
-def test_random_quality_samples_allows_200(tmp_path: Path, monkeypatch) -> None:
-    db_path = tmp_path / "random_quality_samples_200.db"
+def test_random_quality_samples_allows_64_rejects_65(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "random_quality_samples_64.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
 
     monkeypatch.setenv("APP_ENV", "dev")
@@ -365,15 +369,16 @@ def test_random_quality_samples_allows_200(tmp_path: Path, monkeypatch) -> None:
             params={
                 "format": "json",
                 "attempts": 1,
-                "seed": "seed_quality_200",
+                "seed": "seed_quality_64",
                 "strategy": "quality",
-                "quality_samples": 200,
+                "quality_samples": 64,
+                "debug": 1,
             },
         )
         assert ok_resp.status_code == 200
         body = ok_resp.json()
         assert body["ok"] is True
-        assert body["data"]["debug"]["quality_samples"] == 200
+        assert body["data"]["debug"]["quality_samples"] == 64
 
         bad_resp = client.get(
             "/random",
@@ -381,7 +386,7 @@ def test_random_quality_samples_allows_200(tmp_path: Path, monkeypatch) -> None:
                 "format": "json",
                 "attempts": 1,
                 "strategy": "quality",
-                "quality_samples": 201,
+                "quality_samples": 65,
             },
         )
         assert bad_resp.status_code == 400

@@ -72,3 +72,30 @@ async def engine_apply_snapshot(
     except Exception as exc:
         logger.warning("random-engine snapshot failed: %s", exc)
         return None
+
+
+async def engine_apply_events(
+    client: httpx.AsyncClient,
+    base_url: str,
+    *,
+    events: list[dict[str, Any]],
+    timeout_s: float = 5.0,
+) -> dict[str, Any] | None:
+    """POST /v1/admin/events. Best-effort catalog delta; None on transport/non-200."""
+    if not events:
+        return {"ok": True, "applied": 0}
+    body: dict[str, Any] = {"events": list(events)}
+    try:
+        resp = await client.post(f"{base_url}/v1/admin/events", json=body, timeout=timeout_s)
+        if resp.status_code != 200:
+            logger.debug(
+                "random-engine events status=%s body=%s",
+                resp.status_code,
+                (resp.text or "")[:200],
+            )
+            return None
+        data = resp.json()
+        return data if isinstance(data, dict) else None
+    except Exception as exc:
+        logger.warning("random-engine events failed: %s", exc)
+        return None

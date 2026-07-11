@@ -63,7 +63,7 @@ def test_random_uses_runtime_defaults_for_attempts_r18_strict_and_fail_cooldown(
     asyncio.run(_seed())
 
     with TestClient(app) as client:
-        resp = client.get("/random", params={"format": "json", "seed": "seed_alignment_001"})
+        resp = client.get("/random", params={"format": "json", "seed": "seed_alignment_001", "debug": 1})
         assert resp.status_code == 200
         body = resp.json()
         assert body["ok"] is True

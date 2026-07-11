@@ -178,7 +178,7 @@ describe("DashboardPage", () => {
     expect(await screen.findByText("总数: 2")).toBeInTheDocument();
     expect(await screen.findByText("总请求: 12")).toBeInTheDocument();
     expect(await screen.findByText("近 1 分钟成功率: 100.0%")).toBeInTheDocument();
-    expect(await screen.findByText("代理节点: 1/1 启用")).toBeInTheDocument();
+    expect(await screen.findByText("补全代理节点: 1/1 启用")).toBeInTheDocument();
     expect(await screen.findByText(/提交:\s*abcdef1/)).toBeInTheDocument();
     expect(await screen.findByText("数量: 3")).toBeInTheDocument();
     expect(await screen.findByText(/#101\s*·\s*hydrate_metadata/)).toBeInTheDocument();
@@ -216,7 +216,7 @@ describe("DashboardPage", () => {
 
     expect(await screen.findByText("工作线程 / 队列")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /去添加代理/ }));
-    expect(await screen.findByText("代理管理")).toBeInTheDocument();
+    expect(await screen.findByText("代理管理（仅 Hydrate / OAuth）")).toBeInTheDocument();
   });
 
   it("navigates to playground", async () => {

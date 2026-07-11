@@ -114,7 +114,7 @@ def test_random_uses_runtime_defaults_for_strategy_and_quality_samples(tmp_path:
     asyncio.run(_seed())
 
     with TestClient(app) as client:
-        resp1 = client.get("/random", params={"format": "json", "attempts": 1, "seed": seed})
+        resp1 = client.get("/random", params={"format": "json", "attempts": 1, "seed": seed, "debug": 1})
         assert resp1.status_code == 200
         body1 = resp1.json()
         assert body1["ok"] is True
@@ -132,6 +132,7 @@ def test_random_uses_runtime_defaults_for_strategy_and_quality_samples(tmp_path:
                 "seed": seed,
                 "strategy": "quality",
                 "quality_samples": samples,
+                "debug": 1,
             },
         )
         assert resp2.status_code == 200

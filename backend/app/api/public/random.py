@@ -274,6 +274,18 @@ async def random_image(
             original_url=str(image.original_url),
             local_proxy_path=local_proxy_path,
         )
+        # Public JSON omits debug unless ?debug=1 (keeps payloads small for browsers).
+        include_debug = False
+        try:
+            include_debug = int(request.query_params.get("debug") or 0) == 1
+        except Exception:
+            include_debug = str(request.query_params.get("debug") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        debug_out = debug if include_debug else None
         if format == "simple_json":
             return build_simple_json_body(
                 request_id=request_id,
@@ -281,7 +293,7 @@ async def random_image(
                 proxy_url=proxy_url,
                 origin_url=origin_url,
                 imgproxy_url=imgproxy_url,
-                debug=debug,
+                debug=debug_out,
                 local_url=local_proxy_path,
             )
 
@@ -292,7 +304,7 @@ async def random_image(
             proxy_url=proxy_url,
             origin_url=origin_url,
             imgproxy_url=imgproxy_url,
-            debug=debug,
+            debug=debug_out,
             local_url=local_proxy_path,
         )
 

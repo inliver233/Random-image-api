@@ -331,8 +331,14 @@ export function ProxyPoolsPage() {
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       <Typography.Title level={3} style={{ margin: 0 }}>
-        代理池管理
+        代理池管理（仅 Hydrate / OAuth）
       </Typography.Title>
+      <Alert
+        type="info"
+        showIcon
+        message="池绑定服务补全与令牌出口，不服务公开 /random 出图"
+        description="用户侧图片走 Image Edge；此页配置只影响 hydrate_metadata / OAuth 访问 app-api.pixiv.net 时的代理选择。"
+      />
 
       <Space wrap>
         <Button type="primary" onClick={() => setCreateOpen(true)}>

@@ -7,6 +7,8 @@ import httpx
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.core.config import load_settings
+from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.core.time import iso_utc_ms
 from app.db.models.images import Image
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
@@ -34,23 +36,39 @@ def build_heal_url_handler(engine: AsyncEngine, *, transport: httpx.BaseTranspor
 
         now_iso = iso_utc_ms(datetime.now(timezone.utc))
 
-        async def _op() -> None:
+        async def _op() -> list[int]:
             async with Session() as session:
-                await session.execute(
-                    sa.update(Image)
-                    .where(Image.illust_id == int(illust_id))
-                    .where(Image.status == 3)
-                    .values(
-                        status=1,
-                        last_ok_at=now_iso,
-                        last_error_code=None,
-                        last_error_msg=None,
-                        updated_at=now_iso,
+                rows = (
+                    await session.execute(
+                        sa.select(Image.id)
+                        .where(Image.illust_id == int(illust_id))
+                        .where(Image.status == 3)
                     )
-                )
-                await session.commit()
+                ).scalars().all()
+                healed_ids = [int(x) for x in rows]
+                if healed_ids:
+                    await session.execute(
+                        sa.update(Image)
+                        .where(Image.id.in_(healed_ids))
+                        .values(
+                            status=1,
+                            last_ok_at=now_iso,
+                            last_error_code=None,
+                            last_error_msg=None,
+                            updated_at=now_iso,
+                        )
+                    )
+                    await session.commit()
+                return healed_ids
 
-        await with_sqlite_busy_retry(_op)
+        healed_ids = await with_sqlite_busy_retry(_op)
+        # hydrate already published upserts; re-publish after status=3→1 so engine re-indexes.
+        if healed_ids:
+            await maybe_publish_engine_upserts(
+                engine,
+                image_ids=list(healed_ids),
+                settings=load_settings(),
+            )
 
     return _handler
 

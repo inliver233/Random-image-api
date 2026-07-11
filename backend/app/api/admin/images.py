@@ -10,6 +10,7 @@ from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.admin_request import load_json_object, parse_bool, parse_choice, parse_positive_int_list, require_positive_id
 from app.core.errors import ApiError, ErrorCode
+from app.core.random_engine_sync import maybe_publish_engine_deletes, maybe_publish_engine_empty_snapshot
 from app.core.request_id import get_or_create_request_id
 from app.db.models.image_tags import ImageTag
 from app.db.models.images import Image
@@ -211,7 +212,9 @@ async def delete_admin_image(
 
         return admin_ok(request, payload={"image_id": str(int(image_id))}, request_id=rid)
 
-    return await with_sqlite_busy_retry(_op)
+    result = await with_sqlite_busy_retry(_op)
+    await maybe_publish_engine_deletes(image_ids=[int(image_id)], client=getattr(request.app.state, "httpx_client", None))
+    return result
 
 
 @router.post("/images/bulk-delete")
@@ -230,10 +233,12 @@ async def bulk_delete_admin_images(
     async def _op() -> dict[str, Any]:
         deleted = 0
         found = 0
+        found_ids: list[int] = []
         async with Session() as session:
             for chunk in _chunks(ids, chunk_size=900):
-                rows = (await session.execute(sa.select(Image.id).where(Image.id.in_(chunk)))).scalars().all()
+                rows = list((await session.execute(sa.select(Image.id).where(Image.id.in_(chunk)))).scalars().all())
                 found += len(rows)
+                found_ids.extend(int(x) for x in rows)
 
             for chunk in _chunks(ids, chunk_size=900):
                 await session.execute(sa.delete(ImageTag).where(ImageTag.image_id.in_(chunk)))
@@ -243,11 +248,23 @@ async def bulk_delete_admin_images(
             await session.commit()
 
         missing = max(0, int(len(ids)) - int(found))
-        return admin_ok(request, payload={"requested": int(len(ids)),
-            "deleted": int(deleted),
-            "missing": int(missing)}, request_id=rid)
+        return {
+            "response": admin_ok(
+                request,
+                payload={"requested": int(len(ids)), "deleted": int(deleted), "missing": int(missing)},
+                request_id=rid,
+            ),
+            "deleted_ids": found_ids,
+        }
 
-    return await with_sqlite_busy_retry(_op)
+    out = await with_sqlite_busy_retry(_op)
+    deleted_ids = list(out.get("deleted_ids") or [])
+    if deleted_ids:
+        await maybe_publish_engine_deletes(
+            image_ids=deleted_ids,
+            client=getattr(request.app.state, "httpx_client", None),
+        )
+    return out["response"]
 
 
 async def _load_clear_images_json(request: Request) -> dict[str, Any]:
@@ -286,4 +303,10 @@ async def clear_admin_images(
             "deleted_images": _safe_rowcount(result_images),
             "deleted_tags": _safe_rowcount(result_tags) if result_tags is not None else 0}, request_id=rid)
 
-    return await with_sqlite_busy_retry(_op)
+    result = await with_sqlite_busy_retry(_op)
+    # Full catalog wipe → empty engine snapshot (best-effort).
+    await maybe_publish_engine_empty_snapshot(
+        client=getattr(request.app.state, "httpx_client", None),
+        revision="cleared",
+    )
+    return result

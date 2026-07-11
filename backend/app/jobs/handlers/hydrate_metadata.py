@@ -23,6 +23,7 @@ from app.core.failover import classify_pixiv_rate_limit, pixiv_rate_limit_backof
 from app.core.metrics import TOKEN_REFRESH_FAIL_TOTAL
 from app.core.proxy_health import proxy_endpoint_fail_values_immediate, proxy_endpoint_ok_values
 from app.core.proxy_routing import select_proxy_uri_for_url
+from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.core.redact import redact_text
 from app.core.runtime_settings import RuntimeConfig, load_runtime_config
 from app.core.soft_json import soft_json_object
@@ -972,11 +973,11 @@ LIMIT 1;
         comment_count: int | None,
         tags: list[tuple[str, str | None]],
         source_import_id: int | None,
-    ) -> None:
+    ) -> list[int]:
         now_expr = sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
         normalized_tag_names = [name for name, _t in tags]
 
-        async def _op() -> None:
+        async def _op() -> list[int]:
             async with Session() as session:
                 existing = {}
                 if normalized_tag_names:
@@ -1074,8 +1075,9 @@ LIMIT 1;
                         await session.execute(stmt2)
 
                 await session.commit()
+                return list(image_ids)
 
-        await with_sqlite_busy_retry(_op)
+        return await with_sqlite_busy_retry(_op)
 
     async def _hydrate_single_illust(*, illust_id: int, source_import_id: int | None) -> None:
         now_dt = datetime.now(timezone.utc)
@@ -1270,7 +1272,7 @@ LIMIT 1;
 
             tags = _extract_tags(illust)
 
-            await _persist(
+            persisted_ids = await _persist(
                 illust_id=int(illust_id),
                 pages=pages,
                 width=width,
@@ -1290,6 +1292,13 @@ LIMIT 1;
                 tags=tags,
                 source_import_id=source_import_id,
             )
+            # Best-effort catalog → random-engine delta (no-op without RANDOM_ENGINE_URL).
+            if persisted_ids:
+                await maybe_publish_engine_upserts(
+                    engine,
+                    image_ids=list(persisted_ids),
+                    settings=settings,
+                )
             await _mark_token_ok(token_id, now_dt=now_dt)
             return
 

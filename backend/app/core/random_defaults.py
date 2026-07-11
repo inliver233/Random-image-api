@@ -15,7 +15,8 @@ from app.core.recommendation import (
 )
 from app.core.time import iso_utc_ms
 
-QUALITY_SAMPLES_MAX_QUERY = 200
+# Absolute hard cap for query and runtime (plan: ≤64). Auto-scale uses the same ceiling.
+QUALITY_SAMPLES_MAX_QUERY = 64
 QUALITY_SAMPLES_MAX_AUTO = 64
 DEFAULT_ATTEMPTS = 3
 DEFAULT_QUALITY_SAMPLES = 12

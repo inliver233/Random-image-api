@@ -444,8 +444,14 @@ export function ProxiesPage() {
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       <Typography.Title level={3} style={{ margin: 0 }}>
-        代理管理
+        代理管理（仅 Hydrate / OAuth）
       </Typography.Title>
+      <Alert
+        type="info"
+        showIcon
+        message="住宅代理仅用于 Pixiv App API 补全与 OAuth，不用于用户出图"
+        description="公开图片优先走 Cloudflare Image Edge（302/签名 URL）；本地 /i 仅作兼容回退。请勿再把本池当作用户字节出口。"
+      />
 
       <ActionAlerts
         message={alerts.message}

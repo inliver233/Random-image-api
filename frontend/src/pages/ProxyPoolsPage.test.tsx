@@ -78,7 +78,7 @@ describe("ProxyPoolsPage", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("代理池管理")).toBeInTheDocument();
+    expect(await screen.findByText("代理池管理（仅 Hydrate / OAuth）")).toBeInTheDocument();
     expect(await screen.findByText("默认代理池")).toBeInTheDocument();
 
     fireEvent.click(await screen.findByTestId("pool-config-1"));

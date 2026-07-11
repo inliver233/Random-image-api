@@ -48,6 +48,20 @@ Admin:
 
 After starting the engine, push a snapshot before enabling the flag, or picks will fall through to Python.
 
+### Catalog → engine events (best-effort)
+
+When `RANDOM_ENGINE_URL` is set (does **not** require `RANDOM_ENGINE_ENABLED`), control-plane writers publish deltas:
+
+| Writer | Event |
+| --- | --- |
+| `hydrate_metadata` persist | `image_upserted` per page |
+| `import_images` chunk | `image_upserted` for chunk ids |
+| `heal_url` status 3→1 | `image_upserted` |
+| admin single/bulk delete | `image_deleted` |
+| admin clear all | empty snapshot replace |
+
+Failures are logged and never fail the job/API. Python pick remains correct without the engine.
+
 ## Implemented
 
 1. In-memory index sorted by `random_key` (ring sample)
@@ -56,6 +70,7 @@ After starting the engine, push a snapshot before enabling the flag, or picks wi
 4. `POST /v1/admin/snapshot` full replace
 5. `POST /v1/admin/events` incremental rebuild
 6. BFF feature flag + admin snapshot push
+7. Auto catalog event publish from hydrate/import/heal/admin delete
 
 ## Non-goals (this service)
 
