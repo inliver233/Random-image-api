@@ -22,6 +22,11 @@ from app.jobs.enqueue import enqueue_opportunistic_hydrate_metadata
 PickFn = Callable[..., Awaitable[tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]]]
 
 
+def should_mark_image_ok(image: Any) -> bool:
+    """True when last_ok is missing or a prior error is still recorded."""
+    return image.last_ok_at is None or image.last_error_code is not None
+
+
 async def best_effort(fn, *args, timeout_s: float = 1.5, **kwargs) -> None:  # type: ignore[no-untyped-def]
     try:
         await asyncio.wait_for(fn(*args, **kwargs), timeout=float(timeout_s))
@@ -130,7 +135,7 @@ async def deliver_random_image_stream(
             source_url = rewrite_pximg_to_mirror(origin_url, mirror_host=mirror_host) if use_pixiv_cat else origin_url
             illust_id_for_hydrate = int(image.illust_id)
             needs_hydrate = needs_opportunistic_hydrate(image)
-            should_mark_ok = image.last_ok_at is None or image.last_error_code is not None
+            should_mark_ok = should_mark_image_ok(image)
             user_id_for_recent = int(image.user_id) if getattr(image, "user_id", None) is not None else None
 
         if prefer_edge_redirect:

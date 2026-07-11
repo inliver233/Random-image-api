@@ -10,16 +10,24 @@ from app.core.image_edge import resolve_image_edge_redirect_url
 from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.proxy_routing import select_proxy_uri_for_url
 from app.core.pximg_reverse_proxy import rewrite_pximg_to_mirror
-from app.core.random_delivery import attach_background, best_effort, build_edge_redirect_response
+from app.core.random_delivery import (
+    attach_background,
+    best_effort,
+    build_edge_redirect_response,
+    should_mark_image_ok,
+)
 from app.core.random_request import prefer_image_edge
 from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.time import iso_utc_ms
 from app.db.images_mark import mark_image_failure, mark_image_ok
 from app.jobs.enqueue import enqueue_opportunistic_hydrate_metadata
 
-
-def should_mark_image_ok(image: Any) -> bool:
-    return image.last_ok_at is None or image.last_error_code is not None
+# Re-export for callers that import mark-ok helper from image_delivery.
+__all__ = (
+    "deliver_known_image",
+    "needs_image_proxy_hydrate",
+    "should_mark_image_ok",
+)
 
 
 async def needs_image_proxy_hydrate(session: Any, image: Any) -> bool:

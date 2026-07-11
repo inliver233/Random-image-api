@@ -14,6 +14,7 @@ from app.core.admin_request import (
     parse_int_in_range,
     parse_optional_str,
     parse_required_str,
+    require_positive_id,
 )
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -166,8 +167,7 @@ async def update_proxy_pool(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if pool_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid pool id", status_code=400)
+    pool_id = require_positive_id(pool_id, invalid_message="Invalid pool id")
 
     rid = get_or_create_request_id(request)
     body = await _load_update_json(request)
@@ -202,8 +202,7 @@ async def set_proxy_pool_endpoints(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if pool_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid pool id", status_code=400)
+    pool_id = require_positive_id(pool_id, invalid_message="Invalid pool id")
 
     rid = get_or_create_request_id(request)
     items = await _load_set_endpoints_json(request)

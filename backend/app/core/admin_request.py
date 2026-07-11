@@ -134,6 +134,25 @@ def parse_positive_int(
     return i
 
 
+def require_positive_id(
+    value: Any,
+    *,
+    invalid_message: str,
+) -> int:
+    """
+    Validate a path/query id that FastAPI already typed as int.
+
+    Prefer this over hand-rolled `if id <= 0` so messages stay stable per endpoint.
+    """
+    try:
+        i = int(value)
+    except Exception as exc:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid_message, status_code=400) from exc
+    if i <= 0:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid_message, status_code=400)
+    return i
+
+
 def parse_int_in_range(
     value: Any,
     *,

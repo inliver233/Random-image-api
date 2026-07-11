@@ -17,6 +17,7 @@ from app.core.admin_request import (
     parse_int_in_range,
     parse_optional_str,
     parse_positive_int,
+    require_positive_id,
 )
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -133,8 +134,7 @@ async def list_bindings(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if int(pool_id) <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid pool_id", status_code=400)
+    pool_id = require_positive_id(pool_id, invalid_message="Invalid pool_id")
 
     rid = get_or_create_request_id(request)
     now = iso_utc_ms()
@@ -275,8 +275,7 @@ async def set_binding_override(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if binding_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid binding id", status_code=400)
+    binding_id = require_positive_id(binding_id, invalid_message="Invalid binding id")
 
     rid = get_or_create_request_id(request)
     now = iso_utc_ms()
@@ -333,8 +332,7 @@ async def clear_binding_override(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if binding_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid binding id", status_code=400)
+    binding_id = require_positive_id(binding_id, invalid_message="Invalid binding id")
 
     rid = get_or_create_request_id(request)
     now = iso_utc_ms()

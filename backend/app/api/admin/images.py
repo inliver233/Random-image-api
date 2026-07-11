@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object, parse_bool, parse_choice, parse_positive_int_list
+from app.core.admin_request import load_json_object, parse_bool, parse_choice, parse_positive_int_list, require_positive_id
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.db.models.image_tags import ImageTag
@@ -194,8 +194,7 @@ async def delete_admin_image(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if int(image_id) <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image id", status_code=400)
+    image_id = require_positive_id(image_id, invalid_message="Invalid image id")
 
     rid = get_or_create_request_id(request)
     engine = request.app.state.engine

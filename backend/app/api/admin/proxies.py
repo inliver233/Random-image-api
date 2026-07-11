@@ -20,6 +20,7 @@ from app.core.admin_request import (
     parse_optional_str,
     parse_positive_int,
     parse_required_str,
+    require_positive_id,
 )
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.crypto import FieldEncryptor
@@ -509,8 +510,7 @@ async def update_proxy_endpoint(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if endpoint_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid endpoint id", status_code=400)
+    endpoint_id = require_positive_id(endpoint_id, invalid_message="Invalid endpoint id")
 
     rid = get_or_create_request_id(request)
     body = await _load_update_endpoint_json(request)
@@ -539,8 +539,7 @@ async def reset_proxy_failures(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if endpoint_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid endpoint id", status_code=400)
+    endpoint_id = require_positive_id(endpoint_id, invalid_message="Invalid endpoint id")
 
     rid = get_or_create_request_id(request)
     now = iso_utc_ms()

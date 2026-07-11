@@ -15,6 +15,7 @@ from app.core.admin_request import (
     parse_float_in_range,
     parse_optional_str,
     parse_required_str,
+    require_positive_id,
 )
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.errors import ApiError, ErrorCode
@@ -171,8 +172,7 @@ async def update_token(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if token_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid token id", status_code=400)
+    token_id = require_positive_id(token_id, invalid_message="Invalid token id")
 
     rid = get_or_create_request_id(request)
     body = await _load_update_token_json(request)
@@ -208,8 +208,7 @@ async def delete_token(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if token_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid token id", status_code=400)
+    token_id = require_positive_id(token_id, invalid_message="Invalid token id")
 
     rid = get_or_create_request_id(request)
 
@@ -238,8 +237,7 @@ async def test_refresh_token(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if token_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid token id", status_code=400)
+    token_id = require_positive_id(token_id, invalid_message="Invalid token id")
 
     rid = get_or_create_request_id(request)
 
@@ -371,8 +369,7 @@ async def reset_failures(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if token_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid token id", status_code=400)
+    token_id = require_positive_id(token_id, invalid_message="Invalid token id")
 
     rid = get_or_create_request_id(request)
 

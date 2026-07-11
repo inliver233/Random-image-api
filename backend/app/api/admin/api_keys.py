@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object, parse_bool_optional, parse_optional_str, parse_required_str
+from app.core.admin_request import load_json_object, parse_bool_optional, parse_optional_str, parse_required_str, require_positive_id
 from app.core.api_keys import api_key_hint, hmac_sha256_hex
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -144,8 +144,7 @@ async def update_api_key(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if api_key_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid api_key_id", status_code=400)
+    api_key_id = require_positive_id(api_key_id, invalid_message="Invalid api_key_id")
 
     rid = get_or_create_request_id(request)
     body = await load_json_object(request)

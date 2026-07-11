@@ -15,7 +15,7 @@ from starlette.datastructures import UploadFile
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object, parse_bool
+from app.core.admin_request import load_json_object, parse_bool, require_positive_id
 from app.core.data_files import get_sqlite_db_dir, make_file_ref
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -407,8 +407,7 @@ async def rollback_import(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if import_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid import id", status_code=400)
+    import_id = require_positive_id(import_id, invalid_message="Invalid import id")
 
     rid = get_or_create_request_id(request)
 
@@ -520,8 +519,7 @@ async def get_import(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if import_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid import id", status_code=400)
+    import_id = require_positive_id(import_id, invalid_message="Invalid import id")
 
     rid = get_or_create_request_id(request)
 

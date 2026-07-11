@@ -16,6 +16,7 @@ from app.core.admin_request import (
     parse_positive_int,
     parse_positive_int_list,
     parse_required_str,
+    require_positive_id,
 )
 from app.core.errors import ApiError
 
@@ -73,6 +74,16 @@ def test_parse_positive_int() -> None:
     with pytest.raises(ApiError) as ei_custom:
         parse_positive_int(-1, field="id", invalid_message="bad id")
     assert ei_custom.value.message == "bad id"
+
+
+def test_require_positive_id() -> None:
+    assert require_positive_id(12, invalid_message="Invalid job id") == 12
+    with pytest.raises(ApiError) as ei_zero:
+        require_positive_id(0, invalid_message="Invalid job id")
+    assert ei_zero.value.message == "Invalid job id"
+    with pytest.raises(ApiError) as ei_neg:
+        require_positive_id(-3, invalid_message="Invalid token id")
+    assert ei_neg.value.message == "Invalid token id"
 
 
 def test_parse_int_in_range() -> None:

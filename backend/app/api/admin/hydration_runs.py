@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object, parse_choice, parse_positive_int
+from app.core.admin_request import load_json_object, parse_choice, parse_positive_int, require_positive_id
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
@@ -194,8 +194,7 @@ async def get_hydration_run(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if run_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid hydration_run id", status_code=400)
+    run_id = require_positive_id(run_id, invalid_message="Invalid hydration_run id")
 
     rid = get_or_create_request_id(request)
     engine = request.app.state.engine
@@ -360,8 +359,7 @@ async def _set_run_and_job_status(
     allowed_from: set[str],
     job_status: str,
 ) -> dict[str, Any]:
-    if run_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid hydration_run id", status_code=400)
+    run_id = require_positive_id(run_id, invalid_message="Invalid hydration_run id")
 
     rid = get_or_create_request_id(request)
     now = iso_utc_ms()
