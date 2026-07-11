@@ -11,8 +11,14 @@ import { describe, it } from "node:test";
 
 import {
   authorizePrewarmSecrets,
+  buildHealthzBody,
+  cachePathKey,
   filterPrewarmPaths,
   isAllowedMirrorHost,
+  isOriginCircuitOpen,
+  isSignedUrlExpired,
+  noteOriginSample,
+  originCircuitConfig,
   parseSignedPath,
   resolveFallbackHosts,
   resolveR2Mode,
@@ -150,5 +156,68 @@ describe("prewarm gate + path filter", () => {
       50,
     );
     assert.deepEqual(paths, ["/img-original/a.jpg", "/img-master/b.png"]);
+  });
+});
+
+describe("signed URL expiry", () => {
+  it("expires at exact second boundary (now >= exp)", () => {
+    assert.equal(isSignedUrlExpired(100, 99), false);
+    assert.equal(isSignedUrlExpired(100, 100), true);
+    assert.equal(isSignedUrlExpired(100, 101), true);
+  });
+});
+
+describe("buildHealthzBody", () => {
+  it("reports dual_secret and r2_mode fields", () => {
+    assert.deepEqual(
+      buildHealthzBody({ secrets: ["a", "b"], circuitOpen: true, r2Mode: "read_through" }),
+      {
+        ok: true,
+        service: "random-image-edge",
+        dual_secret: true,
+        origin_circuit_open: true,
+        r2: true,
+        r2_mode: "read_through",
+      },
+    );
+    assert.deepEqual(
+      buildHealthzBody({ secrets: ["a"], circuitOpen: false, r2Mode: "off" }),
+      {
+        ok: true,
+        service: "random-image-edge",
+        dual_secret: false,
+        origin_circuit_open: false,
+        r2: false,
+        r2_mode: "off",
+      },
+    );
+  });
+});
+
+describe("origin circuit pure", () => {
+  it("parses defaults and opens after threshold 403s", () => {
+    const cfg = originCircuitConfig({});
+    assert.equal(cfg.threshold, 8);
+    let state = { windowStartMs: 0, samples: 0, forbidden: 0, openUntilMs: 0 };
+    const now = 1_000_000;
+    for (let i = 0; i < 8; i++) {
+      state = noteOriginSample(state, 403, cfg, now + i);
+    }
+    assert.equal(isOriginCircuitOpen(state, now + 8), true);
+    assert.ok(state.openUntilMs > now);
+  });
+  it("200 cools forbidden counter", () => {
+    const cfg = { threshold: 3, windowMs: 60_000, openMs: 30_000 };
+    let state = { windowStartMs: 1000, samples: 2, forbidden: 2, openUntilMs: 0 };
+    state = noteOriginSample(state, 200, cfg, 1500);
+    assert.equal(state.forbidden, 1);
+    assert.equal(isOriginCircuitOpen(state, 1500), false);
+  });
+});
+
+describe("cachePathKey", () => {
+  it("matches r2 object key shape", () => {
+    assert.equal(cachePathKey("/img-original/x.jpg"), "pximg/img-original/x.jpg");
+    assert.equal(cachePathKey("/img-original/x.jpg"), r2ObjectKey("/img-original/x.jpg"));
   });
 });

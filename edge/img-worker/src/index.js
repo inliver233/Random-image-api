@@ -24,7 +24,12 @@
 
 import {
   authorizePrewarmSecrets,
+  buildHealthzBody,
   filterPrewarmPaths,
+  isOriginCircuitOpen as pureIsOriginCircuitOpen,
+  isSignedUrlExpired,
+  noteOriginSample as pureNoteOriginSample,
+  originCircuitConfig,
   parseSignedPath,
   resolveFallbackHosts,
   resolveR2Mode,
@@ -94,36 +99,16 @@ async function verifySignature(secrets, exp, path, sig) {
   return false;
 }
 
-function originCircuitConfig(env) {
-  const threshold = Math.max(1, Number(env.ORIGIN_403_CIRCUIT_THRESHOLD || 8) || 8);
-  const windowMs = Math.max(1000, Number(env.ORIGIN_403_CIRCUIT_WINDOW_MS || 60000) || 60000);
-  const openMs = Math.max(1000, Number(env.ORIGIN_403_CIRCUIT_OPEN_MS || 30000) || 30000);
-  return { threshold, windowMs, openMs };
-}
-
 function isOriginCircuitOpen(nowMs) {
-  return Number(ORIGIN_CB.openUntilMs || 0) > nowMs;
+  return pureIsOriginCircuitOpen(ORIGIN_CB, nowMs);
 }
 
 function noteOriginSample(status, env, nowMs = Date.now()) {
-  const { threshold, windowMs, openMs } = originCircuitConfig(env);
-  if (!ORIGIN_CB.windowStartMs || nowMs - ORIGIN_CB.windowStartMs > windowMs) {
-    ORIGIN_CB.windowStartMs = nowMs;
-    ORIGIN_CB.samples = 0;
-    ORIGIN_CB.forbidden = 0;
-  }
-  ORIGIN_CB.samples += 1;
-  if (Number(status) === 403) {
-    ORIGIN_CB.forbidden += 1;
-  }
-  // Soft-open only when we have enough samples and 403 rate is high.
-  if (ORIGIN_CB.samples >= threshold && ORIGIN_CB.forbidden >= threshold) {
-    ORIGIN_CB.openUntilMs = nowMs + openMs;
-  }
-  // Success slowly cools the breaker.
-  if (Number(status) === 200 && ORIGIN_CB.forbidden > 0) {
-    ORIGIN_CB.forbidden = Math.max(0, ORIGIN_CB.forbidden - 1);
-  }
+  const next = pureNoteOriginSample(ORIGIN_CB, status, originCircuitConfig(env), nowMs);
+  ORIGIN_CB.windowStartMs = next.windowStartMs;
+  ORIGIN_CB.samples = next.samples;
+  ORIGIN_CB.forbidden = next.forbidden;
+  ORIGIN_CB.openUntilMs = next.openUntilMs;
 }
 
 function corsHeaders() {
@@ -399,20 +384,10 @@ export default {
     if (url.pathname === "/healthz" || url.pathname === "/") {
       const circuitOpen = isOriginCircuitOpen(Date.now());
       const r2Mode = resolveR2Mode(env);
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          service: "random-image-edge",
-          dual_secret: secrets.length > 1,
-          origin_circuit_open: circuitOpen,
-          r2: r2Mode !== "off",
-          r2_mode: r2Mode,
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json; charset=utf-8", ...corsHeaders() },
-        },
-      );
+      return new Response(JSON.stringify(buildHealthzBody({ secrets, circuitOpen, r2Mode })), {
+        status: 200,
+        headers: { "Content-Type": "application/json; charset=utf-8", ...corsHeaders() },
+      });
     }
 
     const parsed = parseSignedPath(url.pathname);
@@ -422,7 +397,7 @@ export default {
 
     const now = Math.floor(Date.now() / 1000);
     // Contract: now >= exp → 403 (expired at exact second boundary).
-    if (parsed.exp <= now) {
+    if (isSignedUrlExpired(parsed.exp, now)) {
       return jsonError(403, "URL expired");
     }
 

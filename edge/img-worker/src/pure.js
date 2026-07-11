@@ -107,3 +107,79 @@ export function filterPrewarmPaths(rawPaths, max = 50) {
   }
   return paths;
 }
+
+/** Parse origin soft-circuit env knobs (defaults match Worker). */
+export function originCircuitConfig(env) {
+  const threshold = Math.max(1, Number(env?.ORIGIN_403_CIRCUIT_THRESHOLD || 8) || 8);
+  const windowMs = Math.max(1000, Number(env?.ORIGIN_403_CIRCUIT_WINDOW_MS || 60000) || 60000);
+  const openMs = Math.max(1000, Number(env?.ORIGIN_403_CIRCUIT_OPEN_MS || 30000) || 30000);
+  return { threshold, windowMs, openMs };
+}
+
+export function isOriginCircuitOpen(state, nowMs) {
+  return Number(state?.openUntilMs || 0) > nowMs;
+}
+
+/**
+ * Pure origin circuit transition (no Date.now).
+ * @param {{windowStartMs:number,samples:number,forbidden:number,openUntilMs:number}} state
+ * @param {number} status HTTP status from origin
+ * @param {{threshold:number,windowMs:number,openMs:number}} cfg
+ * @param {number} nowMs
+ */
+export function noteOriginSample(state, status, cfg, nowMs) {
+  const next = {
+    windowStartMs: Number(state?.windowStartMs || 0),
+    samples: Number(state?.samples || 0),
+    forbidden: Number(state?.forbidden || 0),
+    openUntilMs: Number(state?.openUntilMs || 0),
+  };
+  const threshold = Number(cfg.threshold);
+  const windowMs = Number(cfg.windowMs);
+  const openMs = Number(cfg.openMs);
+  if (!next.windowStartMs || nowMs - next.windowStartMs > windowMs) {
+    next.windowStartMs = nowMs;
+    next.samples = 0;
+    next.forbidden = 0;
+  }
+  next.samples += 1;
+  if (Number(status) === 403) {
+    next.forbidden += 1;
+  }
+  if (next.samples >= threshold && next.forbidden >= threshold) {
+    next.openUntilMs = nowMs + openMs;
+  }
+  if (Number(status) === 200 && next.forbidden > 0) {
+    next.forbidden = Math.max(0, next.forbidden - 1);
+  }
+  return next;
+}
+
+/** exp is inclusive-until: reject when nowSec >= exp. */
+export function isSignedUrlExpired(exp, nowSec) {
+  const e = Number(exp);
+  const n = Number(nowSec);
+  if (!Number.isFinite(e) || !Number.isFinite(n)) return true;
+  return n >= e;
+}
+
+/**
+ * /healthz JSON body (no Request).
+ * @param {{secrets:string[], circuitOpen:boolean, r2Mode:string}} input
+ */
+export function buildHealthzBody({ secrets, circuitOpen, r2Mode }) {
+  const mode = String(r2Mode || "off");
+  return {
+    ok: true,
+    service: "random-image-edge",
+    dual_secret: Array.isArray(secrets) && secrets.length > 1,
+    origin_circuit_open: Boolean(circuitOpen),
+    r2: mode !== "off",
+    r2_mode: mode,
+  };
+}
+
+/** Cache API / R2 key path shape: GET {origin}/pximg{path} — path portion only. */
+export function cachePathKey(path) {
+  return r2ObjectKey(path);
+}
