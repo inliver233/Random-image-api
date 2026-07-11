@@ -620,6 +620,85 @@ def test_sqlite_catalog_store_list_images(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_sqlite_catalog_store_list_authors(tmp_path: Path) -> None:
+    engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_authors.db").as_posix())
+
+    async def _run() -> None:
+        from app.db.models.images import Image
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        store = build_catalog_store(database_url=str(engine.url))
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            session.add_all(
+                [
+                    Image(
+                        illust_id=1,
+                        page_index=0,
+                        ext="jpg",
+                        original_url="https://example.test/1.jpg",
+                        proxy_path="/i/1.jpg",
+                        random_key=0.1,
+                        status=1,
+                        user_id=10,
+                        user_name="alice",
+                    ),
+                    Image(
+                        illust_id=2,
+                        page_index=0,
+                        ext="jpg",
+                        original_url="https://example.test/2.jpg",
+                        proxy_path="/i/2.jpg",
+                        random_key=0.2,
+                        status=1,
+                        user_id=10,
+                        user_name="alice",
+                    ),
+                    Image(
+                        illust_id=3,
+                        page_index=0,
+                        ext="jpg",
+                        original_url="https://example.test/3.jpg",
+                        proxy_path="/i/3.jpg",
+                        random_key=0.3,
+                        status=1,
+                        user_id=20,
+                        user_name="bob",
+                    ),
+                    Image(
+                        illust_id=4,
+                        page_index=0,
+                        ext="jpg",
+                        original_url="https://example.test/4.jpg",
+                        proxy_path="/i/4.jpg",
+                        random_key=0.4,
+                        status=3,
+                        user_id=30,
+                        user_name="ghost",
+                    ),
+                ]
+            )
+            await session.commit()
+
+            items, next_c = await store.list_authors(session, limit=10)
+            assert next_c is None
+            assert [(i.user_id, i.count_images) for i in items] == [(10, 2), (20, 1)]
+
+            page, next_c = await store.list_authors(session, limit=1)
+            assert len(page) == 1 and int(page[0].user_id) == 10
+            assert next_c == 10
+            page2, next_c2 = await store.list_authors(session, limit=1, cursor=next_c)
+            assert len(page2) == 1 and int(page2[0].user_id) == 20
+            assert next_c2 is None
+
+            q_items, _ = await store.list_authors(session, limit=10, q="ali")
+            assert [i.user_id for i in q_items] == [10]
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_sqlite_catalog_store_list_admin_images(tmp_path: Path) -> None:
     engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_admin_list.db").as_posix())
 

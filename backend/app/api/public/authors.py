@@ -6,7 +6,7 @@ from fastapi import APIRouter, Request
 
 from app.core.public_json import public_cursor_list_json
 from app.core.public_search_query import parse_public_search_query
-from app.db.authors_list import list_authors as db_list_authors
+from app.core.random_delivery import resolve_catalog_store
 from app.db.session import create_sessionmaker
 
 router = APIRouter()
@@ -23,8 +23,9 @@ async def list_authors(
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     async with Session() as session:
-        items, next_cursor = await db_list_authors(
+        items, next_cursor = await catalog.list_authors(
             session,
             limit=parsed.limit,
             cursor=parsed.cursor_i,

@@ -25,6 +25,7 @@ Implementation:
 | `get_image_by_illust_page` | Legacy public routes by (illust_id, page_index), status=1 only |
 | `list_images` | Public cursor list with filters (status=1); returns `(rows, next_cursor)` |
 | `list_admin_images` | Admin cursor list (status=1) + tag_count + optional missing-* filters; returns `((image, tag_count), next_cursor)` (response shaping stays in handler) |
+| `list_authors` | Public author cursor list projected from enabled images (`user_id` group + counts; optional `q`/FTS) |
 | `mark_image_ok` / `mark_image_failure` | Delivery quality feedback |
 | `heal_broken_images_for_illust` | After heal hydrate: status `3` → `1` for all pages of an illust; returns healed ids |
 | `set_status_for_import` | Admin import rollback: bulk set status by `created_import_id` |
@@ -47,6 +48,7 @@ Public delivery/get paths adopt the port progressively:
 - Admin `DELETE /admin/api/images/{id}` + `POST /admin/api/images/bulk-delete` → `catalog.delete_images_by_ids` (image_tags remain in handler)
 - Admin `POST /admin/api/images/clear` → `catalog.clear_all_images` (image_tags / Tag wipe remain in handler)
 - Admin `GET /admin/api/images` → `catalog.list_admin_images` (missing-field response shaping remains in handler; tag_count join stays in helper)
+- Public `GET /authors` → `catalog.list_authors` (author projection from Image rows)
 - Worker `build_default_dispatcher` builds one `CatalogStore` and injects into import/hydrate/heal
 - Tag domain is **not** on CatalogStore — see `contracts/tag-store.md`
 
