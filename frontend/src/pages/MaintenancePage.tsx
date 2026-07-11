@@ -1,9 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, InputNumber, Skeleton, Space, Switch, Typography } from "antd";
+import { Button, Card, Form, InputNumber, Skeleton, Space, Switch, Typography } from "antd";
 import React from "react";
 
+import { ActionAlerts } from "../admin/ActionAlerts";
+import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
-import { requestIdFromError, messageFromError } from "../admin/errors";
 
 type CleanupFormValues = {
   keep_days: number;
@@ -24,9 +25,7 @@ type CleanupResponse = {
 
 export function MaintenancePage() {
   const [form] = Form.useForm<CleanupFormValues>();
-  const [result, setResult] = React.useState<CleanupResponse | null>(null);
-  const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
-  const [errorRequestId, setErrorRequestId] = React.useState<string | null>(null);
+  const alerts = useActionAlerts();
 
   const cleanup = useMutation({
     mutationFn: (values: CleanupFormValues) =>
@@ -40,14 +39,17 @@ export function MaintenancePage() {
         }),
       }),
     onMutate: () => {
-      setResult(null);
-      setErrorMessage(null);
-      setErrorRequestId(null);
+      alerts.clear();
     },
-    onSuccess: (data) => setResult(data),
+    onSuccess: (data) => {
+      const msg = data.dry_run ? "预览完成" : "清理完成";
+      const detail = data.dry_run
+        ? `cutoff=${data.cutoff}，would_delete=${data.would_delete ?? 0}，has_more=${String(data.has_more)}`
+        : `cutoff=${data.cutoff}，deleted=${data.deleted ?? 0}，has_more=${String(data.has_more)}`;
+      alerts.setSuccess(`${msg}（${detail}）`, data.request_id);
+    },
     onError: (err) => {
-      setErrorMessage(messageFromError(err));
-      setErrorRequestId(requestIdFromError(err));
+      alerts.setError(err);
     },
   });
 
@@ -98,28 +100,15 @@ export function MaintenancePage() {
         </Form>
 
         {cleanup.isPending ? <Skeleton active style={{ marginTop: 16 }} /> : null}
-        {errorMessage ? (
-          <Alert
-            type="error"
-            showIcon
-            style={{ marginTop: 16 }}
-            message={errorMessage}
-            description={errorRequestId ? `请求ID: ${errorRequestId}` : ""}
+        <div style={{ marginTop: 16 }}>
+          <ActionAlerts
+            message={alerts.message}
+            requestId={alerts.requestId}
+            errorMessage={alerts.errorMessage}
+            errorRequestId={alerts.errorRequestId}
+            requestIdPlacement="description"
           />
-        ) : null}
-        {result ? (
-          <Alert
-            type="success"
-            showIcon
-            style={{ marginTop: 16 }}
-            message={result.dry_run ? "预览完成" : "清理完成"}
-            description={
-              result.dry_run
-                ? `cutoff=${result.cutoff}，would_delete=${result.would_delete ?? 0}，has_more=${String(result.has_more)}，请求ID: ${result.request_id}`
-                : `cutoff=${result.cutoff}，deleted=${result.deleted ?? 0}，has_more=${String(result.has_more)}，请求ID: ${result.request_id}`
-            }
-          />
-        ) : null}
+        </div>
       </Card>
     </Space>
   );

@@ -4,8 +4,9 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { CursorTableCard } from "../admin/CursorTableCard";
+import { messageFromError, requestIdFromError } from "../admin/errors";
 import { apiJson } from "../api/client";
-import { messageFromError, requestIdFromError, requestIdOrMessageDescription } from "../admin/errors";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ImportFormValues = {
@@ -138,8 +139,6 @@ export function ImportPage() {
     nextCursor,
     listRequestId,
     loadMore,
-    hasMore,
-    isLoadingMore,
   } = useCursorList<ImportListItem, ImportsListResponse>({
     queryKey: ["admin", "imports", { limit: 50 }],
     getItemId: (item) => item.id,
@@ -391,54 +390,19 @@ export function ImportPage() {
         </Space>
       ) : null}
 
-      <Card title="导入历史">
-        {listRequestId ? <Typography.Text type="secondary">请求ID: {listRequestId}</Typography.Text> : null}
-        {historyQuery.isLoading ? (
-          <Alert type="info" showIcon message="正在加载导入历史..." style={{ marginTop: 12 }} />
-        ) : historyQuery.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="加载导入历史失败"
-            description={requestIdOrMessageDescription(historyQuery.error)}
-            style={{ marginTop: 12 }}
-          />
-        ) : historyItems.length === 0 ? (
-          <Alert type="info" showIcon message="暂无导入记录" style={{ marginTop: 12 }} />
-        ) : (
-          <>
-            <Table<ImportListItem>
-              rowKey={(row) => row.id}
-              columns={historyColumns}
-              dataSource={historyItems}
-              pagination={false}
-              size="small"
-              style={{ marginTop: 12 }}
-              scroll={{ x: 1200 }}
-            />
-            {hasMore ? (
-              <Button
-                style={{ marginTop: 12 }}
-                loading={isLoadingMore}
-                onClick={() => {
-                  if (nextCursor) loadMore.mutate(nextCursor);
-                }}
-              >
-                加载更多
-              </Button>
-            ) : null}
-            {loadMore.isError ? (
-              <Alert
-                type="error"
-                showIcon
-                message="加载更多失败"
-                description={messageFromError(loadMore.error)}
-                style={{ marginTop: 12 }}
-              />
-            ) : null}
-          </>
-        )}
-      </Card>
+      <CursorTableCard<ImportListItem>
+        title="导入历史"
+        columns={historyColumns}
+        items={historyItems}
+        rowKey={(row) => row.id}
+        query={historyQuery}
+        loadMore={loadMore}
+        nextCursor={nextCursor}
+        listRequestId={listRequestId}
+        errorMessage="加载导入历史失败"
+        emptyMessage="暂无导入记录"
+        scrollX={1200}
+      />
     </Space>
   );
 }

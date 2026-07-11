@@ -17,6 +17,8 @@ type CursorTableCardProps<TItem> = {
   emptyMessage: string;
   emptyDescription?: string;
   scrollX?: number;
+  /** Optional Card title for embedded list sections. */
+  title?: string;
 };
 
 /**
@@ -35,6 +37,7 @@ export function CursorTableCard<TItem>(props: CursorTableCardProps<TItem>) {
     emptyMessage,
     emptyDescription,
     scrollX,
+    title,
   } = props;
 
   return (
@@ -57,7 +60,7 @@ export function CursorTableCard<TItem>(props: CursorTableCardProps<TItem>) {
       ) : items.length === 0 ? (
         <Alert type="info" showIcon message={emptyMessage} description={emptyDescription || ""} />
       ) : (
-        <Card>
+        <Card title={title}>
           {listRequestId ? <Typography.Text type="secondary">请求ID: {listRequestId}</Typography.Text> : null}
           <Table<TItem>
             rowKey={rowKey}
