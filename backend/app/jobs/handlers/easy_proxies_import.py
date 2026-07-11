@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import httpx
@@ -12,6 +11,7 @@ from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.source_ref import sanitize_source_ref
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor
+from app.core.env_parse import parse_str_env
 from app.core.proxy_uri import parse_proxy_uri
 from app.core.time import iso_utc_ms
 from app.db.models.proxy_endpoints import ProxyEndpoint
@@ -46,7 +46,7 @@ def build_easy_proxies_import_handler(engine: AsyncEngine, *, transport: httpx.B
 
         password = str(payload.get("password") or "").strip()
         if not password:
-            password = str(os.environ.get("EASY_PROXIES_PASSWORD") or "").strip()
+            password = parse_str_env("EASY_PROXIES_PASSWORD")
         conflict_policy = _parse_conflict_policy(payload.get("conflict_policy"))
 
         host_override = str(payload.get("host_override") or "").strip() or None

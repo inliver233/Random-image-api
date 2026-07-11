@@ -9,7 +9,13 @@ from typing import Any
 
 from app.easy_proxies.auto_refresh import EasyProxiesAutoRefreshConfig, EasyProxiesAutoRefresher
 from app.core.config import load_settings
-from app.core.env_parse import parse_bool_env, parse_float_env, parse_int_env
+from app.core.env_parse import (
+    parse_bool_env,
+    parse_float_env,
+    parse_int_env,
+    parse_optional_str_env,
+    parse_str_env,
+)
 from app.core.logging import configure_logging, get_logger
 from app.core.redact import redact_text
 from app.core.time import iso_utc_ms
@@ -241,13 +247,13 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
     try:
         dispatcher = build_default_dispatcher(engine)
 
-        base_url = (os.environ.get("EASY_PROXIES_BASE_URL") or "").strip()
+        base_url = parse_str_env("EASY_PROXIES_BASE_URL")
         auto_refresh_enabled = parse_bool_env("EASY_PROXIES_AUTO_REFRESH", default=True)
 
-        raw_ms = (os.environ.get("EASY_PROXIES_REFRESH_INTERVAL_MS") or "").strip()
-        raw_s = (os.environ.get("EASY_PROXIES_REFRESH_INTERVAL_SECONDS") or "").strip()
+        raw_ms = parse_str_env("EASY_PROXIES_REFRESH_INTERVAL_MS")
+        raw_s = parse_str_env("EASY_PROXIES_REFRESH_INTERVAL_SECONDS")
         if not raw_s:
-            raw_s = (os.environ.get("EASY_PROXIES_REFRESH_INTERVAL_S") or "").strip()
+            raw_s = parse_str_env("EASY_PROXIES_REFRESH_INTERVAL_S")
 
         interval_s = 0.0
         if raw_ms:
@@ -264,14 +270,17 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
         if not auto_refresh_enabled:
             interval_s = 0.0
 
-        conflict_policy = (os.environ.get("EASY_PROXIES_CONFLICT_POLICY") or "skip_non_easy_proxies").strip()
+        conflict_policy = parse_str_env(
+            "EASY_PROXIES_CONFLICT_POLICY",
+            default="skip_non_easy_proxies",
+        )
 
-        host_override = (os.environ.get("EASY_PROXIES_HOST_OVERRIDE") or "").strip() or None
+        host_override = parse_optional_str_env("EASY_PROXIES_HOST_OVERRIDE")
 
         auto_attach = parse_bool_env("EASY_PROXIES_AUTO_ATTACH", default=True)
 
         attach_pool_id: int | None = None
-        raw_attach_pool = (os.environ.get("EASY_PROXIES_ATTACH_POOL_ID") or "").strip()
+        raw_attach_pool = parse_str_env("EASY_PROXIES_ATTACH_POOL_ID")
         if raw_attach_pool:
             try:
                 attach_pool_id = int(raw_attach_pool)
@@ -315,7 +324,7 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
         if refresher.enabled:
             log.info("easy_proxies_auto_refresh_enabled base_url=%s interval_s=%s", base_url, interval_s)
 
-        worker_id = (os.environ.get("WORKER_ID") or f"pid{os.getpid()}").strip()
+        worker_id = parse_str_env("WORKER_ID", default=f"pid{os.getpid()}")
         jobs_lock_ttl_s = parse_int_env(
             "WORKER_JOBS_LOCK_TTL_SECONDS",
             default=int(DEFAULT_LOCK_TTL_S),

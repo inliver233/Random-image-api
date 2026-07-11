@@ -63,3 +63,26 @@ def parse_bool_env(
     if v in {"0", "false", "no", "n", "off"}:
         return False
     return bool(default)
+
+
+def parse_str_env(
+    name: str,
+    *,
+    default: str = "",
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Soft env string (strip); empty/missing → default (also stripped)."""
+    raw = _env_raw(name, env)
+    if raw == "":
+        return str(default or "").strip()
+    return raw
+
+
+def parse_optional_str_env(
+    name: str,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str | None:
+    """Soft env string; empty/missing → None."""
+    raw = _env_raw(name, env)
+    return raw or None
