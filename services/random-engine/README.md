@@ -67,9 +67,11 @@ After starting the engine, push a snapshot before enabling the flag, or picks wi
 | --- | --- | --- |
 | `INDEX_NOT_READY` | in-memory index size 0 (no snapshot yet) | `empty_index` |
 | `NO_MATCH` | filters excluded all candidates | `no_match` |
-| `OK` + items | successful pick | `ok` (then catalog rehydrate) |
+| `OK` + items | successful pick | `ok` (PickItem DTO delivery; catalog rehydrate only if item incomplete) |
 
 Prometheus: `new_pixiv_random_engine_pick_total{status=…}` — watch `empty_index` / `unavailable` before raising `RANDOM_ENGINE_TRAFFIC_PERCENT`.
+
+BFF debug meta on engine hit also includes `engine_dto_count` / `engine_rehydrate_count` / `engine_rehydrate` so dual-run can confirm SQLite skip rate.
 
 ### Catalog → engine events (best-effort)
 

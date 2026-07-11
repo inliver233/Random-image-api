@@ -240,6 +240,170 @@ def classify_engine_pick_response(data: dict[str, Any] | None) -> str:
     return "ok"
 
 
+class EnginePickImage:
+    """Lightweight delivery DTO from Go PickItem (avoids SQLite rehydrate on happy path).
+
+    Attribute surface matches what public delivery / side-effects read via getattr.
+    last_ok_at is set to a non-null marker so should_mark_image_ok skips catalog write
+    (we do not know fail/error state without a row load; edge path already skips mark_ok).
+    """
+
+    __slots__ = (
+        "id",
+        "illust_id",
+        "page_index",
+        "ext",
+        "original_url",
+        "width",
+        "height",
+        "orientation",
+        "x_restrict",
+        "ai_type",
+        "illust_type",
+        "user_id",
+        "user_name",
+        "title",
+        "created_at_pixiv",
+        "bookmark_count",
+        "view_count",
+        "comment_count",
+        "status",
+        "last_ok_at",
+        "last_error_code",
+        "added_at",
+        "random_key",
+        "from_engine_item",
+    )
+
+    def __init__(self, **kwargs: Any) -> None:
+        for key in self.__slots__:
+            setattr(self, key, kwargs.get(key))
+
+
+def _nullable_int(raw: Any) -> int | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except Exception:
+        return None
+
+
+def image_from_engine_pick_item(item: Mapping[str, Any] | dict[str, Any] | None) -> EnginePickImage | None:
+    """Build delivery DTO from engine PickItem when id/ext/original_url are present.
+
+    Returns None when the item cannot satisfy public URL/stream delivery without catalog.
+    """
+    if not isinstance(item, Mapping):
+        return None
+    try:
+        image_id = int(item.get("id"))  # type: ignore[arg-type]
+    except Exception:
+        return None
+    if image_id <= 0:
+        return None
+    ext = str(item.get("ext") or "").strip().lstrip(".")
+    if not ext:
+        return None
+    origin = item.get("original_url")
+    if origin is None:
+        return None
+    original_url = str(origin).strip()
+    if not original_url:
+        return None
+    try:
+        illust_id = int(item.get("illust_id") or 0)
+    except Exception:
+        illust_id = 0
+    if illust_id <= 0:
+        return None
+    try:
+        page_index = int(item.get("page_index") or 0)
+    except Exception:
+        page_index = 0
+    return EnginePickImage(
+        id=image_id,
+        illust_id=illust_id,
+        page_index=page_index,
+        ext=ext,
+        original_url=original_url,
+        width=_nullable_int(item.get("width")),
+        height=_nullable_int(item.get("height")),
+        orientation=None,
+        x_restrict=_nullable_int(item.get("x_restrict")),
+        ai_type=_nullable_int(item.get("ai_type")),
+        illust_type=_nullable_int(item.get("illust_type")),
+        user_id=_nullable_int(item.get("user_id")),
+        user_name=(str(item["user_name"]) if item.get("user_name") is not None else None),
+        title=(str(item["title"]) if item.get("title") is not None else None),
+        created_at_pixiv=(
+            str(item["created_at_pixiv"]) if item.get("created_at_pixiv") is not None else None
+        ),
+        bookmark_count=_nullable_int(item.get("bookmark_count")),
+        view_count=_nullable_int(item.get("view_count")),
+        comment_count=_nullable_int(item.get("comment_count")),
+        status=1,
+        # Non-null → should_mark_image_ok is False without a catalog round-trip.
+        last_ok_at="engine",
+        last_error_code=None,
+        added_at=None,
+        random_key=None,
+        from_engine_item=True,
+    )
+
+
+async def resolve_engine_pick_images(
+    *,
+    session: AsyncSession,
+    items: list[Any],
+    catalog: CatalogStore | None = None,
+) -> tuple[list[Any], dict[str, Any]]:
+    """Prefer PickItem DTOs; fall back to catalog rehydrate for incomplete items.
+
+    Preserves engine item order. Returns (images, resolve_meta) where resolve_meta has
+    ``rehydrate`` bool and id lists for ops/debug.
+    """
+    store = resolve_catalog_store(catalog)
+    images: list[Any] = []
+    need_ids: list[int] = []
+    dto_by_id: dict[int, EnginePickImage] = {}
+    ordered_ids: list[int] = []
+
+    for raw in items:
+        if not isinstance(raw, Mapping):
+            continue
+        dto = image_from_engine_pick_item(raw)
+        if dto is not None:
+            dto_by_id[int(dto.id)] = dto
+            ordered_ids.append(int(dto.id))
+            continue
+        try:
+            image_id = int(raw.get("id"))  # type: ignore[arg-type]
+        except Exception:
+            continue
+        if image_id <= 0:
+            continue
+        ordered_ids.append(image_id)
+        need_ids.append(image_id)
+
+    rehydrated: dict[int, Any] = {}
+    if need_ids:
+        rows = await store.get_images_by_ids(session, image_ids=need_ids)
+        rehydrated = {int(im.id): im for im in rows}
+
+    for image_id in ordered_ids:
+        if image_id in dto_by_id:
+            images.append(dto_by_id[image_id])
+        elif image_id in rehydrated:
+            images.append(rehydrated[image_id])
+
+    return images, {
+        "engine_dto_count": len(dto_by_id),
+        "engine_rehydrate_count": len(rehydrated),
+        "engine_rehydrate": bool(need_ids),
+    }
+
+
 async def try_pick_via_engine(
     *,
     client: Any,
@@ -250,10 +414,9 @@ async def try_pick_via_engine(
     catalog: CatalogStore | None = None,
 ) -> tuple[Any | None, dict[str, Any]]:
     """
-    Call Go engine; on OK with items, load full Image row from catalog by id.
+    Call Go engine; prefer PickItem delivery DTO, catalog rehydrate only if incomplete.
     Returns (image_or_none, debug_meta). Never raises for transport failures.
     """
-    store = resolve_catalog_store(catalog)
     meta: dict[str, Any] = {"engine": True, "engine_url": base_url}
     data = await engine_pick(client, base_url, payload=payload, timeout_s=timeout_s)
     if data is None:
@@ -271,18 +434,22 @@ async def try_pick_via_engine(
     if not isinstance(first, dict):
         meta["engine_status"] = "bad_item"
         return None, meta
-    try:
-        image_id = int(first.get("id"))
-    except Exception:
-        meta["engine_status"] = "bad_id"
-        return None, meta
-    image = await store.get_image_by_id(session, image_id=image_id)
-    if image is None:
+    images, resolve_meta = await resolve_engine_pick_images(
+        session=session,
+        items=[first],
+        catalog=catalog,
+    )
+    meta.update(resolve_meta)
+    if not images:
+        try:
+            meta["engine_image_id"] = int(first.get("id"))
+        except Exception:
+            pass
         meta["engine_status"] = "db_miss"
-        meta["engine_image_id"] = image_id
         return None, meta
+    image = images[0]
     meta["engine_status"] = "ok"
-    meta["engine_image_id"] = image_id
+    meta["engine_image_id"] = int(image.id)
     meta["picked_by"] = "random_engine"
     return image, meta
 
@@ -297,7 +464,6 @@ async def try_pick_many_via_engine(
     catalog: CatalogStore | None = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Batch variant of try_pick_via_engine for /feed (limit>1)."""
-    store = resolve_catalog_store(catalog)
     meta: dict[str, Any] = {"engine": True, "engine_url": base_url, "batch": True}
     data = await engine_pick(client, base_url, payload=payload, timeout_s=timeout_s)
     if data is None:
@@ -315,22 +481,14 @@ async def try_pick_many_via_engine(
         meta["engine_status"] = "no_match"
         return [], meta
 
-    ids: list[int] = []
-    for it in raw_items:
-        if not isinstance(it, dict):
-            continue
-        try:
-            ids.append(int(it.get("id")))
-        except Exception:
-            continue
-    if not ids:
-        meta["engine_status"] = "bad_item"
-        return [], meta
-
-    images = await store.get_images_by_ids(session, image_ids=ids)
+    images, resolve_meta = await resolve_engine_pick_images(
+        session=session,
+        items=list(raw_items),
+        catalog=catalog,
+    )
+    meta.update(resolve_meta)
     if not images:
         meta["engine_status"] = "db_miss"
-        meta["engine_image_ids"] = ids
         return [], meta
     meta["engine_status"] = "ok"
     meta["engine_image_ids"] = [int(im.id) for im in images]
