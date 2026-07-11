@@ -3,10 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
 
 from app.core.errors import ApiError, ErrorCode
-from app.core.request_id import get_or_create_request_id
+from app.core.public_json import public_cursor_list_json
 from app.db.authors_list import list_authors as db_list_authors
 from app.db.session import create_sessionmaker
 
@@ -41,22 +40,15 @@ async def list_authors(
     async with Session() as session:
         items, next_cursor = await db_list_authors(session, limit=limit, cursor=cursor_i, q=q_norm or None)
 
-    rid = get_or_create_request_id(request)
-    resp = JSONResponse(
-        status_code=200,
-        content={
-            "ok": True,
-            "items": [
-                {
-                    "user_id": str(item.user_id),
-                    "user_name": item.user_name,
-                    "count_images": item.count_images,
-                }
-                for item in items
-            ],
-            "next_cursor": str(next_cursor) if next_cursor is not None else "",
-            "request_id": rid,
-        },
+    return public_cursor_list_json(
+        request,
+        items=[
+            {
+                "user_id": str(item.user_id),
+                "user_name": item.user_name,
+                "count_images": item.count_images,
+            }
+            for item in items
+        ],
+        next_cursor=next_cursor,
     )
-    return resp
-

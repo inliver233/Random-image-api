@@ -3,10 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
 
 from app.core.errors import ApiError, ErrorCode
-from app.core.request_id import get_or_create_request_id
+from app.core.public_json import public_cursor_list_json
 from app.db.session import create_sessionmaker
 from app.db.tags_list import list_tags as db_list_tags
 
@@ -32,23 +31,16 @@ async def list_tags(
     async with Session() as session:
         items, next_cursor = await db_list_tags(session, limit=limit, cursor=cursor, q=q_norm or None)
 
-    rid = get_or_create_request_id(request)
-    resp = JSONResponse(
-        status_code=200,
-        content={
-            "ok": True,
-            "items": [
-                {
-                    "id": str(item.id),
-                    "name": item.name,
-                    "translated_name": item.translated_name,
-                    "count_images": item.count_images,
-                }
-                for item in items
-            ],
-            "next_cursor": next_cursor or "",
-            "request_id": rid,
-        },
+    return public_cursor_list_json(
+        request,
+        items=[
+            {
+                "id": str(item.id),
+                "name": item.name,
+                "translated_name": item.translated_name,
+                "count_images": item.count_images,
+            }
+            for item in items
+        ],
+        next_cursor=next_cursor,
     )
-    return resp
-

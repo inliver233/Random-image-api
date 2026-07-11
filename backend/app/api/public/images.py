@@ -3,15 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
-from fastapi.responses import JSONResponse
 
 from app.core.errors import ApiError, ErrorCode
 from app.core.image_delivery import deliver_known_image, needs_image_proxy_hydrate, should_mark_image_ok
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
 from app.core.proxy_mirror import resolve_proxy_mirror
+from app.core.public_json import public_cursor_list_json, public_ok_json, serialize_public_image
 from app.core.public_list_filters import parse_public_list_filters
 from app.core.random_request import force_local_from_query
-from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.db.images_get import get_image_by_id
 from app.db.images_list import list_images as db_list_images
@@ -80,43 +79,11 @@ async def list_images(
             created_to=filters.created_to_norm,
         )
 
-    rid = get_or_create_request_id(request)
-    set_request_id_on_state(request, rid)
-
-    items = [
-        {
-            "id": str(img.id),
-            "illust_id": str(img.illust_id),
-            "page_index": img.page_index,
-            "ext": img.ext,
-            "width": img.width,
-            "height": img.height,
-            "x_restrict": img.x_restrict,
-            "ai_type": img.ai_type,
-            "bookmark_count": getattr(img, "bookmark_count", None),
-            "view_count": getattr(img, "view_count", None),
-            "comment_count": getattr(img, "comment_count", None),
-            "user": {
-                "id": str(img.user_id) if img.user_id is not None else None,
-                "name": img.user_name,
-            },
-            "title": img.title,
-            "created_at_pixiv": img.created_at_pixiv,
-        }
-        for img in images
-    ]
-
-    resp = JSONResponse(
-        status_code=200,
-        content={
-            "ok": True,
-            "items": items,
-            "next_cursor": str(next_cursor) if next_cursor is not None else "",
-            "request_id": rid,
-        },
+    return public_cursor_list_json(
+        request,
+        items=[serialize_public_image(img) for img in images],
+        next_cursor=next_cursor,
     )
-    set_request_id_header(resp, rid)
-    return resp
 
 
 @router.get("/images/{image_id}")
@@ -136,40 +103,15 @@ async def get_image(
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
         tags = await get_tag_names_for_image(session, image_id=image.id)
 
-    rid = get_or_create_request_id(request)
-    set_request_id_on_state(request, rid)
-
-    resp = JSONResponse(
-        status_code=200,
-        content={
-            "ok": True,
+    return public_ok_json(
+        request,
+        payload={
             "item": {
-                "image": {
-                    "id": str(image.id),
-                    "illust_id": str(image.illust_id),
-                    "page_index": image.page_index,
-                    "ext": image.ext,
-                    "width": image.width,
-                    "height": image.height,
-                    "x_restrict": image.x_restrict,
-                    "ai_type": image.ai_type,
-                    "bookmark_count": getattr(image, "bookmark_count", None),
-                    "view_count": getattr(image, "view_count", None),
-                    "comment_count": getattr(image, "comment_count", None),
-                    "user": {
-                        "id": str(image.user_id) if image.user_id is not None else None,
-                        "name": image.user_name,
-                    },
-                    "title": image.title,
-                    "created_at_pixiv": image.created_at_pixiv,
-                },
+                "image": serialize_public_image(image),
                 "tags": tags,
             },
-            "request_id": rid,
         },
     )
-    set_request_id_header(resp, rid)
-    return resp
 
 
 @router.get("/i/{image_id}.{ext}")
