@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from app.core.coerce import clamp_int
+from app.core.coerce import clamp_float, clamp_int
 from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
 from app.core.recommendation import (
@@ -298,7 +298,7 @@ def resolve_dedup(random_defaults: dict[str, Any]) -> DedupConfig:
         window_raw = dedup_raw.get("window_s")
         if window_raw is not None:
             try:
-                window_s = float(max(0.0, min(float(window_raw), 24.0 * 60.0 * 60.0)))
+                window_s = clamp_float(float(window_raw), min_v=0.0, max_v=24.0 * 60.0 * 60.0)
             except Exception:
                 pass
 
@@ -325,7 +325,7 @@ def resolve_dedup(random_defaults: dict[str, Any]) -> DedupConfig:
             try:
                 v_f = float(image_pen_raw)
                 if math.isfinite(v_f):
-                    image_penalty = float(max(0.0, min(v_f, 1000.0)))
+                    image_penalty = clamp_float(v_f, min_v=0.0, max_v=1000.0)
             except Exception:
                 pass
 
@@ -334,7 +334,7 @@ def resolve_dedup(random_defaults: dict[str, Any]) -> DedupConfig:
             try:
                 v_f = float(author_pen_raw)
                 if math.isfinite(v_f):
-                    author_penalty = float(max(0.0, min(v_f, 1000.0)))
+                    author_penalty = clamp_float(v_f, min_v=0.0, max_v=1000.0)
             except Exception:
                 pass
 
@@ -380,14 +380,14 @@ def resolve_recommendation_config(
         pick_mode_raw = str(DEFAULT_RECOMMENDATION["pick_mode"])
 
     temperature_raw = as_float(recommendation_obj.get("temperature"), default=float(DEFAULT_RECOMMENDATION["temperature"]))
-    temperature = float(max(0.05, min(float(temperature_raw), 100.0)))
+    temperature = clamp_float(float(temperature_raw), min_v=0.05, max_v=100.0)
 
     score_weights_raw = recommendation_obj.get("score_weights")
     score_weights_obj = score_weights_raw if isinstance(score_weights_raw, dict) else {}
     score_weights: dict[str, float] = {}
     for key, default_value in DEFAULT_SCORE_WEIGHTS.items():
         v = as_float(score_weights_obj.get(key), default=float(default_value))
-        score_weights[key] = float(max(-100.0, min(float(v), 100.0)))
+        score_weights[key] = clamp_float(float(v), min_v=-100.0, max_v=100.0)
 
     multipliers_default = DEFAULT_RECOMMENDATION["multipliers"]
     multipliers_raw = recommendation_obj.get("multipliers")
@@ -395,19 +395,19 @@ def resolve_recommendation_config(
     multipliers: dict[str, float] = {}
     for key, default_value in multipliers_default.items():
         v = as_float(multipliers_obj.get(key), default=float(default_value))
-        multipliers[key] = float(max(0.0, min(float(v), 100.0)))
+        multipliers[key] = clamp_float(float(v), min_v=0.0, max_v=100.0)
 
     freshness_half_life_days = float(DEFAULT_RECOMMENDATION["freshness_half_life_days"])
     if "freshness_half_life_days" in recommendation_obj:
         v = as_float(recommendation_obj.get("freshness_half_life_days"), default=float("nan"))
         if math.isfinite(float(v)):
-            freshness_half_life_days = float(max(0.1, min(float(v), 3650.0)))
+            freshness_half_life_days = clamp_float(float(v), min_v=0.1, max_v=3650.0)
 
     velocity_smooth_days = float(DEFAULT_RECOMMENDATION["velocity_smooth_days"])
     if "velocity_smooth_days" in recommendation_obj:
         v = as_float(recommendation_obj.get("velocity_smooth_days"), default=float("nan"))
         if math.isfinite(float(v)):
-            velocity_smooth_days = float(max(0.0, min(float(v), 3650.0)))
+            velocity_smooth_days = clamp_float(float(v), min_v=0.0, max_v=3650.0)
 
     return RecommendationConfig(
         source=source,

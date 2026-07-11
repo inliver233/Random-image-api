@@ -4,6 +4,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
+from app.core.coerce import clamp_float
 from app.core.errors import ApiError, ErrorCode
 from app.core.time import parse_iso_dt
 
@@ -182,22 +183,22 @@ def parse_recommendation_overrides_from_query(query_params: Any) -> tuple[dict[s
 
     temperature_v = _get_float("rec_temperature")
     if temperature_v is not None:
-        overrides["temperature"] = float(max(0.05, min(float(temperature_v), 100.0)))
+        overrides["temperature"] = clamp_float(float(temperature_v), min_v=0.05, max_v=100.0)
 
     freshness_half_life_v = _get_float("rec_fresh_half_life_days")
     if freshness_half_life_v is not None:
-        overrides["freshness_half_life_days"] = float(max(0.1, min(float(freshness_half_life_v), 3650.0)))
+        overrides["freshness_half_life_days"] = clamp_float(float(freshness_half_life_v), min_v=0.1, max_v=3650.0)
 
     velocity_smooth_v = _get_float("rec_velocity_smooth_days")
     if velocity_smooth_v is not None:
-        overrides["velocity_smooth_days"] = float(max(0.0, min(float(velocity_smooth_v), 3650.0)))
+        overrides["velocity_smooth_days"] = clamp_float(float(velocity_smooth_v), min_v=0.0, max_v=3650.0)
 
     score_overrides: dict[str, float] = {}
     for key in DEFAULT_SCORE_WEIGHTS.keys():
         v = _get_float(f"rec_w_{key}")
         if v is None:
             continue
-        score_overrides[key] = float(max(-100.0, min(float(v), 100.0)))
+        score_overrides[key] = clamp_float(float(v), min_v=-100.0, max_v=100.0)
     if score_overrides:
         overrides["score_weights"] = score_overrides
 
@@ -206,7 +207,7 @@ def parse_recommendation_overrides_from_query(query_params: Any) -> tuple[dict[s
         v = _get_float(f"rec_m_{key}")
         if v is None:
             continue
-        mult_overrides[key] = float(max(0.0, min(float(v), 100.0)))
+        mult_overrides[key] = clamp_float(float(v), min_v=0.0, max_v=100.0)
     if mult_overrides:
         overrides["multipliers"] = mult_overrides
 
