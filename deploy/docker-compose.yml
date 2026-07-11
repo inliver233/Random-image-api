@@ -27,6 +27,8 @@ services:
       start_period: 10s
     volumes:
       - ../data:/app/data
+    # Optional dual-run: set RANDOM_ENGINE_URL=http://random-engine:8091 in deploy/.env
+    # (engine is a sibling service; BFF stays up if engine is down — pick falls back to SQLite).
     restart: unless-stopped
 
   worker:
@@ -41,4 +43,28 @@ services:
         condition: service_healthy
     volumes:
       - ../data:/app/data
+    restart: unless-stopped
+
+  # Go in-memory pick service (default OFF on BFF via RANDOM_ENGINE_ENABLED).
+  # Compose always starts a healthy empty index; push snapshot from Admin → 维护工具.
+  random-engine:
+    build:
+      context: ../services/random-engine
+      dockerfile: Dockerfile
+    environment:
+      RANDOM_ENGINE_ADDR: ":8091"
+    ports:
+      - "8091:8091"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-qO-",
+          "http://127.0.0.1:8091/healthz",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 8
+      start_period: 5s
     restart: unless-stopped

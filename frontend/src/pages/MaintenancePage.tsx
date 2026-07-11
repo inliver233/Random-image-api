@@ -54,12 +54,31 @@ type RandomEngineCompareResponse = {
   request_id: string;
 };
 
+type ImageEdgeStatusResponse = {
+  ok: true;
+  enabled_flag: boolean;
+  ready: boolean;
+  base_urls: string[];
+  base_url_count: number;
+  sign_ttl_seconds: number;
+  has_secret: boolean;
+  has_secret_previous: boolean;
+  missing: string[];
+  request_id: string;
+};
+
 export function MaintenancePage() {
   const [form] = Form.useForm<CleanupFormValues>();
   const alerts = useActionAlerts();
   const engineAlerts = useActionAlerts();
   const queryClient = useQueryClient();
   const [compareResult, setCompareResult] = React.useState<RandomEngineCompareResponse | null>(null);
+
+  const imageEdgeStatus = useQuery({
+    queryKey: ["admin", "maintenance", "image-edge"],
+    queryFn: () => apiJson<ImageEdgeStatusResponse>("/admin/api/maintenance/image-edge"),
+    refetchInterval: 30_000,
+  });
 
   const engineStatus = useQuery({
     queryKey: ["admin", "maintenance", "random-engine"],
@@ -143,12 +162,49 @@ export function MaintenancePage() {
     health && typeof (health as { snapshot_revision?: unknown }).snapshot_revision === "string"
       ? String((health as { snapshot_revision: string }).snapshot_revision)
       : null;
+  const edge = imageEdgeStatus.data;
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       <Typography.Title level={3} style={{ margin: 0 }}>
         维护工具
       </Typography.Title>
+
+      <Card title="Image Edge（CF 出图）">
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          只读配置状态（不展示密钥）。公开出图优先签 CF Worker URL；默认{" "}
+          <Typography.Text code>IMAGE_EDGE_ENABLED=false</Typography.Text>
+          ，未 ready 时回退本地 /i。多地区 403 POC 与 wrangler 部署在进程外完成。
+        </Typography.Paragraph>
+
+        <QueryState query={imageEdgeStatus}>
+          {edge ? (
+            <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
+              <Descriptions.Item label="开关 flag">
+                {edge.enabled_flag ? <Tag color="blue">ENABLED</Tag> : <Tag>OFF</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="可签 URL">
+                {edge.ready ? <Tag color="green">ready</Tag> : <Tag color="orange">not ready</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="Base URLs">
+                {edge.base_urls?.length ? edge.base_urls.join(", ") : "（未配置）"}
+              </Descriptions.Item>
+              <Descriptions.Item label="TTL 秒">{edge.sign_ttl_seconds}</Descriptions.Item>
+              <Descriptions.Item label="密钥">
+                {edge.has_secret ? "已配置" : "缺失"}
+                {edge.has_secret_previous ? "（含 previous 轮换）" : ""}
+              </Descriptions.Item>
+              <Descriptions.Item label="缺失项">
+                {edge.missing?.length ? edge.missing.join(", ") : "—"}
+              </Descriptions.Item>
+            </Descriptions>
+          ) : null}
+        </QueryState>
+
+        <Button onClick={() => void imageEdgeStatus.refetch()} loading={imageEdgeStatus.isFetching}>
+          刷新状态
+        </Button>
+      </Card>
 
       <Card title="Random Engine（Go 双跑）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>

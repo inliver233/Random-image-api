@@ -9,6 +9,7 @@ from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
 from app.core.admin_json import admin_ok
 from app.core.admin_request import load_json_object_optional, load_json_object, parse_bool, parse_int_in_range
+from app.core.image_edge import load_image_edge_config_from_settings
 from app.core.random_defaults import resolve_fail_cooldown_ms, resolve_r18_strict
 from app.core.random_engine_client import engine_filter_count, engine_health, random_engine_base_url
 from app.core.random_engine_pick import build_engine_filters
@@ -92,6 +93,51 @@ async def cleanup_request_logs_endpoint(
         "cutoff": result.cutoff,
         "deleted": int(result.deleted),
         "has_more": bool(result.has_more)}, request_id=rid)
+
+
+@router.get("/maintenance/image-edge")
+async def image_edge_status(
+    request: Request,
+    _claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    """Read-only Image Edge config status (never returns secrets).
+
+    Ops surface for Phase 2 cutover: whether signed CF edge URLs can be minted.
+    Deploy / multi-region 403 POC remains outside this process.
+    """
+    _ = _claims
+    rid = get_or_create_request_id(request)
+    settings = getattr(request.app.state, "settings", None)
+    flag_enabled = bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False
+    raw_bases = list(getattr(settings, "image_edge_base_urls", None) or []) if settings is not None else []
+    secret = str(getattr(settings, "image_edge_secret", "") or "").strip() if settings is not None else ""
+    secret_previous = (
+        str(getattr(settings, "image_edge_secret_previous", "") or "").strip() if settings is not None else ""
+    )
+    ttl = int(getattr(settings, "image_edge_sign_ttl_seconds", 604800) or 604800) if settings is not None else 604800
+    cfg = load_image_edge_config_from_settings(settings) if settings is not None else None
+    ready = cfg is not None
+    missing: list[str] = []
+    if not flag_enabled:
+        missing.append("IMAGE_EDGE_ENABLED")
+    if not secret:
+        missing.append("IMAGE_EDGE_SECRET")
+    if not raw_bases:
+        missing.append("IMAGE_EDGE_BASE_URLS")
+    return admin_ok(
+        request,
+        payload={
+            "enabled_flag": flag_enabled,
+            "ready": ready,
+            "base_urls": list(cfg.base_urls) if cfg is not None else list(raw_bases),
+            "base_url_count": len(cfg.base_urls) if cfg is not None else len(raw_bases),
+            "sign_ttl_seconds": int(cfg.sign_ttl_seconds) if cfg is not None else int(ttl),
+            "has_secret": bool(secret),
+            "has_secret_previous": bool(secret_previous) and secret_previous != secret,
+            "missing": missing,
+        },
+        request_id=rid,
+    )
 
 
 @router.get("/maintenance/random-engine")

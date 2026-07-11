@@ -25,6 +25,13 @@ go run ./cmd/random-engine
 # POST http://127.0.0.1:8091/v1/admin/events
 ```
 
+Docker / compose (from repo `deploy/`):
+
+```bash
+docker compose up -d --build random-engine
+# BFF: RANDOM_ENGINE_URL=http://random-engine:8091  (flag still default off)
+```
+
 Env:
 
 | Var | Default | Meaning |

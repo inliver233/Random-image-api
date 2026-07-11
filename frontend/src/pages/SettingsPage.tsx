@@ -188,8 +188,12 @@ export function SettingsPage() {
             <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
             <Form form={form} layout="vertical" onFinish={(values) => save.mutate(values)}>
               <Typography.Title level={5} style={{ marginTop: 12 }}>
-                代理设置
+                代理设置（仅 Hydrate / OAuth）
               </Typography.Title>
+              <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+                住宅代理池只服务 Pixiv App API 补全与 OAuth。公开出图走 Image Edge（或本地 /i
+                回退），不经过本页代理路由。
+              </Typography.Paragraph>
 
               <Form.Item label="启用代理" name="proxy_enabled" valuePropName="checked">
                 <Switch />
@@ -229,8 +233,11 @@ export function SettingsPage() {
               </Form.Item>
 
               <Typography.Title level={5} style={{ marginTop: 12 }}>
-                图片加速
+                图片加速（本地 /i 回退）
               </Typography.Title>
+              <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+                生产主路径是 Image Edge（环境变量 IMAGE_EDGE_*，维护页可看 ready 状态）。以下镜像开关仅影响源站本地反代回退，不是公开出图的一等路径。
+              </Typography.Paragraph>
               <Form.Item
                 label="使用第三方反向代理（仅图片上游）"
                 name="image_proxy_use_pixiv_cat"
