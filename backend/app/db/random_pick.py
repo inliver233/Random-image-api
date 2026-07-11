@@ -4,10 +4,39 @@ from collections.abc import Sequence
 
 from sqlalchemy import and_, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.db.models.image_tags import ImageTag
 from app.db.models.images import Image
 from app.db.models.tags import Tag
+
+# Public pick path only needs delivery + score + hydrate signal columns (skip admin/error blobs).
+_PICK_IMAGE_LOAD_ONLY = load_only(
+    Image.id,
+    Image.illust_id,
+    Image.page_index,
+    Image.ext,
+    Image.original_url,
+    Image.random_key,
+    Image.width,
+    Image.height,
+    Image.orientation,
+    Image.x_restrict,
+    Image.ai_type,
+    Image.illust_type,
+    Image.user_id,
+    Image.user_name,
+    Image.title,
+    Image.created_at_pixiv,
+    Image.bookmark_count,
+    Image.view_count,
+    Image.comment_count,
+    Image.status,
+    Image.last_ok_at,
+    Image.last_error_code,
+    # quality time-boost may fall back to added_at when created_at_pixiv is null
+    Image.added_at,
+)
 
 
 def _r18_where_clause(*, r18: int, r18_strict: bool) -> object | None:
@@ -309,6 +338,7 @@ async def pick_random_image(
 
     stmt = (
         select(Image)
+        .options(_PICK_IMAGE_LOAD_ONLY)
         .where(*clauses, Image.random_key >= r)
         .order_by(Image.random_key.asc())
         .limit(1)
@@ -319,6 +349,7 @@ async def pick_random_image(
 
     stmt2 = (
         select(Image)
+        .options(_PICK_IMAGE_LOAD_ONLY)
         .where(*clauses)
         .order_by(Image.random_key.asc())
         .limit(1)
@@ -388,6 +419,7 @@ async def pick_random_images(
 
     stmt = (
         select(Image)
+        .options(_PICK_IMAGE_LOAD_ONLY)
         .where(*clauses, Image.random_key >= r)
         .order_by(Image.random_key.asc())
         .limit(limit_i)
@@ -402,6 +434,7 @@ async def pick_random_images(
 
     stmt2 = (
         select(Image)
+        .options(_PICK_IMAGE_LOAD_ONLY)
         .where(*clauses, Image.random_key < r)
         .order_by(Image.random_key.asc())
         .limit(remain)

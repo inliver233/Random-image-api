@@ -26,7 +26,10 @@ RECENT_EXCLUDE_SQL_CAP = 512
 
 @dataclass(slots=True)
 class RandomPickContext:
-    """Resolved pick plan for /random (runtime defaults + dedup + quality + rec)."""
+    """RandomService plan: runtime defaults + dedup + quality + engine/Python pick port.
+
+    Routes (/random, /feed) are thin adapters: build context once, then call pick / try_engine_batch.
+    """
 
     attempts: int
     attempts_source: str
@@ -171,45 +174,8 @@ class RandomPickContext:
             session=session,
             settings=settings,
             httpx_client=httpx_client,
-            rng=self.rng,
-            pick_kwargs=self.pick_kwargs,
-            debug_base=self.debug_base,
-            strategy_norm=self.strategy_norm,
-            seed_norm=self.seed_norm,
-            r18=int(filters.r18),
-            r18_strict=int(self.r18_strict),
-            ai_type_raw=filters.ai_type_raw,
-            ai_type_i=filters.ai_type_i,
-            illust_type_i=filters.illust_type_i,
-            orientation_code=filters.orientation_map[filters.layout_norm],
-            min_width_i=int(filters.min_width_i),
-            min_height_i=int(filters.min_height_i),
-            min_pixels_i=int(filters.min_pixels_i),
-            min_bookmarks_i=int(filters.min_bookmarks_i),
-            min_views_i=int(filters.min_views_i),
-            min_comments_i=int(filters.min_comments_i),
-            included=filters.included,
-            excluded=filters.excluded,
-            user_id=filters.user_id,
-            illust_id=filters.illust_id,
-            created_from_norm=filters.created_from_norm,
-            created_to_norm=filters.created_to_norm,
-            fail_cooldown_before=self.fail_cooldown_before,
-            quality_samples_i=int(self.quality_samples_i),
-            pick_mode_raw=self.pick_mode_raw,
-            temperature=float(self.temperature),
-            score_weights=self.score_weights,
-            multipliers=self.multipliers,
-            freshness_half_life_days=float(self.freshness_half_life_days),
-            velocity_smooth_days=float(self.velocity_smooth_days),
-            time_boost_enabled=bool(self.time_boost_enabled),
-            anti_repeat_enabled=bool(self.anti_repeat_enabled),
-            recent_exclude_image_ids=self.recent_exclude_image_ids,
-            recent_image_ids=self.recent_image_ids,
-            recent_author_ids=self.recent_author_ids,
-            dedup_strict=bool(self.dedup_strict),
-            dedup_image_penalty=float(self.dedup_image_penalty),
-            dedup_author_penalty=float(self.dedup_author_penalty),
+            pick_ctx=self,
+            filters=filters,
             exclude_image_ids=exclude_image_ids,
         )
 
