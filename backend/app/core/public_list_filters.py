@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.errors import ApiError, ErrorCode
 from app.core.random_query import (
     MAX_TAG_FILTERS,
@@ -58,17 +59,10 @@ def parse_public_list_filters(
     created_to: str | None,
     limit_max: int = 200,
 ) -> ParsedPublicListFilters:
-    if limit < 1 or limit > int(limit_max):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported limit", status_code=400)
-
-    cursor_i: int | None = None
-    cursor_raw = (cursor or "").strip()
-    if cursor_raw:
-        if not cursor_raw.isdigit():
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
-        cursor_i = int(cursor_raw)
-        if cursor_i <= 0:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
+    # Same limit/cursor contract as admin int-cursor lists (messages preserved).
+    parsed_cursor = parse_admin_int_cursor(limit=limit, cursor=cursor, limit_max=limit_max)
+    limit = parsed_cursor.limit
+    cursor_i = parsed_cursor.cursor_i
 
     if r18 not in {0, 1, 2}:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported r18", status_code=400)

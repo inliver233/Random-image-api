@@ -46,9 +46,15 @@ def public_cursor_list_json(
     )
 
 
-def serialize_public_image(image: Any) -> dict[str, Any]:
-    """Stable public image object for list/detail JSON."""
-    return {
+def serialize_public_image_core(
+    image: Any,
+    *,
+    include_illust_type: bool = False,
+    include_title: bool = False,
+    include_created_at: bool = False,
+) -> dict[str, Any]:
+    """Shared public image fields used by list/detail and /random JSON."""
+    payload: dict[str, Any] = {
         "id": str(image.id),
         "illust_id": str(image.illust_id),
         "page_index": image.page_index,
@@ -64,6 +70,20 @@ def serialize_public_image(image: Any) -> dict[str, Any]:
             "id": str(image.user_id) if image.user_id is not None else None,
             "name": image.user_name,
         },
-        "title": image.title,
-        "created_at_pixiv": image.created_at_pixiv,
     }
+    if include_illust_type:
+        payload["illust_type"] = getattr(image, "illust_type", None)
+    if include_title:
+        payload["title"] = image.title
+    if include_created_at:
+        payload["created_at_pixiv"] = image.created_at_pixiv
+    return payload
+
+
+def serialize_public_image(image: Any) -> dict[str, Any]:
+    """Stable public image object for list/detail JSON."""
+    return serialize_public_image_core(
+        image,
+        include_title=True,
+        include_created_at=True,
+    )

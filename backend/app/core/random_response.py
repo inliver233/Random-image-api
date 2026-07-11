@@ -2,26 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-
-def _image_core_fields(image: Any) -> dict[str, Any]:
-    return {
-        "id": str(image.id),
-        "illust_id": str(image.illust_id),
-        "page_index": image.page_index,
-        "ext": image.ext,
-        "width": image.width,
-        "height": image.height,
-        "x_restrict": image.x_restrict,
-        "ai_type": image.ai_type,
-        "illust_type": getattr(image, "illust_type", None),
-        "bookmark_count": getattr(image, "bookmark_count", None),
-        "view_count": getattr(image, "view_count", None),
-        "comment_count": getattr(image, "comment_count", None),
-        "user": {
-            "id": str(image.user_id) if image.user_id is not None else None,
-            "name": image.user_name,
-        },
-    }
+from app.core.public_json import serialize_public_image_core
 
 
 def build_simple_json_body(
@@ -40,7 +21,7 @@ def build_simple_json_body(
         "code": "OK",
         "request_id": request_id,
         "data": {
-            "image": _image_core_fields(image),
+            "image": serialize_public_image_core(image, include_illust_type=True),
             "urls": {
                 "proxy": proxy_url,
                 # Always-present origin-side stream path for client edge→local cascade.
@@ -64,9 +45,12 @@ def build_json_body(
     debug: dict[str, Any],
     local_url: str | None = None,
 ) -> dict[str, Any]:
-    image_obj = _image_core_fields(image)
-    image_obj["title"] = image.title
-    image_obj["created_at_pixiv"] = image.created_at_pixiv
+    image_obj = serialize_public_image_core(
+        image,
+        include_illust_type=True,
+        include_title=True,
+        include_created_at=True,
+    )
     local = local_url or f"/i/{image.id}.{image.ext}"
     return {
         "ok": True,
