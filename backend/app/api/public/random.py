@@ -158,6 +158,8 @@ async def random_image(
     )
     use_pixiv_cat = resolved_proxy.use_pixiv_cat
     mirror_host = resolved_proxy.mirror_host
+    # Shared for redirect=1 and format=image stream so local=1 is never path-dependent.
+    force_local = force_local_from_query(request.query_params)
 
     random_defaults = runtime.random_defaults if isinstance(runtime.random_defaults, dict) else {}
     pick_ctx = build_random_pick_context(
@@ -220,7 +222,7 @@ async def random_image(
                 proxy_override=proxy_override,
                 pixiv_cat=int(pixiv_cat),
                 pximg_mirror_host_override=pximg_mirror_host_override,
-                force_local=force_local_from_query(request.query_params),
+                force_local=force_local,
             ):
                 edge_url = resolve_image_edge_redirect_url(
                     settings=request.app.state.settings,
@@ -289,7 +291,6 @@ async def random_image(
         )
 
     # When edge is enabled and client did not force local mirror/proxy, hand bytes off to CF.
-    force_local = force_local_from_query(request.query_params)
     prefer_edge_redirect = prefer_image_edge(
         proxy_override=proxy_override,
         pixiv_cat=int(pixiv_cat),
