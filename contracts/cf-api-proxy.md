@@ -58,3 +58,13 @@ When disabled / not ready, hydrate keeps existing `select_proxy_uri_for_url` res
 
 `/healthz` → `modules.cf_api_proxy`  
 Admin → `GET /admin/api/maintenance/cf-api-proxy`
+
+Deploy / probe (repo root):
+
+```
+.\scripts\edge\deploy-api-worker.ps1
+python scripts/edge/probe-api-proxy.py --base-url https://… --healthz
+python scripts/edge/probe-api-proxy.py --bases https://a,https://b --secret … --healthz --proxy-path --out api-proxy-matrix.json
+```
+
+Flip `CF_API_PROXY_ENABLED=true` only after all bases report `service_ok` and secret matches Worker `PROXY_SECRET`.

@@ -29,11 +29,15 @@ try {
   npx wrangler @deployArgs
 
   Write-Host ""
-  Write-Host "Next:"
-  Write-Host "  Set backend CF_API_PROXY_ENABLED=true"
-  Write-Host "  CF_API_PROXY_BASE_URLS=https://w1.workers.dev,https://w2.workers.dev"
-  Write-Host "  CF_API_PROXY_SECRET=<same as PROXY_SECRET>"
-  Write-Host "  IMPORTANT: if Worker has PROXY_SECRET, backend MUST send CF_API_PROXY_SECRET or CF tries 403."
+  Write-Host "Cutover checklist (ops; flags stay off until probe passes):"
+  Write-Host "  1) Probe: python scripts/edge/probe-api-proxy.py --base-url https://... --healthz"
+  Write-Host "     With secret: ... --secret <PROXY_SECRET> --healthz --proxy-path"
+  Write-Host "  2) Backend env (deploy/.env):"
+  Write-Host "       CF_API_PROXY_BASE_URLS=https://w1.workers.dev,https://w2.workers.dev"
+  Write-Host "       CF_API_PROXY_SECRET=<same as PROXY_SECRET>"
+  Write-Host "  3) Then CF_API_PROXY_ENABLED=true"
+  Write-Host "  4) Admin GET /admin/api/maintenance/cf-api-proxy → ready"
+  Write-Host "  IMPORTANT: if Worker has PROXY_SECRET, backend MUST send CF_API_PROXY_SECRET or CF returns 403."
 }
 finally {
   Pop-Location

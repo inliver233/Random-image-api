@@ -170,11 +170,12 @@ Offline pure helpers in `scripts/edge/probe-img-edge.py` (`sign_url`, `summarize
 `backend/tests/test_probe_img_edge_script.py` (no network; HMAC vs frozen vectors).
 
 1. `scripts/edge/deploy-img-worker.ps1` (or `npx wrangler deploy` in `edge/img-worker`)
-2. Single base probe:
+2. Bind custom domain `img.<domain>` (dashboard or wrangler routes)
+3. Single base probe:
    ```
    python scripts/edge/probe-img-edge.py --base-url … --secret … --path … --twice --healthz
    ```
-3. Multi-region status matrix (sticky pool candidates):
+4. Multi-region status matrix (sticky pool candidates):
    ```
    python scripts/edge/probe-img-edge.py \
      --bases https://edge-a.example.com,https://edge-b.example.com \
@@ -182,7 +183,7 @@ Offline pure helpers in `scripts/edge/probe-img-edge.py` (`sign_url`, `summarize
      --out edge-matrix.json
    ```
    Report includes per-base `probe_1`/`probe_2` headers + `summary.mode_suggestion` and a decision checklist.
-4. Choose mode from matrix (do **not** flip `IMAGE_EDGE_ENABLED` until ops sign-off):
+5. Choose mode from matrix (do **not** flip `IMAGE_EDGE_ENABLED` until ops sign-off):
 
 | Observation | Prefer |
 | --- | --- |
@@ -191,4 +192,9 @@ Offline pure helpers in `scripts/edge/probe-img-edge.py` (`sign_url`, `summarize
 | High origin 403 / `X-Edge-Circuit: origin-open` / mirrors dominate Via | **B2** `r2_only` + prewarm |
 | Any base non-200 on known-good path | Fix deploy/secret/path before BFF cutover |
 
+6. Backend env only after probe green: `IMAGE_EDGE_ENABLED` + `IMAGE_EDGE_BASE_URLS` + `IMAGE_EDGE_SECRET`
+7. Admin `GET /admin/api/maintenance/image-edge` → ready; watch `new_pixiv_image_delivery_total`
+
 Matrix fields to record: `status`, `elapsed_ms`, `x_edge_cache`, `x_edge_via`, `x_edge_storage`, `x_edge_circuit`, healthz `r2`/`r2_mode`.
+
+Related API egress: `contracts/cf-api-proxy.md` + `scripts/edge/probe-api-proxy.py` (separate Worker).
