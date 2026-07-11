@@ -23,6 +23,7 @@ from app.core.failover import classify_pixiv_rate_limit, pixiv_rate_limit_backof
 from app.core.metrics import TOKEN_REFRESH_FAIL_TOTAL
 from app.core.proxy_health import proxy_endpoint_fail_values_immediate, proxy_endpoint_ok_values
 from app.core.proxy_routing import invalidate_proxy_pool_caches, select_proxy_uri_for_url
+from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
 from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.core.redact import redact_text
 from app.core.runtime_settings import RuntimeConfig, load_runtime_config
@@ -1301,8 +1302,6 @@ LIMIT 1;
                     image_ids=list(persisted_ids),
                     settings=settings,
                 )
-                from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
-
                 await maybe_enqueue_r2_prewarm(image_ids=list(persisted_ids), settings=settings)
             await _mark_token_ok(token_id, now_dt=now_dt)
             return

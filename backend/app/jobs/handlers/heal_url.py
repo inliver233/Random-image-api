@@ -8,6 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import load_settings
+from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
 from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.core.time import iso_utc_ms
 from app.db.models.images import Image
@@ -70,8 +71,6 @@ def build_heal_url_handler(engine: AsyncEngine, *, transport: httpx.BaseTranspor
                 image_ids=list(healed_ids),
                 settings=settings,
             )
-            from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
-
             await maybe_enqueue_r2_prewarm(image_ids=list(healed_ids), settings=settings)
 
     return _handler

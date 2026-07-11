@@ -38,8 +38,9 @@ Optional cutover — default **off** (Python SQLite pick remains primary):
 | Env | Default | Meaning |
 | --- | --- | --- |
 | `RANDOM_ENGINE_URL` | empty | e.g. `http://127.0.0.1:8091` |
-| `RANDOM_ENGINE_ENABLED` | `0` | set `1` to try engine first on `/random` |
+| `RANDOM_ENGINE_ENABLED` | `0` | set `1` to try engine first on `/random` / `/feed` |
 | `RANDOM_ENGINE_TIMEOUT_MS` | `800` | pick timeout; on fail → Python fallback |
+| `RANDOM_ENGINE_TRAFFIC_PERCENT` | `100` | progressive cutover 0–100 when enabled (100 = all eligible picks) |
 
 Admin:
 

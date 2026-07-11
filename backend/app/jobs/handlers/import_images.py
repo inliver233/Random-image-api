@@ -17,6 +17,7 @@ from app.core.coerce import as_optional_int, as_str, derive_orientation
 from app.core.config import load_settings
 from app.core.data_files import get_sqlite_db_dir, resolve_file_ref
 from app.core.pixiv_urls import parse_pixiv_original_url
+from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
 from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.db.models.image_tags import ImageTag
 from app.db.models.images import Image
@@ -332,8 +333,6 @@ def build_import_images_handler(engine: AsyncEngine):
                 # Best-effort: warm random-engine index (+ optional R2 prewarm) after each import chunk.
                 settings = load_settings()
                 await maybe_publish_engine_upserts(engine, image_ids=list(image_ids), settings=settings)
-                from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
-
                 await maybe_enqueue_r2_prewarm(image_ids=list(image_ids), settings=settings)
             return list(image_ids or [])
 
