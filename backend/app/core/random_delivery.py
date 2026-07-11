@@ -308,6 +308,12 @@ async def deliver_random_image_stream(
                 recent_dedup=dedup,
             )
             observe_image_delivery(path="local_stream")
+            if use_pixiv_cat:
+                observe_image_delivery(path="local_stream_mirror")
+            elif proxy_uri:
+                observe_image_delivery(path="local_stream_residential")
+            else:
+                observe_image_delivery(path="local_stream_direct")
             return attach_background(resp, background_tasks)
         except ApiError as exc:
             if exc.code in {

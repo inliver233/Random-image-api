@@ -169,6 +169,8 @@ async def deliver_known_image(
         origin_url=str(image.original_url),
         use_mirror=use_mirror,
         mirror_host=mirror_host,
+        # Explicit mirror/proxy override may still use mirror rewrite; residential only
+        # when edge is not ready (default inside prepare_origin_stream).
     )
 
     transport = getattr(request.app.state, "httpx_transport", None)
@@ -184,6 +186,12 @@ async def deliver_known_image(
             range_header=request.headers.get("Range"),
         )
         observe_image_delivery(path="local_stream")
+        if use_mirror:
+            observe_image_delivery(path="local_stream_mirror")
+        elif proxy_uri:
+            observe_image_delivery(path="local_stream_residential")
+        else:
+            observe_image_delivery(path="local_stream_direct")
         if background_tasks is not None:
             # Local stream proved bytes — mark ok when the row still needs it.
             schedule_mark_ok_if_needed(

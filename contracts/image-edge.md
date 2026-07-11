@@ -39,7 +39,19 @@ Response headers of interest for ops (HIT rate / upstream diagnostics):
 | `X-Edge-Circuit` | `origin-open` when soft 403 circuit skips origin |
 | `Cache-Control` | `public, max-age=…, immutable` on successful image responses |
 
-BFF counters: Prometheus `new_pixiv_image_delivery_total{path=edge_redirect|edge_unavailable|local_stream|local_i_redirect}`.
+BFF counters: Prometheus `new_pixiv_image_delivery_total{path=...}`:
+
+| path | Meaning |
+| --- | --- |
+| `edge_redirect` | 302 to signed edge URL |
+| `edge_unavailable` | prefer edge but no signed URL → local cascade |
+| `local_stream` | any local byte stream (legacy aggregate) |
+| `local_stream_direct` | local stream without residential proxy |
+| `local_stream_residential` | local stream via residential pool |
+| `local_stream_mirror` | local stream via pixiv.cat / host mirror |
+| `local_i_redirect` | `/i` non-stream redirect path |
+
+When Image Edge is **ready** (`IMAGE_EDGE_ENABLED` + secret + base URLs), public local cascade **skips residential pool selection** and fetches origin direct (or mirror if `pixiv_cat`/`proxy` override). Residential remains for control-plane hydrate and when edge is not configured.
 
 ## Signing (Python / any language)
 
