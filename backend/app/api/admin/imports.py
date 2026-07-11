@@ -25,6 +25,7 @@ from app.db.models.images import Image
 from app.db.models.imports import Import
 from app.db.models.jobs import JobRow
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.jobs.claim import claim_pending_job_by_id
 from app.jobs.dispatch import JobDispatcher
 from app.jobs.executor import execute_claimed_job
 from app.jobs.handlers.import_images import build_import_images_handler
@@ -81,26 +82,6 @@ def _import_inline_max_accepted() -> int:
     except Exception:
         return default
     return max(0, min(int(value), 10_000))
-
-
-async def _claim_job_by_id(engine, *, job_id: int, worker_id: str, now: str) -> dict[str, Any] | None:
-    sql = """
-UPDATE jobs
-SET status='running',
-    locked_by=:worker_id,
-    locked_at=:now,
-    updated_at=:now
-WHERE id=:id AND status='pending'
-RETURNING *;
-""".strip()
-
-    async def _op() -> dict[str, Any] | None:
-        async with engine.begin() as conn:
-            result = await conn.exec_driver_sql(sql, {"id": int(job_id), "worker_id": worker_id, "now": now})
-            row = result.mappings().first()
-            return dict(row) if row else None
-
-    return await with_sqlite_busy_retry(_op)
 
 
 def _parse_import_text(
@@ -383,7 +364,9 @@ async def create_import(
         now = iso_utc_ms()
         actor = str(_claims.get("sub") or "admin").strip() or "admin"
         worker_id = f"inline-import:{actor}"
-        claimed = await _claim_job_by_id(engine, job_id=int(job_id), worker_id=worker_id, now=now)
+        claimed = await claim_pending_job_by_id(
+            engine, job_id=int(job_id), worker_id=worker_id, now=now
+        )
         if claimed is not None:
             dispatcher = JobDispatcher()
             dispatcher.register("import_images", build_import_images_handler(engine))

@@ -14,11 +14,11 @@ from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.admin_request import (
     load_json_object,
     load_json_object_optional,
-    parse_bool_optional,
     parse_choice,
     parse_int_in_range,
     parse_optional_str,
     parse_positive_int,
+    parse_required_bool,
     parse_required_str,
     require_positive_id,
 )
@@ -255,10 +255,11 @@ async def _load_update_endpoint_json(request: Request) -> dict[str, Any]:
     if "enabled" not in data:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing enabled", status_code=400)
 
-    enabled = parse_bool_optional(data.get("enabled"))
-    if enabled is None:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported enabled", status_code=400)
-
+    enabled = parse_required_bool(
+        data.get("enabled"),
+        field="enabled",
+        invalid_message="Unsupported enabled",
+    )
     return {"enabled": bool(enabled)}
 
 
@@ -295,10 +296,11 @@ async def _load_easy_import_json(request: Request) -> dict[str, Any]:
 
     recompute_bindings = False
     if "recompute_bindings" in data:
-        v = parse_bool_optional(data.get("recompute_bindings"))
-        if v is None:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid recompute_bindings", status_code=400)
-        recompute_bindings = bool(v)
+        recompute_bindings = parse_required_bool(
+            data.get("recompute_bindings"),
+            field="recompute_bindings",
+            invalid_message="Invalid recompute_bindings",
+        )
 
     max_tokens_per_proxy = 2
     if "max_tokens_per_proxy" in data:
@@ -312,10 +314,11 @@ async def _load_easy_import_json(request: Request) -> dict[str, Any]:
 
     strict = True
     if "strict" in data:
-        v = parse_bool_optional(data.get("strict"))
-        if v is None:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid strict", status_code=400)
-        strict = bool(v)
+        strict = parse_required_bool(
+            data.get("strict"),
+            field="strict",
+            invalid_message="Invalid strict",
+        )
 
     conflict_policy = _parse_easy_conflict_policy(data.get("conflict_policy"))
     if recompute_bindings and attach_pool_id is None:
@@ -377,10 +380,11 @@ async def _load_cleanup_invalid_hosts_json(request: Request) -> dict[str, Any]:
     for key in ("dry_run", "delete_orphans", "recompute_bindings", "strict"):
         if key not in data:
             continue
-        v = parse_bool_optional(data.get(key))
-        if v is None:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Invalid {key}", status_code=400)
-        out[key] = bool(v)
+        out[key] = parse_required_bool(
+            data.get(key),
+            field=key,
+            invalid_message=f"Invalid {key}",
+        )
 
     if "max_tokens_per_proxy" in data:
         out["max_tokens_per_proxy"] = parse_int_in_range(

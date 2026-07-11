@@ -67,6 +67,39 @@ RETURNING *;
     return job
 
 
+async def claim_pending_job_by_id(
+    engine: AsyncEngine,
+    *,
+    job_id: int,
+    worker_id: str,
+    now: str,
+) -> dict[str, Any] | None:
+    """Claim a specific pending job by id (admin inline execution paths)."""
+    sql = """
+UPDATE jobs
+SET status='running',
+    locked_by=:worker_id,
+    locked_at=:now,
+    updated_at=:now
+WHERE id=:id AND status='pending'
+RETURNING *;
+""".strip()
+
+    async def _op() -> dict[str, Any] | None:
+        async with engine.begin() as conn:
+            result = await conn.exec_driver_sql(
+                sql,
+                {"id": int(job_id), "worker_id": worker_id, "now": now},
+            )
+            row = result.mappings().first()
+            return dict(row) if row else None
+
+    job = await with_sqlite_busy_retry(_op)
+    if job is not None:
+        JOBS_CLAIM_TOTAL.inc()
+    return job
+
+
 async def renew_job_lock(
     engine: AsyncEngine,
     *,

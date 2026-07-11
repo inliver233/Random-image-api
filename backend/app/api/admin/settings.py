@@ -15,6 +15,7 @@ from app.core.admin_request import (
     parse_int_clamped,
     parse_int_in_range,
     parse_positive_int,
+    parse_required_bool,
 )
 from app.core.recommendation import DEFAULT_RECOMMENDATION, DEFAULT_SCORE_WEIGHTS
 from app.core.request_id import get_or_create_request_id
@@ -398,16 +399,20 @@ async def update_settings(
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid proxy", status_code=400)
 
         if "enabled" in proxy:
-            v = parse_bool_optional(proxy.get("enabled"))
-            if v is None:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid proxy.enabled", status_code=400)
+            v = parse_required_bool(
+                proxy.get("enabled"),
+                field="proxy.enabled",
+                invalid_message="Invalid proxy.enabled",
+            )
             proxy_enabled_override = bool(v)
             updates.append(("proxy.enabled", bool(v)))
 
         if "fail_closed" in proxy:
-            v = parse_bool_optional(proxy.get("fail_closed"))
-            if v is None:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid proxy.fail_closed", status_code=400)
+            v = parse_required_bool(
+                proxy.get("fail_closed"),
+                field="proxy.fail_closed",
+                invalid_message="Invalid proxy.fail_closed",
+            )
             proxy_fail_closed_override = bool(v)
             updates.append(("proxy.fail_closed", bool(v)))
 
@@ -466,9 +471,11 @@ async def update_settings(
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image_proxy", status_code=400)
 
         if "use_pixiv_cat" in image_proxy:
-            v = parse_bool_optional(image_proxy.get("use_pixiv_cat"))
-            if v is None:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image_proxy.use_pixiv_cat", status_code=400)
+            v = parse_required_bool(
+                image_proxy.get("use_pixiv_cat"),
+                field="image_proxy.use_pixiv_cat",
+                invalid_message="Invalid image_proxy.use_pixiv_cat",
+            )
             updates.append(("image_proxy.use_pixiv_cat", bool(v)))
 
         if "pximg_mirror_host" in image_proxy:
@@ -536,10 +543,11 @@ async def update_settings(
                     invalid_message="Invalid random.strategy",
                 )
             else:
-                v = parse_bool_optional(random.get(key))
-                if v is None:
-                    raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Invalid random.{key}", status_code=400)
-                defaults[key] = bool(v)
+                defaults[key] = parse_required_bool(
+                    random.get(key),
+                    field=f"random.{key}",
+                    invalid_message=f"Invalid random.{key}",
+                )
 
         if "recommendation" in random:
             defaults["recommendation"] = _normalize_recommendation(random.get("recommendation"), strict=True)
@@ -563,13 +571,11 @@ async def update_settings(
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid security", status_code=400)
 
         if "hide_origin_url_in_public_json" in security:
-            v = parse_bool_optional(security.get("hide_origin_url_in_public_json"))
-            if v is None:
-                raise ApiError(
-                    code=ErrorCode.BAD_REQUEST,
-                    message="Invalid security.hide_origin_url_in_public_json",
-                    status_code=400,
-                )
+            v = parse_required_bool(
+                security.get("hide_origin_url_in_public_json"),
+                field="security.hide_origin_url_in_public_json",
+                invalid_message="Invalid security.hide_origin_url_in_public_json",
+            )
             updates.append(("security.hide_origin_url_in_public_json", bool(v)))
 
     rate_limit = body.get("rate_limit")

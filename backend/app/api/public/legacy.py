@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
+from app.core.admin_request import require_positive_id
 from app.core.errors import ApiError, ErrorCode
 from app.core.image_delivery import deliver_known_image
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
@@ -60,10 +61,8 @@ async def legacy_multi(
     pximg_mirror_host: str | None = None,
     proxy: str | None = None,
 ):
-    if int(illust_id) <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported illust_id", status_code=400)
-    if int(page) <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported page", status_code=400)
+    illust_id = require_positive_id(illust_id, invalid_message="Unsupported illust_id")
+    page = require_positive_id(page, invalid_message="Unsupported page")
 
     ext = (ext or "").lower()
     if ext not in ALLOWED_IMAGE_EXTS:
@@ -95,8 +94,7 @@ async def legacy_single(
     pximg_mirror_host: str | None = None,
     proxy: str | None = None,
 ):
-    if int(illust_id) <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported illust_id", status_code=400)
+    illust_id = require_positive_id(illust_id, invalid_message="Unsupported illust_id")
 
     ext = (ext or "").lower()
     if ext not in ALLOWED_IMAGE_EXTS:

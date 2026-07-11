@@ -70,6 +70,23 @@ def parse_bool_optional(value: Any) -> bool | None:
     return None
 
 
+def parse_required_bool(
+    value: Any,
+    *,
+    field: str,
+    invalid_message: str | None = None,
+) -> bool:
+    """Require a recognized bool; missing/unrecognized → BAD_REQUEST."""
+    v = parse_bool_optional(value)
+    if v is None:
+        raise ApiError(
+            code=ErrorCode.BAD_REQUEST,
+            message=invalid_message or f"Invalid {field}",
+            status_code=400,
+        )
+    return bool(v)
+
+
 def parse_optional_str(
     value: Any,
     *,

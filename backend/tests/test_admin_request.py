@@ -15,6 +15,7 @@ from app.core.admin_request import (
     parse_optional_str,
     parse_positive_int,
     parse_positive_int_list,
+    parse_required_bool,
     parse_required_str,
     require_positive_id,
 )
@@ -33,6 +34,19 @@ def test_parse_bool_optional() -> None:
     assert parse_bool_optional(1) is True
     assert parse_bool_optional("false") is False
     assert parse_bool_optional("maybe") is None
+
+
+def test_parse_required_bool() -> None:
+    assert parse_required_bool(True, field="enabled") is True
+    assert parse_required_bool("yes", field="enabled") is True
+    assert parse_required_bool(0, field="enabled") is False
+    with pytest.raises(ApiError) as ei:
+        parse_required_bool(None, field="enabled")
+    assert ei.value.message == "Invalid enabled"
+    with pytest.raises(ApiError) as ei_custom:
+        parse_required_bool("maybe", field="enabled", invalid_message="Unsupported enabled")
+    assert ei_custom.value.message == "Unsupported enabled"
+    assert ei_custom.value.status_code == 400
 
 
 def test_parse_optional_str() -> None:

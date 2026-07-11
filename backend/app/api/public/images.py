@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Query, Request
 
+from app.core.admin_request import require_positive_id
 from app.core.errors import ApiError, ErrorCode
 from app.core.image_delivery import deliver_known_image, needs_image_proxy_hydrate, should_mark_image_ok
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
@@ -91,8 +92,7 @@ async def get_image(
     request: Request,
     image_id: int,
 ) -> Any:
-    if int(image_id) <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported image_id", status_code=400)
+    image_id = require_positive_id(image_id, invalid_message="Unsupported image_id")
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)

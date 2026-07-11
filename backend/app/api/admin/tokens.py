@@ -11,9 +11,9 @@ from app.core.admin_json import admin_ok
 from app.core.admin_request import (
     load_json_object,
     parse_bool,
-    parse_bool_optional,
     parse_float_in_range,
     parse_optional_str,
+    parse_required_bool,
     parse_required_str,
     require_positive_id,
 )
@@ -68,10 +68,11 @@ async def _load_update_token_json(request: Request) -> dict[str, Any]:
         out["label"] = parse_optional_str(data.get("label"), max_len=200, field="label")
 
     if "enabled" in data:
-        enabled = parse_bool_optional(data.get("enabled"))
-        if enabled is None:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported enabled", status_code=400)
-        out["enabled"] = bool(enabled)
+        out["enabled"] = parse_required_bool(
+            data.get("enabled"),
+            field="enabled",
+            invalid_message="Unsupported enabled",
+        )
 
     if "weight" in data:
         out["weight"] = parse_float_in_range(
