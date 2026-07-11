@@ -205,3 +205,72 @@ func TestQualitySamplesCap(t *testing.T) {
 		t.Fatalf("samples want 64 got %#v", resp.Items[0].ScoreDebug["samples"])
 	}
 }
+
+func TestClientDedupKeyShortWindow(t *testing.T) {
+	// Two enabled images only so exclude of the first pick forces the second id.
+	st := &engineState{
+		revision:    "empty",
+		byID:        map[int64]int{},
+		tagIndex:    map[string]map[int64]struct{}{},
+		clientDedup: newClientDedupStore(),
+	}
+	mux := testMux(st)
+	body := map[string]any{
+		"revision": "dedup",
+		"images": []map[string]any{
+			{"id": 11, "illust_id": 1100, "page_index": 0, "ext": "jpg", "status": 1, "random_key": 0.1, "x_restrict": 0, "bookmark_count": 1, "view_count": 1, "tag_names": []string{}},
+			{"id": 22, "illust_id": 2200, "page_index": 0, "ext": "png", "status": 1, "random_key": 0.9, "x_restrict": 0, "bookmark_count": 1, "view_count": 1, "tag_names": []string{}},
+		},
+	}
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/snapshot", bytes.NewReader(raw))
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("snapshot %d %s", rr.Code, rr.Body.String())
+	}
+
+	// Fixed seed keeps first pick stable; client_dedup_key records it for the next call.
+	pickBody := `{"filters":{"r18":0,"r18_strict":1},"strategy":"random","limit":1,"seed":"fixed-dedup","client_dedup_key":"client-a"}`
+	req = httptest.NewRequest(http.MethodPost, "/v1/pick", bytes.NewBufferString(pickBody))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	var first pickResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Code != "OK" || len(first.Items) != 1 {
+		t.Fatalf("first pick: %#v", first)
+	}
+	firstID := first.Items[0].ID
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/pick", bytes.NewBufferString(pickBody))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	var second pickResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Code != "OK" || len(second.Items) != 1 {
+		t.Fatalf("second pick: %#v", second)
+	}
+	if second.Items[0].ID == firstID {
+		t.Fatalf("client_dedup_key did not exclude previous id %d", firstID)
+	}
+
+	// Different key must not inherit the first key's window.
+	other := `{"filters":{"r18":0,"r18_strict":1},"strategy":"random","limit":1,"seed":"fixed-dedup","client_dedup_key":"client-b"}`
+	req = httptest.NewRequest(http.MethodPost, "/v1/pick", bytes.NewBufferString(other))
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	var third pickResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &third); err != nil {
+		t.Fatal(err)
+	}
+	if third.Code != "OK" || len(third.Items) != 1 {
+		t.Fatalf("other-key pick: %#v", third)
+	}
+	if third.Items[0].ID != firstID {
+		t.Fatalf("other key should still get first seed pick id=%d got=%d", firstID, third.Items[0].ID)
+	}
+}

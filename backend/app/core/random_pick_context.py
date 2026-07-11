@@ -110,9 +110,16 @@ class RandomPickContext:
         exclude_image_ids: list[int] | set[int] | None = None,
         limit: int = 1,
         debug: bool = False,
+        client_dedup_key: str | None = None,
     ) -> dict[str, Any]:
         """Build Go engine /v1/pick body from this plan + public filters."""
         from app.core.random_engine_pick import compose_engine_pick_payload
+
+        # When BFF anti-repeat is on, also pin an engine-side short window (OpenAPI client_dedup_key).
+        # Complements filters.exclude_image_ids; fail-open if engine ignores the field.
+        dedup_key = (client_dedup_key or "").strip() or None
+        if dedup_key is None and bool(self.anti_repeat_enabled):
+            dedup_key = "bff-anti-repeat"
 
         return compose_engine_pick_payload(
             r18=int(filters.r18),
@@ -146,6 +153,7 @@ class RandomPickContext:
             seed=self.seed_norm or None,
             limit=int(limit),
             debug=bool(debug),
+            client_dedup_key=dedup_key,
         )
 
     async def try_engine_batch(

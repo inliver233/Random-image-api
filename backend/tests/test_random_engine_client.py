@@ -96,6 +96,7 @@ def test_build_engine_pick_payload() -> None:
     assert body["seed"] == "x"
     assert body["quality"]["samples"] == 12
     assert body["filters"]["r18"] == 0
+    assert "client_dedup_key" not in body
 
 
 def test_build_engine_pick_payload_batch_limit() -> None:
@@ -110,6 +111,27 @@ def test_build_engine_pick_payload_batch_limit() -> None:
     assert body["limit"] == 12
     assert "quality" not in body
     assert "seed" not in body
+
+
+def test_build_engine_pick_payload_client_dedup_key() -> None:
+    body = build_engine_pick_payload(
+        filters={"r18": 0},
+        strategy="random",
+        quality=None,
+        seed=None,
+        limit=1,
+        client_dedup_key="  api-key-7  ",
+    )
+    assert body["client_dedup_key"] == "api-key-7"
+    omitted = build_engine_pick_payload(
+        filters={"r18": 0},
+        strategy="random",
+        quality=None,
+        seed=None,
+        limit=1,
+        client_dedup_key="   ",
+    )
+    assert "client_dedup_key" not in omitted
 
 
 def test_build_engine_filters_safe_defaults() -> None:

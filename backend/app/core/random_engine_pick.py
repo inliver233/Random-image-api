@@ -105,6 +105,7 @@ def build_engine_pick_payload(
     seed: str | None,
     limit: int = 1,
     debug: bool = False,
+    client_dedup_key: str | None = None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
         "filters": filters,
@@ -116,6 +117,9 @@ def build_engine_pick_payload(
         body["quality"] = quality
     if seed:
         body["seed"] = seed
+    key = (client_dedup_key or "").strip()
+    if key:
+        body["client_dedup_key"] = key
     return body
 
 
@@ -165,6 +169,7 @@ def compose_engine_pick_payload(
     seed: str | None,
     limit: int = 1,
     debug: bool = False,
+    client_dedup_key: str | None = None,
 ) -> dict[str, Any]:
     """Compose full /v1/pick body (filters + quality + seed) for single or batch picks."""
     engine_filters = build_engine_filters(
@@ -206,6 +211,7 @@ def compose_engine_pick_payload(
         seed=seed or None,
         limit=int(limit),
         debug=bool(debug),
+        client_dedup_key=client_dedup_key,
     )
 
 

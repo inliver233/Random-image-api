@@ -20,12 +20,13 @@ import (
 // No image I/O, no residential proxies. BFF adapts public GET /random.
 
 type pickRequest struct {
-	Filters  map[string]any `json:"filters"`
-	Strategy string         `json:"strategy"`
-	Quality  map[string]any `json:"quality"`
-	Seed     *string        `json:"seed"`
-	Limit    int            `json:"limit"`
-	Debug    bool           `json:"debug"`
+	Filters        map[string]any `json:"filters"`
+	Strategy       string         `json:"strategy"`
+	Quality        map[string]any `json:"quality"`
+	Seed           *string        `json:"seed"`
+	Limit          int            `json:"limit"`
+	Debug          bool           `json:"debug"`
+	ClientDedupKey *string        `json:"client_dedup_key"`
 }
 
 type indexImage struct {
@@ -91,6 +92,91 @@ type healthResponse struct {
 	SnapshotRevision string `json:"snapshot_revision"`
 }
 
+// Short-window per-client anti-repeat (process-local). Complements filters.exclude_image_ids.
+// Fail-open: missing/empty key is a no-op. Multi-instance engines do not share this map.
+const (
+	clientDedupMaxIDs = 64
+	clientDedupTTL    = 10 * time.Minute
+)
+
+type clientDedupWindow struct {
+	ids  []int64
+	last time.Time
+}
+
+type clientDedupStore struct {
+	mu      sync.Mutex
+	windows map[string]*clientDedupWindow
+}
+
+func newClientDedupStore() *clientDedupStore {
+	return &clientDedupStore{windows: map[string]*clientDedupWindow{}}
+}
+
+func (s *clientDedupStore) recentIDs(key string) []int64 {
+	key = strings.TrimSpace(key)
+	if key == "" || s == nil {
+		return nil
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	w, ok := s.windows[key]
+	if !ok || w == nil {
+		return nil
+	}
+	if now.Sub(w.last) > clientDedupTTL {
+		delete(s.windows, key)
+		return nil
+	}
+	out := make([]int64, len(w.ids))
+	copy(out, w.ids)
+	return out
+}
+
+func (s *clientDedupStore) record(key string, ids []int64) {
+	key = strings.TrimSpace(key)
+	if key == "" || s == nil || len(ids) == 0 {
+		return
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Opportunistic prune of stale keys (bounded map growth).
+	if len(s.windows) > 10_000 {
+		for k, w := range s.windows {
+			if w == nil || now.Sub(w.last) > clientDedupTTL {
+				delete(s.windows, k)
+			}
+		}
+	}
+	w := s.windows[key]
+	if w == nil {
+		w = &clientDedupWindow{}
+		s.windows[key] = w
+	}
+	for _, id := range ids {
+		if id == 0 {
+			continue
+		}
+		// de-dupe while appending
+		exists := false
+		for _, prev := range w.ids {
+			if prev == id {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			w.ids = append(w.ids, id)
+		}
+	}
+	if len(w.ids) > clientDedupMaxIDs {
+		w.ids = append([]int64(nil), w.ids[len(w.ids)-clientDedupMaxIDs:]...)
+	}
+	w.last = now
+}
+
 type engineState struct {
 	mu       sync.RWMutex
 	revision string
@@ -100,14 +186,17 @@ type engineState struct {
 	byID map[int64]int
 	// exact tag name -> set of image ids (matches SQL Tag.name)
 	tagIndex map[string]map[int64]struct{}
+	// optional per-client short-window excludes (client_dedup_key)
+	clientDedup *clientDedupStore
 }
 
 func main() {
 	addr := envOr("RANDOM_ENGINE_ADDR", ":8091")
 	st := &engineState{
-		revision: "empty",
-		byID:     map[int64]int{},
-		tagIndex: map[string]map[int64]struct{}{},
+		revision:    "empty",
+		byID:        map[int64]int{},
+		tagIndex:    map[string]map[int64]struct{}{},
+		clientDedup: newClientDedupStore(),
 	}
 
 	mux := http.NewServeMux()
@@ -409,7 +498,17 @@ func handlePick(w http.ResponseWriter, r *http.Request, st *engineState) {
 	}
 
 	rng := rngFromSeed(req.Seed)
-	candidates := filterImages(st, req.Filters)
+	filters := req.Filters
+	dedupKey := ""
+	if req.ClientDedupKey != nil {
+		dedupKey = strings.TrimSpace(*req.ClientDedupKey)
+	}
+	if dedupKey != "" && st.clientDedup != nil {
+		if recent := st.clientDedup.recentIDs(dedupKey); len(recent) > 0 {
+			filters = mergeExcludeImageIDs(filters, recent)
+		}
+	}
+	candidates := filterImages(st, filters)
 	if len(candidates) == 0 {
 		resp := pickResponse{OK: true, Code: "NO_MATCH", Items: []pickItem{}}
 		if req.Debug {
@@ -473,6 +572,14 @@ func handlePick(w http.ResponseWriter, r *http.Request, st *engineState) {
 		items = append(items, item)
 	}
 
+	if dedupKey != "" && st.clientDedup != nil && len(items) > 0 {
+		ids := make([]int64, 0, len(items))
+		for _, it := range items {
+			ids = append(ids, it.ID)
+		}
+		st.clientDedup.record(dedupKey, ids)
+	}
+
 	resp := pickResponse{OK: true, Code: "OK", Items: items}
 	if req.Debug {
 		resp.Debug = map[string]any{
@@ -487,6 +594,61 @@ func handlePick(w http.ResponseWriter, r *http.Request, st *engineState) {
 		resp.Code = "NO_MATCH"
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// mergeExcludeImageIDs returns a shallow copy of filters with extra ids unioned into exclude_image_ids.
+func mergeExcludeImageIDs(filters map[string]any, extra []int64) map[string]any {
+	if len(extra) == 0 {
+		return filters
+	}
+	out := map[string]any{}
+	if filters != nil {
+		for k, v := range filters {
+			out[k] = v
+		}
+	}
+	seen := map[int64]struct{}{}
+	merged := make([]any, 0, len(extra)+8)
+	if raw, ok := out["exclude_image_ids"]; ok {
+		switch v := raw.(type) {
+		case []any:
+			for _, x := range v {
+				id := int64FromAny(x, 0)
+				if id == 0 {
+					continue
+				}
+				if _, e := seen[id]; e {
+					continue
+				}
+				seen[id] = struct{}{}
+				merged = append(merged, id)
+			}
+		case []float64:
+			for _, x := range v {
+				id := int64(x)
+				if id == 0 {
+					continue
+				}
+				if _, e := seen[id]; e {
+					continue
+				}
+				seen[id] = struct{}{}
+				merged = append(merged, id)
+			}
+		}
+	}
+	for _, id := range extra {
+		if id == 0 {
+			continue
+		}
+		if _, e := seen[id]; e {
+			continue
+		}
+		seen[id] = struct{}{}
+		merged = append(merged, id)
+	}
+	out["exclude_image_ids"] = merged
+	return out
 }
 
 type scoredImg struct {
