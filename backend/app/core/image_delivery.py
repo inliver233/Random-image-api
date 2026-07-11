@@ -121,12 +121,13 @@ async def deliver_known_image(
     mark_fail_on_upstream: bool = False,
 ) -> Any:
     """Shared edge-prefer + local stream path for /i and legacy routes."""
-    if prefer_image_edge(
+    prefer_edge = prefer_image_edge(
         proxy_override=proxy_override,
         pixiv_cat=int(pixiv_cat),
         pximg_mirror_host_override=pximg_mirror_host_override,
         force_local=force_local,
-    ) and not use_pixiv_cat:
+    ) and not use_pixiv_cat
+    if prefer_edge:
         edge_url = resolve_image_edge_redirect_url(
             settings=settings,
             original_url=str(image.original_url),
@@ -146,6 +147,8 @@ async def deliver_known_image(
             if background_tasks is not None:
                 return attach_background(resp, background_tasks)
             return resp
+        # Prefer edge but no signed URL → fall through to local stream.
+        observe_image_delivery(path="edge_unavailable")
 
     resolved = resolve_proxy_mirror(
         runtime=runtime,

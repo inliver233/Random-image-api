@@ -203,6 +203,8 @@ async def deliver_random_image_stream(
                     build_edge_redirect_response(edge_url=edge_url, cache_control="no-store"),
                     background_tasks,
                 )
+            # Prefer edge but no signed URL (disabled/misconfigured/path rejected) → local cascade.
+            observe_image_delivery(path="edge_unavailable")
 
         source_url, proxy_uri = await prepare_origin_stream(
             engine=engine,

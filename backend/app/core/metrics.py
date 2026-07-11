@@ -69,8 +69,10 @@ RANDOM_LATENCY_SECONDS = Histogram(
     ),
 )
 
-# Public image bytes delivery path (edge 302 vs local stream vs local /i redirect).
-# Labels stay small: edge_redirect | local_stream | local_i_redirect.
+# Public image bytes delivery path (edge 302 vs local cascade).
+# Labels stay small:
+#   edge_redirect | edge_unavailable | local_stream | local_i_redirect
+# edge_unavailable = prefer edge but no signed URL, then local path still counted.
 IMAGE_DELIVERY_TOTAL = Counter(
     "new_pixiv_image_delivery_total",
     "Public image delivery outcomes by path (edge vs local cascade).",
@@ -138,6 +140,7 @@ METRICS_LAST_SCRAPE_SUCCESS = Gauge(
 
 IMAGE_DELIVERY_PATHS: tuple[str, ...] = (
     "edge_redirect",
+    "edge_unavailable",
     "local_stream",
     "local_i_redirect",
 )

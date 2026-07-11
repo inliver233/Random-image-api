@@ -217,22 +217,28 @@ async def random_image(
         if format == "image" and redirect == 1:
             # Prefer CF image edge as primary public delivery when configured.
             # Explicit local mirror/proxy overrides (incl. local=1) keep the local /i/ fallback path.
-            edge_url = None
-            if prefer_image_edge(
+            prefer_edge = prefer_image_edge(
                 proxy_override=proxy_override,
                 pixiv_cat=int(pixiv_cat),
                 pximg_mirror_host_override=pximg_mirror_host_override,
                 force_local=force_local,
-            ):
-                edge_url = resolve_image_edge_redirect_url(
+            )
+            edge_url = (
+                resolve_image_edge_redirect_url(
                     settings=request.app.state.settings,
                     original_url=str(image.original_url),
                 )
+                if prefer_edge
+                else None
+            )
             if edge_url:
                 # Edge 302 does not prove bytes; skip mark_image_ok (fail_cooldown stays honest).
                 observe_image_delivery(path="edge_redirect")
                 resp = build_edge_redirect_response(edge_url=edge_url, cache_control="no-store")
             else:
+                if prefer_edge:
+                    # Prefer edge but no signed URL → local /i redirect cascade.
+                    observe_image_delivery(path="edge_unavailable")
                 observe_image_delivery(path="local_i_redirect")
                 resp = build_local_i_redirect_response(
                     image_id=int(image.id),
