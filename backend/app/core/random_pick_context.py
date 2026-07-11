@@ -44,6 +44,7 @@ class RandomService(Protocol):
         exclude_image_ids: list[int] | None = None,
         catalog: CatalogStore | None = None,
         pick: RandomPickPort | None = None,
+        skip_engine: bool = False,
     ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]: ...
 
     async def try_engine_batch(
@@ -239,6 +240,7 @@ class RandomPickContext:
         exclude_image_ids: list[int] | None = None,
         catalog: CatalogStore | None = None,
         pick: RandomPickPort | None = None,
+        skip_engine: bool = False,
     ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
         return await pick_with_strategy(
             session=session,
@@ -249,6 +251,7 @@ class RandomPickContext:
             exclude_image_ids=exclude_image_ids,
             catalog=catalog,
             pick=pick,
+            skip_engine=bool(skip_engine),
         )
 
 

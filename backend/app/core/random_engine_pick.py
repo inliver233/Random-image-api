@@ -513,12 +513,14 @@ async def pick_with_strategy(
     exclude_image_ids: list[int] | None = None,
     catalog: CatalogStore | None = None,
     pick: Any | None = None,
+    skip_engine: bool = False,
 ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
     """Engine-first pick (feature flag) with Python random/quality fallback.
 
     ``pick_ctx`` is the resolved RandomPickContext plan; ``filters`` is ParsedRandomFilters.
     Routes stay thin adapters over this service entrypoint.
     ``pick`` is optional RandomPickPort for the Python SQL ring path.
+    ``skip_engine`` forces the Python path (used by /feed top-up after one engine batch).
     """
     from app.core.random_engine_client import random_engine_base_url, should_route_pick_to_engine
     from app.db.random_pick_port import resolve_random_pick
@@ -528,7 +530,12 @@ async def pick_with_strategy(
     debug_base = dict(pick_ctx.debug_base)
     engine_url = random_engine_base_url(settings) if settings is not None else None
     # Traffic roll uses process RNG only — never pick_ctx.rng (seed must stay deterministic).
-    if engine_url and httpx_client is not None and should_route_pick_to_engine(settings):
+    if (
+        not skip_engine
+        and engine_url
+        and httpx_client is not None
+        and should_route_pick_to_engine(settings)
+    ):
         exclude_set = merge_engine_exclude_ids(pick_ctx=pick_ctx, exclude_image_ids=exclude_image_ids)
 
         payload = pick_ctx.build_engine_payload(

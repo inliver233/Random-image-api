@@ -136,6 +136,62 @@ def test_try_pick_via_engine_uses_dto(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_pick_with_strategy_skip_engine_bypasses_engine(monkeypatch) -> None:
+    """/feed top-up must not re-hit dual-run after try_engine_batch."""
+    from types import SimpleNamespace
+
+    from app.core.random_engine_pick import pick_with_strategy
+
+    engine_calls: list[str] = []
+
+    async def _boom_engine(*_a: Any, **_k: Any) -> tuple[Any, dict[str, Any]]:
+        engine_calls.append("engine")
+        raise AssertionError("engine must not run when skip_engine=True")
+
+    monkeypatch.setattr("app.core.random_engine_pick.try_pick_via_engine", _boom_engine)
+    monkeypatch.setattr(
+        "app.core.random_engine_client.random_engine_base_url",
+        lambda _s: "http://engine.test",
+    )
+    monkeypatch.setattr(
+        "app.core.random_engine_client.should_route_pick_to_engine",
+        lambda _s: True,
+    )
+
+    python_img = SimpleNamespace(id=99, illust_id=1)
+
+    async def _fake_random(**_k: Any) -> tuple[Any, dict[str, Any]]:
+        return python_img, {"picked_by": "python"}
+
+    monkeypatch.setattr("app.core.random_engine_pick.pick_by_random_key", _fake_random)
+
+    pick_ctx = SimpleNamespace(
+        debug_base={},
+        strategy_norm="random",
+        rng=None,
+        pick_kwargs={},
+        anti_repeat_enabled=False,
+        recent_exclude_image_ids=[],
+        dedup_strict=False,
+    )
+    settings = SimpleNamespace(random_engine_enabled=True, random_engine_timeout_ms=100)
+
+    async def _run() -> None:
+        image, meta = await pick_with_strategy(
+            session=object(),
+            settings=settings,
+            httpx_client=object(),
+            pick_ctx=pick_ctx,
+            filters=object(),
+            skip_engine=True,
+        )
+        assert image is python_img
+        assert meta.get("picked_by") == "python"
+        assert engine_calls == []
+
+    asyncio.run(_run())
+
+
 def test_resolve_engine_pick_images_rehydrates_incomplete() -> None:
     class _FakeRow:
         def __init__(self) -> None:

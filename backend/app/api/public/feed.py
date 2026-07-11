@@ -155,8 +155,10 @@ async def feed_images(
             _append_item(image, items)
 
         # Python loop: full path when engine off/failed, or top-up when engine returned partial.
+        # After one engine batch attempt, top-up must not re-hit dual-run N times.
         remaining = limit_i - len(items)
         if remaining > 0:
+            skip_engine_topup = True  # batch already tried (or dual-run off → no-op skip)
             for _ in range(remaining):
                 image, _debug = await pick_ctx.pick(
                     session=session,
@@ -166,6 +168,7 @@ async def feed_images(
                     exclude_image_ids=list(exclude_ids) if exclude_ids else None,
                     catalog=catalog,
                     pick=random_pick,
+                    skip_engine=skip_engine_topup,
                 )
                 if image is None:
                     break
