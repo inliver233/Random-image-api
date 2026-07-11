@@ -21,6 +21,7 @@ from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
 from app.core.failover import classify_pixiv_rate_limit, pixiv_rate_limit_backoff_seconds
 from app.core.metrics import TOKEN_REFRESH_FAIL_TOTAL
+from app.core.proxy_health import proxy_endpoint_fail_values_immediate, proxy_endpoint_ok_values
 from app.core.proxy_routing import select_proxy_uri_for_url
 from app.core.redact import redact_text
 from app.core.runtime_settings import RuntimeConfig, load_runtime_config
@@ -220,14 +221,7 @@ def build_hydrate_metadata_handler(
                 await session.execute(
                     sa.update(ProxyEndpoint)
                     .where(ProxyEndpoint.id == int(endpoint_id))
-                    .values(
-                        last_latency_ms=float(latency_ms) if latency_ms is not None else None,
-                        last_ok_at=now_iso,
-                        success_count=ProxyEndpoint.success_count + 1,
-                        last_error=None,
-                        blacklisted_until=None,
-                        updated_at=now_iso,
-                    )
+                    .values(**proxy_endpoint_ok_values(now_iso=now_iso, latency_ms=latency_ms))
                 )
                 await session.commit()
 
@@ -254,30 +248,16 @@ def build_hydrate_metadata_handler(
 
         async def _op() -> None:
             async with Session() as session:
-                if blacklist_until_iso:
-                    blacklist_expr = sa.case(
-                        (
-                            sa.and_(
-                                ProxyEndpoint.blacklisted_until.isnot(None),
-                                ProxyEndpoint.blacklisted_until > blacklist_until_iso,
-                            ),
-                            ProxyEndpoint.blacklisted_until,
-                        ),
-                        else_=blacklist_until_iso,
-                    )
-                else:
-                    blacklist_expr = ProxyEndpoint.blacklisted_until
-
                 await session.execute(
                     sa.update(ProxyEndpoint)
                     .where(ProxyEndpoint.id == int(endpoint_id))
                     .values(
-                        last_latency_ms=float(latency_ms) if latency_ms is not None else None,
-                        last_fail_at=now_iso,
-                        failure_count=ProxyEndpoint.failure_count + 1,
-                        blacklisted_until=blacklist_expr,
-                        last_error=msg,
-                        updated_at=now_iso,
+                        **proxy_endpoint_fail_values_immediate(
+                            now_iso=now_iso,
+                            latency_ms=latency_ms,
+                            error_message=msg,
+                            blacklist_until_iso=blacklist_until_iso,
+                        )
                     )
                 )
                 await session.commit()

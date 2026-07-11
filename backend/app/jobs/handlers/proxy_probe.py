@@ -14,6 +14,12 @@ from app.core.coerce import format_exc, truncate_text
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor
 from app.core.metrics import PROXY_PROBE_LATENCY_MS
+from app.core.proxy_health import (
+    PROBE_BLACKLIST_AFTER_FAILURES,
+    PROBE_BLACKLIST_TTL_S,
+    proxy_endpoint_fail_values_threshold,
+    proxy_endpoint_ok_values,
+)
 from app.core.proxy_uri import build_proxy_uri
 from app.core.redact import redact_text
 from app.core.time import iso_utc_ms
@@ -26,8 +32,9 @@ DEFAULT_PROBE_URL = "https://www.pixiv.net/robots.txt"
 DEFAULT_TIMEOUT_MS = 8000
 DEFAULT_CONCURRENCY = 10
 
-BLACKLIST_AFTER_FAILURES = 3
-BLACKLIST_TTL_S = 30 * 60
+# Re-export historical names for tests/importers that pin these constants.
+BLACKLIST_AFTER_FAILURES = PROBE_BLACKLIST_AFTER_FAILURES
+BLACKLIST_TTL_S = PROBE_BLACKLIST_TTL_S
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,35 +177,22 @@ def build_proxy_probe_handler(
                         await session.execute(
                             sa.update(ProxyEndpoint)
                             .where(ProxyEndpoint.id == int(r.endpoint_id))
-                            .values(
-                                last_latency_ms=latency,
-                                last_ok_at=now_iso,
-                                success_count=ProxyEndpoint.success_count + 1,
-                                last_error=None,
-                                blacklisted_until=None,
-                                updated_at=now_iso,
-                            )
+                            .values(**proxy_endpoint_ok_values(now_iso=now_iso, latency_ms=latency))
                         )
                         continue
 
                     msg = truncate_text(redact_text(r.error or "probe_failed"))
-                    blacklist_expr = sa.case(
-                        (
-                            (ProxyEndpoint.failure_count + 1) >= int(BLACKLIST_AFTER_FAILURES),
-                            blacklist_until_iso,
-                        ),
-                        else_=ProxyEndpoint.blacklisted_until,
-                    )
                     await session.execute(
                         sa.update(ProxyEndpoint)
                         .where(ProxyEndpoint.id == int(r.endpoint_id))
                         .values(
-                            last_latency_ms=latency,
-                            last_fail_at=now_iso,
-                            failure_count=ProxyEndpoint.failure_count + 1,
-                            blacklisted_until=blacklist_expr,
-                            last_error=msg,
-                            updated_at=now_iso,
+                            **proxy_endpoint_fail_values_threshold(
+                                now_iso=now_iso,
+                                latency_ms=latency,
+                                error_message=msg,
+                                blacklist_until_iso=blacklist_until_iso,
+                                after_failures=int(BLACKLIST_AFTER_FAILURES),
+                            )
                         )
                     )
 
