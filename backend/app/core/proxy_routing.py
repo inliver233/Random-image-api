@@ -118,7 +118,8 @@ class ProxyUri:
     pool_id: int
 
 
-async def _first_enabled_pool_id(engine: AsyncEngine) -> int | None:
+async def first_enabled_pool_id(engine: AsyncEngine) -> int | None:
+    """Lowest-id enabled proxy pool, or None when none are enabled."""
     sql = "SELECT id FROM proxy_pools WHERE enabled=1 ORDER BY id ASC LIMIT 1;"
 
     async def _op() -> int | None:

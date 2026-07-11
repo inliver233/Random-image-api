@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.logging import get_logger
+from app.core.proxy_routing import first_enabled_pool_id
 from app.db.models.jobs import JobRow
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 
@@ -27,18 +28,6 @@ class EasyProxiesAutoRefreshConfig:
     recompute_bindings: bool = True
     max_tokens_per_proxy: int = 2
     strict: bool = False
-
-
-async def _first_enabled_pool_id(engine: AsyncEngine) -> int | None:
-    sql = "SELECT id FROM proxy_pools WHERE enabled=1 ORDER BY id ASC LIMIT 1;"
-
-    async def _op() -> int | None:
-        async with engine.connect() as conn:
-            result = await conn.exec_driver_sql(sql)
-            value = result.scalar_one_or_none()
-            return int(value) if value is not None else None
-
-    return await with_sqlite_busy_retry(_op)
 
 
 async def _enqueue_if_needed(
@@ -109,7 +98,7 @@ class EasyProxiesAutoRefresher:
         base_url = self._config.base_url.strip()
         resolved_pool_id = self._config.attach_pool_id
         if bool(self._config.auto_attach) and resolved_pool_id is None:
-            resolved_pool_id = await _first_enabled_pool_id(engine)
+            resolved_pool_id = await first_enabled_pool_id(engine)
 
         payload: dict[str, object] = {}
         if self._config.host_override:

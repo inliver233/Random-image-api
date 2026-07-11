@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.core.errors import ApiError, ErrorCode
+from app.core.time import parse_iso_dt
 
 DEFAULT_SCORE_WEIGHTS: dict[str, float] = {
     "bookmark": 4.0,
@@ -75,21 +76,6 @@ def as_float(value: Any, *, default: float) -> float:
         return float(value)
     except Exception:
         return float(default)
-
-
-def parse_iso_dt(value: str | None) -> datetime | None:
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-    try:
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        dt = datetime.fromisoformat(raw)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
 
 
 def age_days(dt: datetime | None, *, now: datetime | None = None) -> float | None:

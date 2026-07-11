@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.errors import ErrorCode, error_body
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
+from app.core.time import parse_iso_dt
 from app.db.session import with_sqlite_busy_retry
 
 router = APIRouter()
@@ -45,21 +46,6 @@ async def _check_db(engine: AsyncEngine) -> bool:
         return True
     except Exception:
         return False
-
-
-def _parse_iso_utc(value: str) -> datetime | None:
-    raw = (value or "").strip()
-    if not raw:
-        return None
-    if raw.endswith("Z"):
-        raw = raw[:-1] + "+00:00"
-    try:
-        dt = datetime.fromisoformat(raw)
-    except Exception:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
 
 
 async def _query_worker_last_seen(engine: AsyncEngine) -> tuple[str | None, str]:
@@ -135,7 +121,7 @@ async def healthz(request: Request) -> Any:
         worker_last_seen_at, worker_reason = await _query_worker_last_seen(engine)  # type: ignore[arg-type]
         worker_ok = False
         if worker_last_seen_at is not None:
-            last_seen_dt = _parse_iso_utc(worker_last_seen_at)
+            last_seen_dt = parse_iso_dt(worker_last_seen_at)
             if last_seen_dt is None:
                 worker_reason = "invalid_timestamp"
             else:
