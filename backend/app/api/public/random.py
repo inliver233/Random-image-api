@@ -13,6 +13,7 @@ from app.core.random_delivery import (
     build_edge_redirect_response,
     deliver_random_image_stream,
     resolve_catalog_store,
+    resolve_recent_dedup,
     schedule_pick_side_effects,
 )
 from app.core.random_pick_context import build_random_pick_context
@@ -54,6 +55,7 @@ async def random_image(
 
     engine = request.app.state.engine
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
+    recent_dedup = resolve_recent_dedup(getattr(request.app.state, "recent_dedup", None))
     Session = create_sessionmaker(engine)
     runtime = await resolve_runtime_for_request(request, engine)
 
@@ -83,6 +85,7 @@ async def random_image(
         strategy=q.strategy,
         quality_samples=q.quality_samples,
         query_params=request.query_params,
+        recent_dedup=recent_dedup,
     )
     # Keep no-match filter summary in sync with resolved default when query omits r18_strict.
     r18_strict = int(pick_ctx.r18_strict)
@@ -122,6 +125,7 @@ async def random_image(
             pick_ctx=pick_ctx,
             hydrate_reason="random",
             catalog=catalog,
+            recent_dedup=recent_dedup,
         )
 
         if format == "image" and redirect == 1:
@@ -221,4 +225,5 @@ async def random_image(
         background_tasks=background_tasks,
         no_match_error=_no_match_error,
         catalog=catalog,
+        recent_dedup=recent_dedup,
     )

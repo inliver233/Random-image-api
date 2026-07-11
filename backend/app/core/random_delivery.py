@@ -13,7 +13,7 @@ from app.core.http_stream import stream_url
 from app.core.image_edge import resolve_image_edge_redirect_url
 from app.core.metrics import observe_image_delivery
 from app.core.origin_stream import prepare_origin_stream
-from app.core.recent_dedup import record_recent
+from app.core.recent_dedup import MemoryRecentDedup, RecentDedupPort
 from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.time import iso_utc_ms
 from app.db.catalog import CatalogStore, SqliteCatalogStore
@@ -30,6 +30,11 @@ def should_mark_image_ok(image: Any) -> bool:
 def resolve_catalog_store(catalog: CatalogStore | None = None) -> CatalogStore:
     """Prefer injected CatalogStore; fall back to default SQLite helpers."""
     return catalog if catalog is not None else SqliteCatalogStore()
+
+
+def resolve_recent_dedup(dedup: RecentDedupPort | None = None) -> RecentDedupPort:
+    """Prefer injected RecentDedupPort; fall back to process-local memory."""
+    return dedup if dedup is not None else MemoryRecentDedup()
 
 
 async def best_effort(fn, *args, timeout_s: float = 1.5, **kwargs) -> None:  # type: ignore[no-untyped-def]
@@ -109,10 +114,11 @@ def schedule_edge_side_effects(
     mark_ok_on_edge: bool = False,
     should_mark_ok: bool = False,
     catalog: CatalogStore | None = None,
+    recent_dedup: RecentDedupPort | None = None,
 ) -> None:
     if bool(anti_repeat_enabled):
         try:
-            record_recent(
+            resolve_recent_dedup(recent_dedup).record(
                 now=time.monotonic(),
                 image_id=int(image_id),
                 user_id=user_id,
@@ -149,6 +155,7 @@ def schedule_pick_side_effects(
     mark_ok_on_edge: bool = False,
     should_mark_ok: bool = False,
     catalog: CatalogStore | None = None,
+    recent_dedup: RecentDedupPort | None = None,
 ) -> None:
     """Thin wrapper: anti-repeat / hydrate / optional mark_ok from RandomPickContext + image."""
     schedule_edge_side_effects(
@@ -166,6 +173,7 @@ def schedule_pick_side_effects(
         mark_ok_on_edge=bool(mark_ok_on_edge),
         should_mark_ok=bool(should_mark_ok),
         catalog=catalog,
+        recent_dedup=recent_dedup,
     )
 
 
@@ -202,9 +210,11 @@ async def deliver_random_image_stream(
     background_tasks: BackgroundTasks,
     no_match_error: Callable[[], ApiError],
     catalog: CatalogStore | None = None,
+    recent_dedup: RecentDedupPort | None = None,
 ) -> Any:
     """Pick + edge-redirect-or-stream retry loop for /random?format=image."""
     store = resolve_catalog_store(catalog)
+    dedup = resolve_recent_dedup(recent_dedup)
     tried_ids: set[int] = set()
     last_error: ApiError | None = None
     attempts_i = max(1, int(attempts))
@@ -239,6 +249,7 @@ async def deliver_random_image_stream(
                     mark_ok_on_edge=False,
                     should_mark_ok=bool(should_mark_ok),
                     catalog=store,
+                    recent_dedup=dedup,
                 )
                 observe_image_delivery(path="edge_redirect")
                 return attach_background(
@@ -281,6 +292,7 @@ async def deliver_random_image_stream(
                 mark_ok_on_edge=True,
                 should_mark_ok=bool(should_mark_ok),
                 catalog=store,
+                recent_dedup=dedup,
             )
             observe_image_delivery(path="local_stream")
             return attach_background(resp, background_tasks)

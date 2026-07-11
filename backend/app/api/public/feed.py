@@ -7,7 +7,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from app.core.errors import ApiError, ErrorCode
 from app.core.imgproxy import load_imgproxy_config_from_settings
 from app.core.proxy_mirror import resolve_proxy_mirror
-from app.core.random_delivery import resolve_catalog_store, schedule_pick_side_effects
+from app.core.random_delivery import (
+    resolve_catalog_store,
+    resolve_recent_dedup,
+    schedule_pick_side_effects,
+)
 from app.core.random_pick_context import build_random_pick_context
 from app.core.random_query import no_match_error_from_filters
 from app.core.random_request import PublicRandomQuery
@@ -61,6 +65,7 @@ async def feed_images(
 
     engine = request.app.state.engine
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
+    recent_dedup = resolve_recent_dedup(getattr(request.app.state, "recent_dedup", None))
     Session = create_sessionmaker(engine)
     runtime = await resolve_runtime_for_request(request, engine)
 
@@ -82,6 +87,7 @@ async def feed_images(
         strategy=q.strategy,
         quality_samples=q.quality_samples,
         query_params=request.query_params,
+        recent_dedup=recent_dedup,
     )
     r18_strict = int(pick_ctx.r18_strict)
 
@@ -106,6 +112,7 @@ async def feed_images(
             pick_ctx=pick_ctx,
             hydrate_reason="feed",
             catalog=catalog,
+            recent_dedup=recent_dedup,
         )
         urls = resolve_public_item_urls(
             image=image,

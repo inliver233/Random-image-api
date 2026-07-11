@@ -24,6 +24,11 @@ Implementation:
 
 Module helpers (`record_recent`, `get_recent_lists`, `clear_recent`) remain the process-local source of truth so existing call sites stay behavior-identical without injection.
 
+Public delivery side-effects adopt the port progressively:
+
+- `/random` + `/feed` `schedule_pick_side_effects` / stream path → `recent_dedup.record`
+- injected store preferred via `app.state.recent_dedup` + `resolve_recent_dedup`
+
 ## Ops
 
 `/healthz` → `modules.recent_dedup.backend` = `memory` (config-only; no outbound probe).

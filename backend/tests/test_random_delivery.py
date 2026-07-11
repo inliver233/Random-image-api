@@ -36,10 +36,10 @@ def test_schedule_edge_side_effects_skips_mark_ok_by_default(monkeypatch: pytest
     calls: list[tuple] = []
     bg = BackgroundTasks()
 
-    def _record_recent(**kwargs):  # type: ignore[no-untyped-def]
+    def _record(self, **kwargs):  # type: ignore[no-untyped-def]
         calls.append(("recent", kwargs))
 
-    monkeypatch.setattr("app.core.random_delivery.record_recent", _record_recent)
+    monkeypatch.setattr("app.core.recent_dedup.MemoryRecentDedup.record", _record)
 
     schedule_edge_side_effects(
         background_tasks=bg,

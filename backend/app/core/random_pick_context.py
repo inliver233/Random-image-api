@@ -18,7 +18,7 @@ from app.core.random_defaults import (
 )
 from app.core.random_engine_pick import pick_with_strategy
 from app.core.random_request import ParsedRandomFilters
-from app.core.recent_dedup import get_recent_lists
+from app.core.recent_dedup import MemoryRecentDedup, RecentDedupPort
 from app.db.catalog import CatalogStore
 
 # Cap NOT IN size for SQLite plan quality; remaining recent ids still apply logit penalties.
@@ -225,6 +225,7 @@ def build_random_pick_context(
     strategy: str | None,
     quality_samples: int | None,
     query_params: Any = None,
+    recent_dedup: RecentDedupPort | None = None,
 ) -> RandomPickContext:
     """Resolve runtime defaults + dedup window into a pick plan."""
     attempts_resolved = resolve_attempts(attempts, random_defaults)
@@ -254,7 +255,8 @@ def build_random_pick_context(
     recent_author_ids: set[int] = set()
     recent_exclude_image_ids: list[int] = []
     if anti_repeat_enabled:
-        recent_image_list, recent_author_list = get_recent_lists(
+        store = recent_dedup if recent_dedup is not None else MemoryRecentDedup()
+        recent_image_list, recent_author_list = store.get_lists(
             time.monotonic(),
             window_s=float(dedup_window_s),
             max_images=int(dedup_max_images),
