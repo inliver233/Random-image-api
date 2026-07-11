@@ -301,9 +301,13 @@ async def _load_easy_import_json(request: Request) -> dict[str, Any]:
 
     max_tokens_per_proxy = 2
     if "max_tokens_per_proxy" in data:
-        max_tokens_per_proxy = parse_positive_int(data.get("max_tokens_per_proxy"), field="max_tokens_per_proxy")
-        if max_tokens_per_proxy > 1000:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid max_tokens_per_proxy", status_code=400)
+        max_tokens_per_proxy = parse_int_in_range(
+            data.get("max_tokens_per_proxy"),
+            field="max_tokens_per_proxy",
+            min_value=1,
+            max_value=1000,
+            invalid_message="Invalid max_tokens_per_proxy",
+        )
 
     strict = True
     if "strict" in data:
@@ -333,25 +337,34 @@ async def _load_probe_json(request: Request) -> dict[str, Any]:
     out: dict[str, Any] = {}
 
     if "probe_url" in data:
-        probe_url = str(data.get("probe_url") or "").strip()
+        probe_url = parse_optional_str(
+            data.get("probe_url"),
+            max_len=2000,
+            field="probe_url",
+            invalid_message="Invalid probe_url",
+        )
         if probe_url:
-            if len(probe_url) > 2000:
-                raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid probe_url", status_code=400)
             if "://" not in probe_url:
                 raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid probe_url", status_code=400)
             out["probe_url"] = probe_url
 
     if "timeout_ms" in data:
-        timeout_ms = parse_positive_int(data.get("timeout_ms"), field="timeout_ms")
-        if timeout_ms > 600_000:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid timeout_ms", status_code=400)
-        out["timeout_ms"] = int(timeout_ms)
+        out["timeout_ms"] = parse_int_in_range(
+            data.get("timeout_ms"),
+            field="timeout_ms",
+            min_value=1,
+            max_value=600_000,
+            invalid_message="Invalid timeout_ms",
+        )
 
     if "concurrency" in data:
-        concurrency = parse_positive_int(data.get("concurrency"), field="concurrency")
-        if concurrency > 200:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid concurrency", status_code=400)
-        out["concurrency"] = int(concurrency)
+        out["concurrency"] = parse_int_in_range(
+            data.get("concurrency"),
+            field="concurrency",
+            min_value=1,
+            max_value=200,
+            invalid_message="Invalid concurrency",
+        )
 
     return out
 
@@ -369,10 +382,13 @@ async def _load_cleanup_invalid_hosts_json(request: Request) -> dict[str, Any]:
         out[key] = bool(v)
 
     if "max_tokens_per_proxy" in data:
-        n = parse_positive_int(data.get("max_tokens_per_proxy"), field="max_tokens_per_proxy")
-        if n > 1000:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid max_tokens_per_proxy", status_code=400)
-        out["max_tokens_per_proxy"] = int(n)
+        out["max_tokens_per_proxy"] = parse_int_in_range(
+            data.get("max_tokens_per_proxy"),
+            field="max_tokens_per_proxy",
+            min_value=1,
+            max_value=1000,
+            invalid_message="Invalid max_tokens_per_proxy",
+        )
 
     return out
 

@@ -263,7 +263,7 @@ async def recompute_bindings(
             )
             await session.commit()
 
-        return admin_ok(request, payload={"pool_id": str(pool_id) **result}, request_id=rid)
+        return admin_ok(request, payload={"pool_id": str(pool_id), **result}, request_id=rid)
 
     return await with_sqlite_busy_retry(_op)
 

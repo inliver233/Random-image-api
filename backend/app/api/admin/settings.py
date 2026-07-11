@@ -8,7 +8,13 @@ from fastapi import APIRouter, Depends, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object, parse_choice, parse_positive_int
+from app.core.admin_request import (
+    load_json_object,
+    parse_bool_optional,
+    parse_choice,
+    parse_int_in_range,
+    parse_positive_int,
+)
 from app.core.recommendation import DEFAULT_RECOMMENDATION, DEFAULT_SCORE_WEIGHTS, as_bool
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_config_cache import invalidate_runtime_config_cache
@@ -96,36 +102,63 @@ def _normalize_dedup(value: Any, *, strict: bool) -> dict[str, Any]:
                 raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup", status_code=400)
 
     enabled = default["enabled"]
-    v = _as_bool(value.get("enabled"))
+    v = parse_bool_optional(value.get("enabled"))
     if v is not None:
         enabled = bool(v)
 
     window_s = int(default["window_s"])
     if "window_s" in value:
-        try:
-            n = int(value.get("window_s"))
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup.window_s", status_code=400) from exc
-        window_s = int(max(0, min(n, 24 * 60 * 60)))
+        if strict:
+            window_s = parse_int_in_range(
+                value.get("window_s"),
+                field="window_s",
+                min_value=0,
+                max_value=24 * 60 * 60,
+                invalid_message="Invalid random.dedup.window_s",
+            )
+        else:
+            try:
+                n = int(value.get("window_s"))
+                window_s = int(max(0, min(n, 24 * 60 * 60)))
+            except Exception:
+                window_s = int(default["window_s"])
 
     max_images = int(default["max_images"])
     if "max_images" in value:
-        try:
-            n = int(value.get("max_images"))
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup.max_images", status_code=400) from exc
-        max_images = int(max(1, min(n, 200_000)))
+        if strict:
+            max_images = parse_int_in_range(
+                value.get("max_images"),
+                field="max_images",
+                min_value=1,
+                max_value=200_000,
+                invalid_message="Invalid random.dedup.max_images",
+            )
+        else:
+            try:
+                n = int(value.get("max_images"))
+                max_images = int(max(1, min(n, 200_000)))
+            except Exception:
+                max_images = int(default["max_images"])
 
     max_authors = int(default["max_authors"])
     if "max_authors" in value:
-        try:
-            n = int(value.get("max_authors"))
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid random.dedup.max_authors", status_code=400) from exc
-        max_authors = int(max(1, min(n, 200_000)))
+        if strict:
+            max_authors = parse_int_in_range(
+                value.get("max_authors"),
+                field="max_authors",
+                min_value=1,
+                max_value=200_000,
+                invalid_message="Invalid random.dedup.max_authors",
+            )
+        else:
+            try:
+                n = int(value.get("max_authors"))
+                max_authors = int(max(1, min(n, 200_000)))
+            except Exception:
+                max_authors = int(default["max_authors"])
 
     strict_mode = bool(default["strict"])
-    v = _as_bool(value.get("strict"))
+    v = parse_bool_optional(value.get("strict"))
     if v is not None:
         strict_mode = bool(v)
 
@@ -383,14 +416,14 @@ async def update_settings(
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid proxy", status_code=400)
 
         if "enabled" in proxy:
-            v = _as_bool(proxy.get("enabled"))
+            v = parse_bool_optional(proxy.get("enabled"))
             if v is None:
                 raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid proxy.enabled", status_code=400)
             proxy_enabled_override = bool(v)
             updates.append(("proxy.enabled", bool(v)))
 
         if "fail_closed" in proxy:
-            v = _as_bool(proxy.get("fail_closed"))
+            v = parse_bool_optional(proxy.get("fail_closed"))
             if v is None:
                 raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid proxy.fail_closed", status_code=400)
             proxy_fail_closed_override = bool(v)
@@ -456,7 +489,7 @@ async def update_settings(
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image_proxy", status_code=400)
 
         if "use_pixiv_cat" in image_proxy:
-            v = _as_bool(image_proxy.get("use_pixiv_cat"))
+            v = parse_bool_optional(image_proxy.get("use_pixiv_cat"))
             if v is None:
                 raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image_proxy.use_pixiv_cat", status_code=400)
             updates.append(("image_proxy.use_pixiv_cat", bool(v)))
@@ -502,17 +535,22 @@ async def update_settings(
         for key in ("default_attempts", "default_r18_strict", "fail_cooldown_ms", "strategy", "quality_samples"):
             if key not in random:
                 continue
-            if key in {"default_attempts", "fail_cooldown_ms", "quality_samples"}:
-                try:
-                    n = int(random.get(key))
-                except Exception as exc:
-                    raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Invalid random.{key}", status_code=400) from exc
-                if key == "quality_samples":
-                    if n < 1 or n > 200:
-                        raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Invalid random.{key}", status_code=400)
-                elif n < 0 or n > 10_000_000:
-                    raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Invalid random.{key}", status_code=400)
-                defaults[key] = n
+            if key == "quality_samples":
+                defaults[key] = parse_int_in_range(
+                    random.get(key),
+                    field=key,
+                    min_value=1,
+                    max_value=200,
+                    invalid_message=f"Invalid random.{key}",
+                )
+            elif key in {"default_attempts", "fail_cooldown_ms"}:
+                defaults[key] = parse_int_in_range(
+                    random.get(key),
+                    field=key,
+                    min_value=0,
+                    max_value=10_000_000,
+                    invalid_message=f"Invalid random.{key}",
+                )
             elif key == "strategy":
                 defaults[key] = parse_choice(
                     random.get(key),
@@ -521,7 +559,7 @@ async def update_settings(
                     invalid_message="Invalid random.strategy",
                 )
             else:
-                v = _as_bool(random.get(key))
+                v = parse_bool_optional(random.get(key))
                 if v is None:
                     raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Invalid random.{key}", status_code=400)
                 defaults[key] = bool(v)
@@ -548,7 +586,7 @@ async def update_settings(
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid security", status_code=400)
 
         if "hide_origin_url_in_public_json" in security:
-            v = _as_bool(security.get("hide_origin_url_in_public_json"))
+            v = parse_bool_optional(security.get("hide_origin_url_in_public_json"))
             if v is None:
                 raise ApiError(
                     code=ErrorCode.BAD_REQUEST,
