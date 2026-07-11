@@ -221,6 +221,22 @@ describe("DashboardPage", () => {
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
+        if (url.endsWith("/admin/api/maintenance/api-key-rate-limit")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              required: true,
+              rpm: 60,
+              burst: 10,
+              configured_backend: "redis",
+              active_backend: "memory",
+              redis_url_configured: false,
+              using_memory_fallback: true,
+              request_id: "req_rl",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
         return new Response(JSON.stringify({ ok: false, code: "NOT_FOUND", message: "not found", request_id: "req_x", details: {} }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
@@ -265,7 +281,9 @@ describe("DashboardPage", () => {
     expect(await screen.findByText(/catalog=sqlite/)).toBeInTheDocument();
     expect(await screen.findByText(/job_queue=sqlite/)).toBeInTheDocument();
     expect(await screen.findByText("redis→sqlite fallback")).toBeInTheDocument();
-    expect(await screen.findByText("redis→memory fallback")).toBeInTheDocument();
+    expect((await screen.findAllByText("redis→memory fallback")).length).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByText(/api_key_rl=memory/)).toBeInTheDocument();
+    expect(await screen.findByText("api_key required")).toBeInTheDocument();
     expect(await screen.findByText(/image_edge=flag-on-not-ready/)).toBeInTheDocument();
     expect(await screen.findByText(/cf_api_proxy=off/)).toBeInTheDocument();
     expect(await screen.findByText(/r2_prewarm=flag-on-not-ready/)).toBeInTheDocument();

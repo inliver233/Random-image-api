@@ -132,6 +132,18 @@ type R2PrewarmStatusResponse = {
   request_id: string;
 };
 
+type ApiKeyRateLimitStatusResponse = {
+  ok: true;
+  required: boolean;
+  rpm: number;
+  burst: number;
+  configured_backend: string;
+  active_backend: string;
+  redis_url_configured: boolean;
+  using_memory_fallback: boolean;
+  request_id: string;
+};
+
 export function DashboardPage() {
   const navigate = useNavigate();
 
@@ -191,6 +203,12 @@ export function DashboardPage() {
   const r2Prewarm = useQuery({
     queryKey: ["admin", "maintenance", "r2-prewarm"],
     queryFn: () => apiJson<R2PrewarmStatusResponse>("/admin/api/maintenance/r2-prewarm"),
+    refetchInterval: 30_000,
+  });
+
+  const apiKeyRl = useQuery({
+    queryKey: ["admin", "maintenance", "api-key-rate-limit"],
+    queryFn: () => apiJson<ApiKeyRateLimitStatusResponse>("/admin/api/maintenance/api-key-rate-limit"),
     refetchInterval: 30_000,
   });
 
@@ -412,13 +430,14 @@ export function DashboardPage() {
         <Col xs={24} md={24} xl={24}>
           <Card title="模块端口 / 边缘切流（Phase 4）">
             <QueryState
-              queries={[modularPorts, imageEdge, randomEngine, cfApiProxy, r2Prewarm]}
+              queries={[modularPorts, imageEdge, randomEngine, cfApiProxy, r2Prewarm, apiKeyRl]}
               errorMessages={[
                 "加载模块端口失败",
                 "加载 Image Edge 失败",
                 "加载 Random Engine 失败",
                 "加载 CF API Proxy 失败",
                 "加载 R2 Prewarm 失败",
+                "加载 API Key 限流失败",
               ]}
             >
               <Space direction="vertical" style={{ width: "100%" }}>
@@ -465,6 +484,32 @@ export function DashboardPage() {
                     ) : null}
                     <Tag>random_service={modularPorts.data.random_service?.backend ?? "default"}</Tag>
                     <Tag>random_pick={modularPorts.data.random_pick?.backend ?? "sqlite"}</Tag>
+                  </Space>
+                ) : null}
+
+                {apiKeyRl.data ? (
+                  <Space wrap size={[8, 8]}>
+                    <Tag
+                      color={
+                        apiKeyRl.data.active_backend === "redis"
+                          ? "green"
+                          : apiKeyRl.data.using_memory_fallback
+                            ? "orange"
+                            : undefined
+                      }
+                    >
+                      api_key_rl={apiKeyRl.data.active_backend}
+                      {apiKeyRl.data.configured_backend !== apiKeyRl.data.active_backend
+                        ? ` (req=${apiKeyRl.data.configured_backend})`
+                        : ""}
+                    </Tag>
+                    {apiKeyRl.data.using_memory_fallback ? (
+                      <Tag color="orange">redis→memory fallback</Tag>
+                    ) : null}
+                    {apiKeyRl.data.required ? <Tag color="blue">api_key required</Tag> : null}
+                    <Tag>
+                      rpm={apiKeyRl.data.rpm}/{apiKeyRl.data.burst}
+                    </Tag>
                   </Space>
                 ) : null}
 
@@ -548,6 +593,7 @@ export function DashboardPage() {
                     cfApiProxy.data?.request_id,
                     r2Prewarm.data?.request_id,
                     randomEngine.data?.request_id,
+                    apiKeyRl.data?.request_id,
                   ]
                     .filter(Boolean)
                     .join(" / ") || "—"}
