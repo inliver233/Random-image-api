@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from app.core.admin_request import (
+    load_json_object_optional,
     parse_bool,
     parse_bool_optional,
     parse_choice,
@@ -105,6 +106,29 @@ def test_parse_choice() -> None:
     with pytest.raises(ApiError) as ei_missing:
         parse_choice("", field="status", choices={"a", "b"})
     assert ei_missing.value.message == "Unsupported status"
+
+
+def test_load_json_object_optional() -> None:
+    import asyncio
+
+    class _Req:
+        def __init__(self, payload: object) -> None:
+            self._payload = payload
+
+        async def json(self) -> object:
+            if isinstance(self._payload, BaseException):
+                raise self._payload
+            return self._payload
+
+    async def _run() -> None:
+        assert await load_json_object_optional(_Req({"a": 1})) == {"a": 1}  # type: ignore[arg-type]
+        assert await load_json_object_optional(_Req(None)) == {}  # type: ignore[arg-type]
+        assert await load_json_object_optional(_Req(ValueError("bad"))) == {}  # type: ignore[arg-type]
+        with pytest.raises(ApiError) as ei:
+            await load_json_object_optional(_Req([1, 2]))  # type: ignore[arg-type]
+        assert ei.value.message == "Invalid JSON body"
+
+    asyncio.run(_run())
 
 
 def test_parse_positive_int_list() -> None:

@@ -13,6 +13,7 @@ from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.admin_request import (
     load_json_object,
+    load_json_object_optional,
     parse_bool_optional,
     parse_choice,
     parse_int_in_range,
@@ -328,16 +329,7 @@ async def _load_easy_import_json(request: Request) -> dict[str, Any]:
 
 
 async def _load_probe_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception:
-        return {}
-
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
-
+    data = await load_json_object_optional(request)
     out: dict[str, Any] = {}
 
     if "probe_url" in data:
@@ -365,16 +357,7 @@ async def _load_probe_json(request: Request) -> dict[str, Any]:
 
 
 async def _load_cleanup_invalid_hosts_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception:
-        return {}
-
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
-
+    data = await load_json_object_optional(request)
     out: dict[str, Any] = {}
 
     for key in ("dry_run", "delete_orphans", "recompute_bindings", "strict"):

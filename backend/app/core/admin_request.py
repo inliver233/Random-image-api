@@ -18,6 +18,24 @@ async def load_json_object(request: Request) -> dict[str, Any]:
     return data
 
 
+async def load_json_object_optional(request: Request) -> dict[str, Any]:
+    """
+    Parse optional JSON object body.
+
+    Empty/missing/invalid-parse → {}; non-object JSON → BAD_REQUEST.
+    Used by admin endpoints that accept empty body with defaults.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        return {}
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    return data
+
+
 def parse_bool(value: Any, *, default: bool) -> bool:
     """Lenient bool parse used by admin forms (missing/unknown → default)."""
     if value is None:
