@@ -14,7 +14,6 @@ from app.core.random_delivery import resolve_catalog_store
 from app.core.random_engine_sync import maybe_publish_engine_deletes, maybe_publish_engine_empty_snapshot
 from app.core.request_id import get_or_create_request_id
 from app.db.models.image_tags import ImageTag
-from app.db.models.images import Image
 from app.db.models.tags import Tag
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 
@@ -58,51 +57,15 @@ async def list_admin_images(
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
-
-    tag_counts = (
-        sa.select(ImageTag.image_id.label("image_id"), sa.func.count().label("tag_count"))
-        .group_by(ImageTag.image_id)
-        .subquery()
-    )
-    tag_count_col = sa.func.coalesce(tag_counts.c.tag_count, 0).label("tag_count")
-
-    stmt = (
-        sa.select(Image, tag_count_col)
-        .outerjoin(tag_counts, tag_counts.c.image_id == Image.id)
-        .where(Image.status == 1)
-        .order_by(Image.id.desc())
-        .limit(int(limit) + 1)
-    )
-    if cursor_i is not None:
-        stmt = stmt.where(Image.id < int(cursor_i))
-
-    for key in missing_keys:
-        if key == "tags":
-            stmt = stmt.where(tag_count_col == 0)
-        elif key == "geometry":
-            stmt = stmt.where((Image.width.is_(None)) | (Image.height.is_(None)))
-        elif key == "r18":
-            stmt = stmt.where(Image.x_restrict.is_(None))
-        elif key == "ai":
-            stmt = stmt.where(Image.ai_type.is_(None))
-        elif key == "illust_type":
-            stmt = stmt.where(Image.illust_type.is_(None))
-        elif key == "user":
-            stmt = stmt.where(Image.user_id.is_(None))
-        elif key == "title":
-            stmt = stmt.where((Image.title.is_(None)) | (sa.func.trim(Image.title) == ""))
-        elif key == "created_at":
-            stmt = stmt.where((Image.created_at_pixiv.is_(None)) | (sa.func.trim(Image.created_at_pixiv) == ""))
-        elif key == "popularity":
-            stmt = stmt.where(
-                (Image.bookmark_count.is_(None)) | (Image.view_count.is_(None)) | (Image.comment_count.is_(None))
-            )
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async with Session() as session:
-        rows = (await session.execute(stmt)).all()
-
-    rows_page = rows[: int(limit)]
-    next_cursor = int(rows_page[-1][0].id) if len(rows) > int(limit) and rows_page else None
+        rows_page, next_cursor = await catalog.list_admin_images(
+            session,
+            limit=int(limit),
+            cursor=cursor_i,
+            missing_keys=missing_keys,
+        )
 
     items: list[dict[str, Any]] = []
     for img, tag_count in rows_page:

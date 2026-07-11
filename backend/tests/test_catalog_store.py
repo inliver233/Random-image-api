@@ -620,6 +620,97 @@ def test_sqlite_catalog_store_list_images(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_sqlite_catalog_store_list_admin_images(tmp_path: Path) -> None:
+    engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_admin_list.db").as_posix())
+
+    async def _run() -> None:
+        from app.db.models.image_tags import ImageTag
+        from app.db.models.images import Image
+        from app.db.models.tags import Tag
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        store = build_catalog_store(database_url=str(engine.url))
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            incomplete = Image(
+                illust_id=1,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/1.jpg",
+                proxy_path="/i/1.jpg",
+                random_key=0.1,
+                status=1,
+                width=None,
+                height=None,
+                x_restrict=None,
+                title=None,
+            )
+            complete = Image(
+                illust_id=2,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/2.jpg",
+                proxy_path="/i/2.jpg",
+                random_key=0.2,
+                status=1,
+                width=100,
+                height=200,
+                x_restrict=0,
+                ai_type=0,
+                illust_type=0,
+                user_id=7,
+                title="ok",
+                created_at_pixiv="2020-01-01T00:00:00Z",
+                bookmark_count=1,
+                view_count=2,
+                comment_count=3,
+            )
+            disabled = Image(
+                illust_id=3,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/3.jpg",
+                proxy_path="/i/3.jpg",
+                random_key=0.3,
+                status=3,
+            )
+            session.add_all([incomplete, complete, disabled])
+            await session.flush()
+            tag = Tag(name="t1", translated_name=None)
+            session.add(tag)
+            await session.flush()
+            session.add(ImageTag(image_id=int(complete.id), tag_id=int(tag.id)))
+            await session.commit()
+            await session.refresh(incomplete)
+            await session.refresh(complete)
+
+            rows, next_cursor = await store.list_admin_images(session, limit=10)
+            assert next_cursor is None
+            assert [int(img.id) for img, _ in rows] == [int(complete.id), int(incomplete.id)]
+            by_id = {int(img.id): int(tc) for img, tc in rows}
+            assert by_id[int(complete.id)] == 1
+            assert by_id[int(incomplete.id)] == 0
+
+            missing_tags, _ = await store.list_admin_images(session, limit=10, missing_keys=["tags"])
+            assert [int(img.id) for img, _ in missing_tags] == [int(incomplete.id)]
+
+            missing_geo, _ = await store.list_admin_images(session, limit=10, missing_keys=["geometry"])
+            assert [int(img.id) for img, _ in missing_geo] == [int(incomplete.id)]
+
+            page1, next_c = await store.list_admin_images(session, limit=1)
+            assert len(page1) == 1
+            assert int(page1[0][0].id) == int(complete.id)
+            assert next_c == int(complete.id)
+            page2, next_c2 = await store.list_admin_images(session, limit=1, cursor=next_c)
+            assert len(page2) == 1
+            assert int(page2[0][0].id) == int(incomplete.id)
+            assert next_c2 is None
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_sqlite_catalog_store_clear_all_images(tmp_path: Path) -> None:
     engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_clear.db").as_posix())
 

@@ -6,6 +6,7 @@ from typing import Protocol, runtime_checkable
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.db.images_admin_list import list_admin_images as list_admin_images_helper
 from app.db.images_delete import clear_all_images, delete_images_by_ids
 from app.db.images_get import (
     get_image_by_id,
@@ -152,6 +153,15 @@ class CatalogStore(Protocol):
         created_from: str | None = None,
         created_to: str | None = None,
     ) -> tuple[list[Image], int | None]: ...
+
+    async def list_admin_images(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+        cursor: int | None = None,
+        missing_keys: Sequence[str] | None = None,
+    ) -> tuple[list[tuple[Image, int]], int | None]: ...
 
     async def mark_image_ok(self, engine: AsyncEngine, *, image_id: int, now: str) -> None: ...
 
@@ -371,6 +381,21 @@ class SqliteCatalogStore:
             illust_id=illust_id,
             created_from=created_from,
             created_to=created_to,
+        )
+
+    async def list_admin_images(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+        cursor: int | None = None,
+        missing_keys: Sequence[str] | None = None,
+    ) -> tuple[list[tuple[Image, int]], int | None]:
+        return await list_admin_images_helper(
+            session,
+            limit=limit,
+            cursor=cursor,
+            missing_keys=missing_keys,
         )
 
     async def mark_image_ok(self, engine: AsyncEngine, *, image_id: int, now: str) -> None:
