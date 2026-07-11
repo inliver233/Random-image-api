@@ -37,6 +37,7 @@ Public delivery side-effects adopt the port progressively:
 - Score = unix wall time (not process monotonic) so multi-instance windows align
 - Member = image_id / user_id string; re-record updates score (last-seen)
 - Missing `redis` package, connect failure, or command error → fail-open to process-local memory
+- **Non-blocking pick path:** `get_lists` never waits on Redis RTT (no `fut.result` on the request thread). Warm process cache (~0.5s TTL) returns immediately; cold/expired cache schedules a background refresh and returns process-local memory. `record` dual-writes memory + fire-and-forget Redis via a small thread pool.
 
 ## Ops
 

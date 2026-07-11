@@ -19,6 +19,17 @@ Implementation:
 
 Catalog + RecentDedup + **RandomPickPort** (Python SQL ring) remain separate ports injected into the plan / pick path.
 
+## Dual-run sticky skip
+
+`pick_with_strategy(..., skip_engine=True)` forces the Python SQL path (used by `/feed` top-up after one engine batch and by `/random` stream retries after the first dual-run attempt).
+
+Prometheus / debug honesty:
+
+| `engine_status` / observe status | When |
+| --- | --- |
+| `skipped_traffic` | Engine enabled + URL set, but this request did **not** route to engine (traffic percent / no client) and `skip_engine` is false |
+| `skipped_sticky` | `skip_engine=True` (must **not** count as `skipped_traffic`) |
+
 ## Ops
 
 - `/healthz` → `modules.random_service.backend` (default: `default`)
