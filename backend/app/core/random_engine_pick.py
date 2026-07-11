@@ -5,9 +5,10 @@ from typing import Any, Mapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.metrics import observe_random_engine_pick
+from app.core.random_delivery import resolve_catalog_store
 from app.core.random_engine_client import engine_pick
 from app.core.random_strategy import pick_by_quality, pick_by_random_key
-from app.db.images_get import get_image_by_id, get_images_by_ids
+from app.db.catalog import CatalogStore
 
 
 def orientation_to_engine_str(orientation_code: int | None) -> str:
@@ -215,11 +216,13 @@ async def try_pick_via_engine(
     session: AsyncSession,
     payload: dict[str, Any],
     timeout_s: float = 0.8,
+    catalog: CatalogStore | None = None,
 ) -> tuple[Any | None, dict[str, Any]]:
     """
-    Call Go engine; on OK with items, load full Image row from SQLite by id.
+    Call Go engine; on OK with items, load full Image row from catalog by id.
     Returns (image_or_none, debug_meta). Never raises for transport failures.
     """
+    store = resolve_catalog_store(catalog)
     meta: dict[str, Any] = {"engine": True, "engine_url": base_url}
     data = await engine_pick(client, base_url, payload=payload, timeout_s=timeout_s)
     if data is None:
@@ -244,7 +247,7 @@ async def try_pick_via_engine(
     except Exception:
         meta["engine_status"] = "bad_id"
         return None, meta
-    image = await get_image_by_id(session, image_id=image_id)
+    image = await store.get_image_by_id(session, image_id=image_id)
     if image is None:
         meta["engine_status"] = "db_miss"
         meta["engine_image_id"] = image_id
@@ -262,8 +265,10 @@ async def try_pick_many_via_engine(
     session: AsyncSession,
     payload: dict[str, Any],
     timeout_s: float = 0.8,
+    catalog: CatalogStore | None = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Batch variant of try_pick_via_engine for /feed (limit>1)."""
+    store = resolve_catalog_store(catalog)
     meta: dict[str, Any] = {"engine": True, "engine_url": base_url, "batch": True}
     data = await engine_pick(client, base_url, payload=payload, timeout_s=timeout_s)
     if data is None:
@@ -292,7 +297,7 @@ async def try_pick_many_via_engine(
         meta["engine_status"] = "bad_item"
         return [], meta
 
-    images = await get_images_by_ids(session, image_ids=ids)
+    images = await store.get_images_by_ids(session, image_ids=ids)
     if not images:
         meta["engine_status"] = "db_miss"
         meta["engine_image_ids"] = ids
@@ -312,6 +317,7 @@ async def pick_with_strategy(
     pick_ctx: Any,
     filters: Any,
     exclude_image_ids: list[int] | None = None,
+    catalog: CatalogStore | None = None,
 ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
     """Engine-first pick (feature flag) with Python random/quality fallback.
 
@@ -320,6 +326,7 @@ async def pick_with_strategy(
     """
     from app.core.random_engine_client import random_engine_base_url, should_route_pick_to_engine
 
+    store = resolve_catalog_store(catalog)
     debug_base = dict(pick_ctx.debug_base)
     engine_url = random_engine_base_url(settings) if settings is not None else None
     # Traffic roll uses process RNG only — never pick_ctx.rng (seed must stay deterministic).
@@ -339,6 +346,7 @@ async def pick_with_strategy(
             session=session,
             payload=payload,
             timeout_s=timeout_s,
+            catalog=store,
         )
         if image is not None:
             try:

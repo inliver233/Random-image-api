@@ -15,6 +15,7 @@ from app.core.random_delivery import (
     attach_background,
     best_effort,
     build_edge_redirect_response,
+    resolve_catalog_store,
     schedule_hydrate_if_needed,
     schedule_mark_ok_if_needed,
     should_mark_image_ok,
@@ -23,7 +24,7 @@ from app.core.random_request import force_local_from_query, prefer_image_edge
 from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.core.time import iso_utc_ms
-from app.db.images_mark import mark_image_failure
+from app.db.catalog import CatalogStore
 
 # Re-export for callers that import mark-ok helper from image_delivery.
 __all__ = (
@@ -72,6 +73,7 @@ async def deliver_public_image_from_request(
 ) -> Any:
     """Resolve runtime + proxy/mirror query flags, then deliver a known image row."""
     engine = request.app.state.engine
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     runtime = await resolve_runtime_for_request(request, engine)
     resolved = resolve_proxy_mirror(
         runtime=runtime,
@@ -97,6 +99,7 @@ async def deliver_public_image_from_request(
         should_mark_ok=bool(should_mark_ok),
         hydrate_reason=str(hydrate_reason),
         mark_fail_on_upstream=bool(mark_fail_on_upstream),
+        catalog=catalog,
     )
 
 
@@ -119,8 +122,10 @@ async def deliver_known_image(
     cache_control_edge: str = "public, max-age=300",
     cache_control_stream: str = "public, max-age=31536000, immutable",
     mark_fail_on_upstream: bool = False,
+    catalog: CatalogStore | None = None,
 ) -> Any:
     """Shared edge-prefer + local stream path for /i and legacy routes."""
+    store = resolve_catalog_store(catalog)
     prefer_edge = prefer_image_edge(
         proxy_override=proxy_override,
         pixiv_cat=int(pixiv_cat),
@@ -191,6 +196,7 @@ async def deliver_known_image(
                 image_id=int(image.id),
                 should_mark_ok=bool(should_mark_ok),
                 now=now,
+                catalog=store,
             )
             schedule_hydrate_if_needed(
                 background_tasks=background_tasks,
@@ -210,7 +216,7 @@ async def deliver_known_image(
                 ErrorCode.UPSTREAM_RATE_LIMIT,
             }:
                 await best_effort(
-                    mark_image_failure,
+                    store.mark_image_failure,
                     engine,
                     image_id=int(image.id),
                     now=now,

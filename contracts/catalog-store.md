@@ -17,7 +17,13 @@ Implementation:
 | `get_image_by_id` / `get_images_by_ids` | Public delivery + engine hydrate DTO |
 | `mark_image_ok` / `mark_image_failure` | Delivery quality feedback |
 
-Handlers may still call helpers directly; the port freezes the boundary for progressive adoption.
+Public delivery/get paths adopt the port progressively:
+
+- `GET /images/{id}` and `GET /i/{id}.{ext}` → `catalog.get_image_by_id`
+- `/i` + `/random` stream mark_ok / mark_failure → `catalog.mark_image_*`
+- Go engine hydrate after pick → `catalog.get_image_by_id` / `get_images_by_ids`
+
+Helpers remain available for non-public paths; injected store is preferred via `app.state.catalog_store`.
 
 ## Ops
 

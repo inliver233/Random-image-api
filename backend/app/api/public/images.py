@@ -14,7 +14,7 @@ from app.core.image_delivery import (
 )
 from app.core.public_json import public_cursor_list_json, public_ok_json, serialize_public_image
 from app.core.public_list_filters import parse_public_list_filters
-from app.db.images_get import get_image_by_id
+from app.core.random_delivery import resolve_catalog_store
 from app.db.images_list import list_images as db_list_images
 from app.db.session import create_sessionmaker
 from app.db.tags_get import get_tag_names_for_image
@@ -96,10 +96,11 @@ async def get_image(
     image_id = require_positive_id(image_id, invalid_message="Unsupported image_id")
 
     engine = request.app.state.engine
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     Session = create_sessionmaker(engine)
 
     async with Session() as session:
-        image = await get_image_by_id(session, image_id=image_id)
+        image = await catalog.get_image_by_id(session, image_id=image_id)
         if image is None:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
         tags = await get_tag_names_for_image(session, image_id=image.id)
@@ -129,10 +130,11 @@ async def proxy_image(
     ext = normalize_image_ext(ext)
 
     engine = request.app.state.engine
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     Session = create_sessionmaker(engine)
 
     async with Session() as session:
-        image = await get_image_by_id(session, image_id=image_id)
+        image = await catalog.get_image_by_id(session, image_id=image_id)
         if image is None or (image.ext or "").lower() != ext:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
         should_mark_ok = should_mark_image_ok(image)

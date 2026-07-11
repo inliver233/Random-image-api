@@ -19,6 +19,7 @@ from app.core.random_defaults import (
 from app.core.random_engine_pick import pick_with_strategy
 from app.core.random_request import ParsedRandomFilters
 from app.core.recent_dedup import get_recent_lists
+from app.db.catalog import CatalogStore
 
 # Cap NOT IN size for SQLite plan quality; remaining recent ids still apply logit penalties.
 RECENT_EXCLUDE_SQL_CAP = 512
@@ -40,6 +41,7 @@ class RandomService(Protocol):
         httpx_client: Any,
         filters: ParsedRandomFilters,
         exclude_image_ids: list[int] | None = None,
+        catalog: CatalogStore | None = None,
     ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]: ...
 
     async def try_engine_batch(
@@ -51,6 +53,7 @@ class RandomService(Protocol):
         filters: ParsedRandomFilters,
         limit: int,
         exclude_image_ids: list[int] | set[int] | None = None,
+        catalog: CatalogStore | None = None,
     ) -> tuple[list[Any], dict[str, Any] | None]: ...
 
 
@@ -154,6 +157,7 @@ class RandomPickContext:
         filters: ParsedRandomFilters,
         limit: int,
         exclude_image_ids: list[int] | set[int] | None = None,
+        catalog: CatalogStore | None = None,
     ) -> tuple[list[Any], dict[str, Any] | None]:
         """One-shot engine batch for /feed. Returns ([], None) when dual-run is off."""
         from app.core.metrics import observe_random_engine_pick
@@ -182,6 +186,7 @@ class RandomPickContext:
             session=session,
             payload=payload,
             timeout_s=timeout_s,
+            catalog=catalog,
         )
         engine_status = str((eng_meta or {}).get("engine_status") or "fallback")
         try:
@@ -198,6 +203,7 @@ class RandomPickContext:
         httpx_client: Any,
         filters: ParsedRandomFilters,
         exclude_image_ids: list[int] | None = None,
+        catalog: CatalogStore | None = None,
     ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
         return await pick_with_strategy(
             session=session,
@@ -206,6 +212,7 @@ class RandomPickContext:
             pick_ctx=self,
             filters=filters,
             exclude_image_ids=exclude_image_ids,
+            catalog=catalog,
         )
 
 

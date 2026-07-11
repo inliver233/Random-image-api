@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from app.core.errors import ApiError, ErrorCode
 from app.core.imgproxy import load_imgproxy_config_from_settings
 from app.core.proxy_mirror import resolve_proxy_mirror
-from app.core.random_delivery import schedule_pick_side_effects
+from app.core.random_delivery import resolve_catalog_store, schedule_pick_side_effects
 from app.core.random_pick_context import build_random_pick_context
 from app.core.random_query import no_match_error_from_filters
 from app.core.random_request import PublicRandomQuery
@@ -60,6 +60,7 @@ async def feed_images(
     pximg_mirror_host_override = filters.pximg_mirror_host_override
 
     engine = request.app.state.engine
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     Session = create_sessionmaker(engine)
     runtime = await resolve_runtime_for_request(request, engine)
 
@@ -104,6 +105,7 @@ async def feed_images(
             image=image,
             pick_ctx=pick_ctx,
             hydrate_reason="feed",
+            catalog=catalog,
         )
         urls = resolve_public_item_urls(
             image=image,
@@ -135,6 +137,7 @@ async def feed_images(
             httpx_client=httpx_client,
             filters=filters,
             limit=limit_i,
+            catalog=catalog,
         )
         for image in images:
             exclude_ids.append(int(image.id))
@@ -150,6 +153,7 @@ async def feed_images(
                     httpx_client=httpx_client,
                     filters=filters,
                     exclude_image_ids=list(exclude_ids) if exclude_ids else None,
+                    catalog=catalog,
                 )
                 if image is None:
                     break

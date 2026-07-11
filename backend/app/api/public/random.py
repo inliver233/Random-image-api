@@ -12,6 +12,7 @@ from app.core.random_delivery import (
     attach_background,
     build_edge_redirect_response,
     deliver_random_image_stream,
+    resolve_catalog_store,
     schedule_pick_side_effects,
 )
 from app.core.random_pick_context import build_random_pick_context
@@ -52,6 +53,7 @@ async def random_image(
     pximg_mirror_host_override = filters.pximg_mirror_host_override
 
     engine = request.app.state.engine
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     Session = create_sessionmaker(engine)
     runtime = await resolve_runtime_for_request(request, engine)
 
@@ -98,6 +100,7 @@ async def random_image(
             settings=getattr(request.app.state, "settings", None),
             httpx_client=getattr(request.app.state, "httpx_client", None),
             filters=filters,
+            catalog=catalog,
             exclude_image_ids=exclude_image_ids,
         )
 
@@ -118,6 +121,7 @@ async def random_image(
             image=image,
             pick_ctx=pick_ctx,
             hydrate_reason="random",
+            catalog=catalog,
         )
 
         if format == "image" and redirect == 1:
@@ -216,4 +220,5 @@ async def random_image(
         dedup_max_authors=int(pick_ctx.dedup_max_authors),
         background_tasks=background_tasks,
         no_match_error=_no_match_error,
+        catalog=catalog,
     )

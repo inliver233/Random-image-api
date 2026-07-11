@@ -16,7 +16,7 @@ from app.core.origin_stream import prepare_origin_stream
 from app.core.recent_dedup import record_recent
 from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.time import iso_utc_ms
-from app.db.images_mark import mark_image_failure, mark_image_ok
+from app.db.catalog import CatalogStore, SqliteCatalogStore
 from app.jobs.enqueue import enqueue_opportunistic_hydrate_metadata
 
 PickFn = Callable[..., Awaitable[tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]]]
@@ -25,6 +25,11 @@ PickFn = Callable[..., Awaitable[tuple[Any, dict[str, Any]] | tuple[None, dict[s
 def should_mark_image_ok(image: Any) -> bool:
     """True when last_ok is missing or a prior error is still recorded."""
     return image.last_ok_at is None or image.last_error_code is not None
+
+
+def resolve_catalog_store(catalog: CatalogStore | None = None) -> CatalogStore:
+    """Prefer injected CatalogStore; fall back to default SQLite helpers."""
+    return catalog if catalog is not None else SqliteCatalogStore()
 
 
 async def best_effort(fn, *args, timeout_s: float = 1.5, **kwargs) -> None:  # type: ignore[no-untyped-def]
@@ -50,13 +55,15 @@ def schedule_mark_ok_if_needed(
     image_id: int,
     should_mark_ok: bool,
     now: str | None = None,
+    catalog: CatalogStore | None = None,
 ) -> None:
     """Queue mark_image_ok only when the caller proved delivery and the row needs it."""
     if not should_mark_ok:
         return
+    store = resolve_catalog_store(catalog)
     background_tasks.add_task(
         best_effort,
-        mark_image_ok,
+        store.mark_image_ok,
         engine,
         image_id=int(image_id),
         now=now or iso_utc_ms(),
@@ -101,6 +108,7 @@ def schedule_edge_side_effects(
     # Edge 302 does not prove bytes were served; do not mark_image_ok (avoids fail_cooldown skew).
     mark_ok_on_edge: bool = False,
     should_mark_ok: bool = False,
+    catalog: CatalogStore | None = None,
 ) -> None:
     if bool(anti_repeat_enabled):
         try:
@@ -120,6 +128,7 @@ def schedule_edge_side_effects(
             engine=engine,
             image_id=image_id,
             should_mark_ok=should_mark_ok,
+            catalog=catalog,
         )
     schedule_hydrate_if_needed(
         background_tasks=background_tasks,
@@ -139,6 +148,7 @@ def schedule_pick_side_effects(
     hydrate_reason: str,
     mark_ok_on_edge: bool = False,
     should_mark_ok: bool = False,
+    catalog: CatalogStore | None = None,
 ) -> None:
     """Thin wrapper: anti-repeat / hydrate / optional mark_ok from RandomPickContext + image."""
     schedule_edge_side_effects(
@@ -155,6 +165,7 @@ def schedule_pick_side_effects(
         hydrate_reason=str(hydrate_reason),
         mark_ok_on_edge=bool(mark_ok_on_edge),
         should_mark_ok=bool(should_mark_ok),
+        catalog=catalog,
     )
 
 
@@ -190,8 +201,10 @@ async def deliver_random_image_stream(
     dedup_max_authors: int,
     background_tasks: BackgroundTasks,
     no_match_error: Callable[[], ApiError],
+    catalog: CatalogStore | None = None,
 ) -> Any:
     """Pick + edge-redirect-or-stream retry loop for /random?format=image."""
+    store = resolve_catalog_store(catalog)
     tried_ids: set[int] = set()
     last_error: ApiError | None = None
     attempts_i = max(1, int(attempts))
@@ -225,6 +238,7 @@ async def deliver_random_image_stream(
                     hydrate_reason="random",
                     mark_ok_on_edge=False,
                     should_mark_ok=bool(should_mark_ok),
+                    catalog=store,
                 )
                 observe_image_delivery(path="edge_redirect")
                 return attach_background(
@@ -266,6 +280,7 @@ async def deliver_random_image_stream(
                 hydrate_reason="random",
                 mark_ok_on_edge=True,
                 should_mark_ok=bool(should_mark_ok),
+                catalog=store,
             )
             observe_image_delivery(path="local_stream")
             return attach_background(resp, background_tasks)
@@ -277,7 +292,7 @@ async def deliver_random_image_stream(
                 ErrorCode.UPSTREAM_RATE_LIMIT,
             }:
                 await best_effort(
-                    mark_image_failure,
+                    store.mark_image_failure,
                     engine,
                     image_id=image_id,
                     now=iso_utc_ms(),
