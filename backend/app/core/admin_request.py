@@ -50,3 +50,56 @@ def parse_bool_optional(value: Any) -> bool | None:
         if v in {"0", "false", "no", "n", "off"}:
             return False
     return None
+
+
+def parse_optional_str(value: Any, *, max_len: int | None = None, field: str = "value") -> str | None:
+    """Strip optional string; empty → None. Rejects over-length when max_len set."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if max_len is not None and len(text) > max_len:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Unsupported {field}", status_code=400)
+    return text
+
+
+def parse_positive_int_list(
+    raw: Any,
+    *,
+    field: str,
+    allow_empty: bool = False,
+    max_items: int | None = None,
+    invalid_message: str | None = None,
+    empty_message: str | None = None,
+    too_many_message: str | None = None,
+) -> list[int]:
+    """
+    Parse a list of positive ints with de-dupe (first-seen order).
+
+    Raises BAD_REQUEST with field-oriented messages (stable for existing APIs).
+    """
+    invalid = invalid_message or f"Unsupported {field}"
+    empty = empty_message or f"Empty {field}"
+    too_many = too_many_message or f"Too many {field}"
+
+    if not isinstance(raw, list):
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+
+    ids: list[int] = []
+    seen: set[int] = set()
+    for item in raw:
+        try:
+            i = int(item)
+        except Exception as exc:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400) from exc
+        if i <= 0 or i in seen:
+            continue
+        seen.add(i)
+        ids.append(i)
+
+    if not ids and not allow_empty:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=empty, status_code=400)
+    if max_items is not None and len(ids) > max_items:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=too_many, status_code=400)
+    return ids

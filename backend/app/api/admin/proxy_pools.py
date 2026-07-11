@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object, parse_bool
+from app.core.admin_request import load_json_object, parse_bool, parse_optional_str
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.db.models.proxy_endpoints import ProxyEndpoint
@@ -29,9 +29,7 @@ async def _load_create_json(request: Request) -> dict[str, Any]:
     if len(name) > 100:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported name", status_code=400)
 
-    desc_raw = data.get("description")
-    description = str(desc_raw).strip() if desc_raw is not None else None
-    description = description if description else None
+    description = parse_optional_str(data.get("description"))
 
     enabled = parse_bool(data.get("enabled"), default=True)
     return {"name": name, "description": description, "enabled": enabled}
@@ -51,9 +49,7 @@ async def _load_update_json(request: Request) -> dict[str, Any]:
         out["name"] = name
 
     if "description" in data:
-        desc_raw = data.get("description")
-        description = str(desc_raw).strip() if desc_raw is not None else None
-        out["description"] = description if description else None
+        out["description"] = parse_optional_str(data.get("description"))
 
     if "enabled" in data:
         out["enabled"] = parse_bool(data.get("enabled"), default=True)

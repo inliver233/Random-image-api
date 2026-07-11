@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object
+from app.core.admin_request import load_json_object, parse_bool, parse_positive_int_list
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.db.models.image_tags import ImageTag
@@ -164,26 +164,8 @@ async def _load_bulk_delete_json(request: Request) -> dict[str, Any]:
         raw_ids = data.get("ids", None)
     if raw_ids is None:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing image_ids", status_code=400)
-    if not isinstance(raw_ids, list):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported image_ids", status_code=400)
 
-    ids: list[int] = []
-    seen: set[int] = set()
-    for raw in raw_ids:
-        try:
-            i = int(raw)
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported image_ids", status_code=400) from exc
-        if i <= 0 or i in seen:
-            continue
-        seen.add(i)
-        ids.append(i)
-
-    if not ids:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Empty image_ids", status_code=400)
-    if len(ids) > 20_000:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Too many image_ids", status_code=400)
-
+    ids = parse_positive_int_list(raw_ids, field="image_ids", max_items=20_000)
     return {"image_ids": ids}
 
 
@@ -271,18 +253,10 @@ async def bulk_delete_admin_images(
 async def _load_clear_images_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
-    confirm = data.get("confirm", False)
-    if confirm not in {True, 1, "1", "true", "yes", "y", "on"}:
+    if not parse_bool(data.get("confirm"), default=False):
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing confirm", status_code=400)
 
-    delete_tags = data.get("delete_tags", True)
-    delete_tags_bool = (
-        bool(delete_tags)
-        if isinstance(delete_tags, (bool, int))
-        else str(delete_tags).strip().lower() in {"1", "true", "yes", "y", "on"}
-    )
-
-    return {"delete_tags": bool(delete_tags_bool)}
+    return {"delete_tags": parse_bool(data.get("delete_tags"), default=True)}
 
 
 @router.post("/images/clear")

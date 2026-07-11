@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object, parse_bool, parse_bool_optional
+from app.core.admin_request import load_json_object, parse_bool, parse_bool_optional, parse_optional_str
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.errors import ApiError, ErrorCode
 from app.core.proxy_routing import select_proxy_uri_for_url
@@ -35,9 +35,7 @@ async def _load_create_token_json(request: Request) -> dict[str, Any]:
     if len(refresh_token) > 2048:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported refresh_token", status_code=400)
 
-    label_raw = data.get("label")
-    label = str(label_raw).strip() if label_raw is not None else None
-    label = label if label else None
+    label = parse_optional_str(data.get("label"), max_len=200, field="label")
 
     enabled = parse_bool(data.get("enabled"), default=True)
 
@@ -65,14 +63,7 @@ async def _load_update_token_json(request: Request) -> dict[str, Any]:
     out: dict[str, Any] = {}
 
     if "label" in data:
-        label_raw = data.get("label")
-        if label_raw is None:
-            label = None
-        else:
-            label = str(label_raw).strip() or None
-        if label is not None and len(label) > 200:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported label", status_code=400)
-        out["label"] = label
+        out["label"] = parse_optional_str(data.get("label"), max_len=200, field="label")
 
     if "enabled" in data:
         enabled = parse_bool_optional(data.get("enabled"))
