@@ -18,8 +18,6 @@ _RECENT_AUTHORS: deque[tuple[float, int]] = deque()
 
 # Shared pool for RedisRecentDedup so request threads never block on Redis RTT.
 _REDIS_IO_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="recent-dedup-redis")
-# Hard ceiling for any Redis call on the pick path (fail open past this).
-_REDIS_CALL_TIMEOUT_S = 0.15
 # Reuse last successful cross-instance window briefly to avoid sync Redis on every pick.
 _REDIS_LIST_CACHE_TTL_S = 0.5
 
@@ -182,8 +180,9 @@ class RedisRecentDedup:
 
     Request-path contract (latency):
       - ``record`` always dual-writes process-local memory, then fire-and-forgets Redis.
-      - ``get_lists`` serves a short TTL cache or memory immediately; Redis refresh is
-        bounded by a thread-pool timeout so slow Redis never stalls /random plan build.
+      - ``get_lists`` never waits on Redis RTT: warm TTL cache returns immediately;
+        cold/expired cache schedules a background refresh and fail-opens to process-local
+        memory so /random plan build stays non-blocking.
     """
 
     redis_url: str

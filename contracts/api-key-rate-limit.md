@@ -23,6 +23,17 @@ Implementation:
 
 Redis activates only when **backend=redis and URL set**. Missing `redis` package, connect failure, or EVAL error **fails open** to process-local memory (public API stays up; multi-instance limit soft-degrades).
 
+## Request-path latency (budgeted)
+
+`RedisApiKeyRateLimiter.allow` must not stall public auth:
+
+| Call | Budget | On timeout / error |
+| --- | --- | --- |
+| Lazy `ping` / client acquire | `asyncio.wait_for` **0.15s** | Fail open → process-local memory bucket |
+| Lua `EVAL` token-bucket | `asyncio.wait_for` **0.15s** | Fail open → process-local memory bucket |
+
+Socket connect/read timeouts on the Redis client are also short (~0.2s). Budget exists so a hung Redis never blocks `require_public_api_key` beyond a fixed ceiling.
+
 ## Ops surfaces
 
 | Surface | Notes |
