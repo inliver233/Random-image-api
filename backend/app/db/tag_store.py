@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
-from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.catalog import catalog_backend_from_database_url
 from app.db.tags_get import get_tag_names_for_image
 from app.db.tags_links import (
     clear_all_image_tags,
@@ -175,24 +175,8 @@ class PostgresTagStore(SqliteTagStore):
 
 
 def tag_backend_from_database_url(database_url: str) -> str:
-    raw = (database_url or "").strip()
-    if not raw:
-        return "sqlite"
-    try:
-        url = make_url(raw)
-        name = (url.get_backend_name() or "").lower()
-    except Exception:
-        low = raw.lower()
-        if low.startswith("postgres") or "postgresql" in low:
-            return "postgres"
-        if low.startswith("sqlite"):
-            return "sqlite"
-        return "other"
-    if name.startswith("sqlite"):
-        return "sqlite"
-    if name.startswith("postgres"):
-        return "postgres"
-    return name or "other"
+    """Map DATABASE_URL dialect → tag backend label (delegates to catalog helper)."""
+    return catalog_backend_from_database_url(database_url)
 
 
 def build_tag_store(*, database_url: str = "") -> TagStore:
