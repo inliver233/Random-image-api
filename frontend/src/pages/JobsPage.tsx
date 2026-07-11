@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Descriptions, Drawer, Select, Skeleton, Space, Table, Tag, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Drawer, Select, Skeleton, Space, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React, { useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { CursorTableCard } from "../admin/CursorTableCard";
 import { requestIdDescription } from "../admin/errors";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
@@ -270,42 +271,19 @@ export function JobsPage() {
         requestIdPlacement="description"
       />
 
-      <Card>
-        {query.isLoading ? (
-          <Skeleton active />
-        ) : query.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            message="加载任务列表失败"
-            description={requestIdDescription(query.error)}
-          />
-        ) : !query.data ? (
-          <Skeleton active />
-        ) : items.length === 0 ? (
-          <Alert type="info" showIcon message="暂无任务" description="可先触发导入/补全/代理探测任务。" />
-        ) : (
-          <>
-            {listRequestId ? <Typography.Text type="secondary">请求ID: {listRequestId}</Typography.Text> : null}
-            <Table<JobItem>
-              rowKey={(row) => row.id}
-              columns={columns}
-              dataSource={items}
-              pagination={false}
-              size="small"
-              scroll={{ x: 1600 }}
-              style={{ marginTop: 12 }}
-            />
-            {nextCursor ? (
-              <div style={{ marginTop: 12 }}>
-                <Button onClick={() => loadMore.mutate(nextCursor)} loading={loadMore.isPending}>
-                  加载更多
-                </Button>
-              </div>
-            ) : null}
-          </>
-        )}
-      </Card>
+      <CursorTableCard<JobItem>
+        columns={columns}
+        items={items}
+        rowKey={(row) => row.id}
+        query={query}
+        loadMore={loadMore}
+        nextCursor={nextCursor}
+        listRequestId={listRequestId}
+        errorMessage="加载任务列表失败"
+        emptyMessage="暂无任务"
+        emptyDescription="可先触发导入/补全/代理探测任务。"
+        scrollX={1600}
+      />
 
       <Drawer
         open={Boolean(detailJobId)}
