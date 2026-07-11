@@ -67,6 +67,97 @@ class RandomPickContext:
     rng: Any
     seed_norm: str
 
+    def build_engine_payload(
+        self,
+        *,
+        filters: ParsedRandomFilters,
+        exclude_image_ids: list[int] | set[int] | None = None,
+        limit: int = 1,
+        debug: bool = False,
+    ) -> dict[str, Any]:
+        """Build Go engine /v1/pick body from this plan + public filters."""
+        from app.core.random_engine_pick import compose_engine_pick_payload
+
+        return compose_engine_pick_payload(
+            r18=int(filters.r18),
+            r18_strict=int(self.r18_strict),
+            ai_type_raw=filters.ai_type_raw,
+            ai_type_i=filters.ai_type_i,
+            illust_type_i=filters.illust_type_i,
+            orientation_code=filters.orientation_map[filters.layout_norm],
+            min_width_i=int(filters.min_width_i),
+            min_height_i=int(filters.min_height_i),
+            min_pixels_i=int(filters.min_pixels_i),
+            min_bookmarks_i=int(filters.min_bookmarks_i),
+            min_views_i=int(filters.min_views_i),
+            min_comments_i=int(filters.min_comments_i),
+            included=filters.included,
+            excluded=filters.excluded,
+            exclude_image_ids=exclude_image_ids,
+            user_id=filters.user_id,
+            illust_id=filters.illust_id,
+            created_from_norm=filters.created_from_norm,
+            created_to_norm=filters.created_to_norm,
+            fail_cooldown_before=self.fail_cooldown_before,
+            strategy_norm=self.strategy_norm,
+            quality_samples_i=int(self.quality_samples_i),
+            pick_mode_raw=self.pick_mode_raw,
+            temperature=float(self.temperature),
+            score_weights=self.score_weights,
+            multipliers=self.multipliers,
+            freshness_half_life_days=float(self.freshness_half_life_days),
+            velocity_smooth_days=float(self.velocity_smooth_days),
+            seed=self.seed_norm or None,
+            limit=int(limit),
+            debug=bool(debug),
+        )
+
+    async def try_engine_batch(
+        self,
+        *,
+        session: Any,
+        settings: Any,
+        httpx_client: Any,
+        filters: ParsedRandomFilters,
+        limit: int,
+        exclude_image_ids: list[int] | set[int] | None = None,
+    ) -> tuple[list[Any], dict[str, Any] | None]:
+        """One-shot engine batch for /feed. Returns ([], None) when dual-run is off."""
+        from app.core.metrics import observe_random_engine_pick
+        from app.core.random_engine_pick import try_pick_many_via_engine
+
+        engine_enabled = bool(getattr(settings, "random_engine_enabled", False)) if settings is not None else False
+        engine_url = (
+            str(getattr(settings, "random_engine_url", "") or "").strip().rstrip("/") if settings is not None else ""
+        )
+        if not (engine_enabled and engine_url and httpx_client is not None):
+            return [], None
+
+        exclude_set: set[int] = set(int(x) for x in (exclude_image_ids or []))
+        if self.anti_repeat_enabled and self.recent_exclude_image_ids:
+            exclude_set.update(int(x) for x in self.recent_exclude_image_ids)
+
+        payload = self.build_engine_payload(
+            filters=filters,
+            exclude_image_ids=exclude_set,
+            limit=int(limit),
+            debug=False,
+        )
+        timeout_s = float(getattr(settings, "random_engine_timeout_ms", 800) or 800) / 1000.0
+        images, eng_meta = await try_pick_many_via_engine(
+            client=httpx_client,
+            base_url=engine_url,
+            session=session,
+            payload=payload,
+            timeout_s=timeout_s,
+        )
+        engine_status = str((eng_meta or {}).get("engine_status") or "fallback")
+        try:
+            observe_random_engine_pick(status=engine_status if images else engine_status)
+        except Exception:
+            pass
+        return list(images or []), eng_meta
+
     async def pick(
         self,
         *,

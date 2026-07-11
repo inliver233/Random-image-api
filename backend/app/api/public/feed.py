@@ -6,15 +6,8 @@ from fastapi import APIRouter, BackgroundTasks, Query, Request
 
 from app.core.errors import ApiError, ErrorCode
 from app.core.imgproxy import load_imgproxy_config_from_settings
-from app.core.metrics import observe_random_engine_pick
 from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.random_delivery import schedule_pick_side_effects
-from app.core.random_engine_pick import (
-    build_engine_filters,
-    build_engine_pick_payload,
-    build_engine_quality_params,
-    try_pick_many_via_engine,
-)
 from app.core.random_pick_context import build_random_pick_context
 from app.core.random_query import no_match_error_from_filters
 from app.core.random_request import parse_random_filters
@@ -181,73 +174,16 @@ async def feed_images(
 
     async with Session() as session:
         # Prefer one engine batch pick when dual-run is enabled (limit>1).
-        engine_enabled = bool(getattr(settings, "random_engine_enabled", False)) if settings is not None else False
-        engine_url = (
-            str(getattr(settings, "random_engine_url", "") or "").strip().rstrip("/") if settings is not None else ""
+        images, _eng_meta = await pick_ctx.try_engine_batch(
+            session=session,
+            settings=settings,
+            httpx_client=httpx_client,
+            filters=filters,
+            limit=limit_i,
         )
-        used_engine_batch = False
-        if engine_enabled and engine_url and httpx_client is not None:
-            exclude_set: set[int] = set()
-            if pick_ctx.anti_repeat_enabled and pick_ctx.recent_exclude_image_ids:
-                exclude_set.update(int(x) for x in pick_ctx.recent_exclude_image_ids)
-            engine_filters = build_engine_filters(
-                r18=int(filters.r18),
-                r18_strict=int(pick_ctx.r18_strict),
-                ai_type_raw=filters.ai_type_raw,
-                ai_type_i=filters.ai_type_i,
-                illust_type_i=filters.illust_type_i,
-                orientation_code=filters.orientation_map[filters.layout_norm],
-                min_width_i=int(filters.min_width_i),
-                min_height_i=int(filters.min_height_i),
-                min_pixels_i=int(filters.min_pixels_i),
-                min_bookmarks_i=int(filters.min_bookmarks_i),
-                min_views_i=int(filters.min_views_i),
-                min_comments_i=int(filters.min_comments_i),
-                included=filters.included,
-                excluded=filters.excluded,
-                exclude_image_ids=exclude_set,
-                user_id=filters.user_id,
-                illust_id=filters.illust_id,
-                created_from_norm=filters.created_from_norm,
-                created_to_norm=filters.created_to_norm,
-                fail_cooldown_before=pick_ctx.fail_cooldown_before,
-            )
-            quality_params = build_engine_quality_params(
-                strategy_norm=pick_ctx.strategy_norm,
-                quality_samples_i=int(pick_ctx.quality_samples_i),
-                pick_mode_raw=pick_ctx.pick_mode_raw,
-                temperature=float(pick_ctx.temperature),
-                score_weights=pick_ctx.score_weights,
-                multipliers=pick_ctx.multipliers,
-                freshness_half_life_days=float(pick_ctx.freshness_half_life_days),
-                velocity_smooth_days=float(pick_ctx.velocity_smooth_days),
-            )
-            payload = build_engine_pick_payload(
-                filters=engine_filters,
-                strategy=pick_ctx.strategy_norm,
-                quality=quality_params,
-                seed=pick_ctx.seed_norm or None,
-                limit=limit_i,
-                debug=False,
-            )
-            timeout_s = float(getattr(settings, "random_engine_timeout_ms", 800) or 800) / 1000.0
-            images, eng_meta = await try_pick_many_via_engine(
-                client=httpx_client,
-                base_url=engine_url,
-                session=session,
-                payload=payload,
-                timeout_s=timeout_s,
-            )
-            engine_status = str((eng_meta or {}).get("engine_status") or "fallback")
-            try:
-                observe_random_engine_pick(status=engine_status if images else engine_status)
-            except Exception:
-                pass
-            if images:
-                used_engine_batch = True
-                for image in images:
-                    exclude_ids.append(int(image.id))
-                    _append_item(image, items)
+        for image in images:
+            exclude_ids.append(int(image.id))
+            _append_item(image, items)
 
         # Python loop: full path when engine off/failed, or top-up when engine returned partial.
         remaining = limit_i - len(items)

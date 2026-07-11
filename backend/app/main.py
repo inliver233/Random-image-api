@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
@@ -43,9 +44,100 @@ def create_app() -> FastAPI:
     configure_logging()
     settings = load_settings()
 
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
+        # --- startup (same semantics as previous on_event("startup")) ---
+        engine = getattr(app.state, "engine", None)
+        stats = getattr(app.state, "random_request_stats", None)
+        if engine is not None and stats is not None:
+            try:
+                totals = await load_persisted_random_totals(engine)
+                await stats.set_totals(
+                    total_requests=int(totals.get("total_requests", 0) or 0),
+                    total_ok=int(totals.get("total_ok", 0) or 0),
+                    total_error=int(totals.get("total_error", 0) or 0),
+                )
+            except Exception:
+                pass
+
+            try:
+                interval_s = float((settings.random_totals_persist_interval_seconds or 0) or 15)
+            except Exception:
+                interval_s = 15.0
+            interval_s = max(2.0, min(float(interval_s), 300.0))
+
+            async def _loop() -> None:
+                while True:
+                    await asyncio.sleep(float(interval_s))
+                    try:
+                        snap = await stats.snapshot()
+                        await persist_random_totals(
+                            engine,
+                            total_requests=int(snap.total_requests),
+                            total_ok=int(snap.total_ok),
+                            total_error=int(snap.total_error),
+                            source="api",
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        continue
+
+            app.state.random_totals_persist_task = asyncio.create_task(_loop())
+
+        try:
+            yield
+        finally:
+            # --- shutdown (same semantics as previous on_event("shutdown")) ---
+            engine = getattr(app.state, "engine", None)
+            stats = getattr(app.state, "random_request_stats", None)
+            if engine is not None and stats is not None:
+                try:
+                    snap = await asyncio.wait_for(stats.snapshot(), timeout=1.0)
+                    await asyncio.wait_for(
+                        persist_random_totals(
+                            engine,
+                            total_requests=int(snap.total_requests),
+                            total_ok=int(snap.total_ok),
+                            total_error=int(snap.total_error),
+                            source="shutdown",
+                        ),
+                        timeout=2.0,
+                    )
+                except Exception:
+                    pass
+
+            task = getattr(app.state, "random_totals_persist_task", None)
+            if task is not None:
+                try:
+                    task.cancel()
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(task, timeout=2.0)
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    pass
+
+            httpx_client = getattr(app.state, "httpx_client", None)
+            if httpx_client is not None:
+                try:
+                    await httpx_client.aclose()
+                except Exception:
+                    pass
+
+            if engine is not None:
+                await engine.dispose()
+
     # NOTE: We reserve `/docs` for a public human-readable documentation page.
     # Keep Swagger/Redoc available under `/api/*` paths for troubleshooting.
-    app = FastAPI(title="new-pixiv-api", docs_url="/api/docs", redoc_url="/api/redoc")
+    app = FastAPI(
+        title="new-pixiv-api",
+        docs_url="/api/docs",
+        redoc_url="/api/redoc",
+        lifespan=_lifespan,
+    )
 
     @app.exception_handler(ApiError)
     async def _api_error_handler(request: Request, exc: ApiError):  # type: ignore[no-redef]
@@ -90,48 +182,6 @@ def create_app() -> FastAPI:
     app.state.api_key_authenticator = ApiKeyAuthenticator(engine, api_key_cfg)
     app.state.api_key_limiter = ApiKeyRateLimiter(rpm=int(api_key_cfg.rpm), burst=int(api_key_cfg.burst))
     app.state.random_request_stats = RandomRequestStats(window_seconds=60)
-
-    @app.on_event("startup")
-    async def _startup() -> None:  # type: ignore[no-redef]
-        engine = getattr(app.state, "engine", None)
-        stats = getattr(app.state, "random_request_stats", None)
-        if engine is None or stats is None:
-            return
-
-        try:
-            totals = await load_persisted_random_totals(engine)
-            await stats.set_totals(
-                total_requests=int(totals.get("total_requests", 0) or 0),
-                total_ok=int(totals.get("total_ok", 0) or 0),
-                total_error=int(totals.get("total_error", 0) or 0),
-            )
-        except Exception:
-            pass
-
-        try:
-            interval_s = float((settings.random_totals_persist_interval_seconds or 0) or 15)
-        except Exception:
-            interval_s = 15.0
-        interval_s = max(2.0, min(float(interval_s), 300.0))
-
-        async def _loop() -> None:
-            while True:
-                await asyncio.sleep(float(interval_s))
-                try:
-                    snap = await stats.snapshot()
-                    await persist_random_totals(
-                        engine,
-                        total_requests=int(snap.total_requests),
-                        total_ok=int(snap.total_ok),
-                        total_error=int(snap.total_error),
-                        source="api",
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    continue
-
-        app.state.random_totals_persist_task = asyncio.create_task(_loop())
 
     @app.middleware("http")
     async def _public_api_key_middleware(request: Request, call_next):  # type: ignore[no-redef]
@@ -280,49 +330,6 @@ def create_app() -> FastAPI:
                     pass
 
     app.state.settings = settings
-
-    @app.on_event("shutdown")
-    async def _shutdown() -> None:  # type: ignore[no-redef]
-        engine = getattr(app.state, "engine", None)
-        stats = getattr(app.state, "random_request_stats", None)
-        if engine is not None and stats is not None:
-            try:
-                snap = await asyncio.wait_for(stats.snapshot(), timeout=1.0)
-                await asyncio.wait_for(
-                    persist_random_totals(
-                        engine,
-                        total_requests=int(snap.total_requests),
-                        total_ok=int(snap.total_ok),
-                        total_error=int(snap.total_error),
-                        source="shutdown",
-                    ),
-                    timeout=2.0,
-                )
-            except Exception:
-                pass
-
-        task = getattr(app.state, "random_totals_persist_task", None)
-        if task is not None:
-            try:
-                task.cancel()
-            except Exception:
-                pass
-            try:
-                await asyncio.wait_for(task, timeout=2.0)
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                pass
-
-        httpx_client = getattr(app.state, "httpx_client", None)
-        if httpx_client is not None:
-            try:
-                await httpx_client.aclose()
-            except Exception:
-                pass
-
-        if engine is not None:
-            await engine.dispose()
 
     @app.get("/favicon.ico", include_in_schema=False)
     async def _favicon() -> Response:  # type: ignore[no-redef]

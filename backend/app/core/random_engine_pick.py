@@ -118,6 +118,83 @@ def build_engine_pick_payload(
     return body
 
 
+def compose_engine_pick_payload(
+    *,
+    r18: int,
+    r18_strict: int,
+    ai_type_raw: str,
+    ai_type_i: int | None,
+    illust_type_i: int | None,
+    orientation_code: int | None,
+    min_width_i: int,
+    min_height_i: int,
+    min_pixels_i: int,
+    min_bookmarks_i: int,
+    min_views_i: int,
+    min_comments_i: int,
+    included: list[str],
+    excluded: list[str],
+    exclude_image_ids: list[int] | set[int] | None,
+    user_id: int | None,
+    illust_id: int | None,
+    created_from_norm: str | None,
+    created_to_norm: str | None,
+    fail_cooldown_before: str | None,
+    strategy_norm: str,
+    quality_samples_i: int,
+    pick_mode_raw: str,
+    temperature: float,
+    score_weights: Mapping[str, Any],
+    multipliers: Mapping[str, Any],
+    freshness_half_life_days: float,
+    velocity_smooth_days: float,
+    seed: str | None,
+    limit: int = 1,
+    debug: bool = False,
+) -> dict[str, Any]:
+    """Compose full /v1/pick body (filters + quality + seed) for single or batch picks."""
+    engine_filters = build_engine_filters(
+        r18=int(r18),
+        r18_strict=int(r18_strict),
+        ai_type_raw=ai_type_raw,
+        ai_type_i=ai_type_i,
+        illust_type_i=illust_type_i,
+        orientation_code=orientation_code,
+        min_width_i=int(min_width_i),
+        min_height_i=int(min_height_i),
+        min_pixels_i=int(min_pixels_i),
+        min_bookmarks_i=int(min_bookmarks_i),
+        min_views_i=int(min_views_i),
+        min_comments_i=int(min_comments_i),
+        included=included,
+        excluded=excluded,
+        exclude_image_ids=exclude_image_ids,
+        user_id=user_id,
+        illust_id=illust_id,
+        created_from_norm=created_from_norm,
+        created_to_norm=created_to_norm,
+        fail_cooldown_before=fail_cooldown_before,
+    )
+    quality_params = build_engine_quality_params(
+        strategy_norm=strategy_norm,
+        quality_samples_i=int(quality_samples_i),
+        pick_mode_raw=pick_mode_raw,
+        temperature=float(temperature),
+        score_weights=score_weights,
+        multipliers=multipliers,
+        freshness_half_life_days=float(freshness_half_life_days),
+        velocity_smooth_days=float(velocity_smooth_days),
+    )
+    return build_engine_pick_payload(
+        filters=engine_filters,
+        strategy=strategy_norm,
+        quality=quality_params,
+        seed=seed or None,
+        limit=int(limit),
+        debug=bool(debug),
+    )
+
+
 async def try_pick_via_engine(
     *,
     client: Any,
@@ -269,7 +346,7 @@ async def pick_with_strategy(
         if bool(anti_repeat_enabled) and recent_exclude_image_ids:
             exclude_set.update(int(x) for x in recent_exclude_image_ids)
 
-        engine_filters = build_engine_filters(
+        payload = compose_engine_pick_payload(
             r18=int(r18),
             r18_strict=int(r18_strict),
             ai_type_raw=ai_type_raw,
@@ -290,8 +367,6 @@ async def pick_with_strategy(
             created_from_norm=created_from_norm,
             created_to_norm=created_to_norm,
             fail_cooldown_before=fail_cooldown_before,
-        )
-        quality_params = build_engine_quality_params(
             strategy_norm=strategy_norm,
             quality_samples_i=int(quality_samples_i),
             pick_mode_raw=pick_mode_raw,
@@ -300,11 +375,6 @@ async def pick_with_strategy(
             multipliers=multipliers,
             freshness_half_life_days=float(freshness_half_life_days),
             velocity_smooth_days=float(velocity_smooth_days),
-        )
-        payload = build_engine_pick_payload(
-            filters=engine_filters,
-            strategy=strategy_norm,
-            quality=quality_params,
             seed=seed_norm or None,
             limit=1,
             debug=False,
