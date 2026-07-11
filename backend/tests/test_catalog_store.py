@@ -392,6 +392,91 @@ def test_sqlite_catalog_store_bulk_upsert_import(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_sqlite_catalog_store_import_map_and_status(tmp_path: Path) -> None:
+    engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_import_map.db").as_posix())
+
+    async def _run() -> None:
+        import sqlalchemy as sa
+
+        from app.db.models.images import Image
+        from app.db.models.imports import Import
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        store = build_catalog_store(database_url=str(engine.url))
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            imp = Import(created_by="admin", source="manual")
+            session.add(imp)
+            await session.commit()
+            await session.refresh(imp)
+            import_id = int(imp.id)
+
+            a = Image(
+                illust_id=30,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/30.jpg",
+                proxy_path="/i/1.jpg",
+                random_key=0.1,
+                status=1,
+                created_import_id=import_id,
+            )
+            b = Image(
+                illust_id=30,
+                page_index=1,
+                ext="png",
+                original_url="https://example.test/30_p1.png",
+                proxy_path="/i/2.png",
+                random_key=0.2,
+                status=1,
+                created_import_id=import_id,
+            )
+            other = Image(
+                illust_id=31,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/31.jpg",
+                proxy_path="/i/3.jpg",
+                random_key=0.3,
+                status=1,
+                created_import_id=None,
+            )
+            session.add_all([a, b, other])
+            await session.commit()
+            await session.refresh(a)
+            await session.refresh(b)
+            await session.refresh(other)
+
+            mapping = await store.map_image_ids_by_illust_page(
+                session,
+                keys=[(30, 0), (30, 1), (999, 0)],
+            )
+            assert mapping == {(30, 0): int(a.id), (30, 1): int(b.id)}
+
+            any_row = await store.get_image_by_id_any_status(session, image_id=int(a.id))
+            assert any_row is not None
+            assert int(any_row.illust_id) == 30
+            assert await store.get_image_by_id_any_status(session, image_id=999999) is None
+
+            updated = await store.set_status_for_import(session, import_id=import_id, status=2)
+            await session.commit()
+            assert updated == 2
+            statuses = dict(
+                (
+                    await session.execute(
+                        sa.select(Image.id, Image.status).where(Image.id.in_([int(a.id), int(b.id), int(other.id)]))
+                    )
+                ).all()
+            )
+            assert int(statuses[int(a.id)]) == 2
+            assert int(statuses[int(b.id)]) == 2
+            assert int(statuses[int(other.id)]) == 1
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_sqlite_catalog_store_engine_loads(tmp_path: Path) -> None:
     engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_engine.db").as_posix())
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
@@ -44,6 +44,13 @@ async def get_image_by_id(session: AsyncSession, *, image_id: int) -> Image | No
         .limit(1)
     )
     return (await session.execute(stmt)).scalars().first()
+
+
+async def get_image_by_id_any_status(session: AsyncSession, *, image_id: int) -> Image | None:
+    """Load one image by primary key regardless of status (admin/manual hydrate resolve)."""
+    if int(image_id) <= 0:
+        return None
+    return (await session.execute(select(Image).where(Image.id == int(image_id)).limit(1))).scalars().first()
 
 
 async def get_images_by_ids(session: AsyncSession, *, image_ids: list[int]) -> list[Image]:
@@ -124,4 +131,29 @@ async def list_enabled_images(session: AsyncSession, *, limit: int | None = None
     if limit is not None and int(limit) > 0:
         stmt = stmt.limit(int(limit))
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def map_image_ids_by_illust_page(
+    session: AsyncSession,
+    *,
+    keys: list[tuple[int, int]],
+) -> dict[tuple[int, int], int]:
+    """Map (illust_id, page_index) → image id for tag linking after import upsert."""
+    if not keys:
+        return {}
+    # SQLite variable limit: chunk large key lists (2 binds per key).
+    out: dict[tuple[int, int], int] = {}
+    chunk_size = 450
+    for offset in range(0, len(keys), chunk_size):
+        chunk = keys[offset : offset + chunk_size]
+        rows = (
+            await session.execute(
+                select(Image.id, Image.illust_id, Image.page_index).where(
+                    tuple_(Image.illust_id, Image.page_index).in_(chunk)
+                )
+            )
+        ).all()
+        for img_id, illust_id, page_index in rows:
+            out[(int(illust_id), int(page_index))] = int(img_id)
+    return out
 

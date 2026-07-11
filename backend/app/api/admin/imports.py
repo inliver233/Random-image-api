@@ -22,7 +22,7 @@ from app.core.request_id import get_or_create_request_id
 from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
 from app.core.pixiv_urls import parse_pixiv_original_url
-from app.db.models.images import Image
+from app.core.random_delivery import resolve_catalog_store
 from app.db.models.imports import Import
 from app.db.models.jobs import JobRow
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
@@ -406,6 +406,7 @@ async def rollback_import(
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async def _op() -> int:
         async with Session() as session:
@@ -413,12 +414,12 @@ async def rollback_import(
             if imp is None:
                 raise ApiError(code=ErrorCode.NOT_FOUND, message="Import not found", status_code=404)
 
-            result = await session.execute(
-                sa.update(Image)
-                .where(Image.created_import_id == import_id)
-                .values(status=target_status, updated_at=now_expr)
+            updated = await catalog.set_status_for_import(
+                session,
+                import_id=import_id,
+                status=int(target_status),
+                now_expr=now_expr,
             )
-            updated = int(result.rowcount or 0)
             await session.commit()
             return int(updated)
 

@@ -32,7 +32,6 @@ from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
 from app.db.catalog import CatalogStore, build_catalog_store
 from app.db.models.image_tags import ImageTag
-from app.db.models.images import Image
 from app.db.models.hydration_runs import HydrationRun
 from app.db.models.pixiv_tokens import PixivToken
 from app.db.models.proxy_endpoints import ProxyEndpoint

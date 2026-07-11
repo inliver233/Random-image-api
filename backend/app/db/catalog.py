@@ -9,14 +9,21 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.db.images_delete import clear_all_images, delete_images_by_ids
 from app.db.images_get import (
     get_image_by_id,
+    get_image_by_id_any_status,
     get_images_by_ids,
     get_images_by_ids_any_status,
     get_images_by_illust_id,
     list_enabled_images,
+    map_image_ids_by_illust_page,
 )
 from app.db.images_get_by_illust import get_image_by_illust_page
 from app.db.images_list import list_images as list_images_helper
-from app.db.images_mark import heal_broken_images_for_illust, mark_image_failure, mark_image_ok
+from app.db.images_mark import (
+    heal_broken_images_for_illust,
+    mark_image_failure,
+    mark_image_ok,
+    set_status_for_import,
+)
 from app.db.images_upsert import (
     bulk_upsert_import_rows,
     upsert_hydrated_image_page,
@@ -85,6 +92,8 @@ class CatalogStore(Protocol):
 
     async def get_image_by_id(self, session: AsyncSession, *, image_id: int) -> Image | None: ...
 
+    async def get_image_by_id_any_status(self, session: AsyncSession, *, image_id: int) -> Image | None: ...
+
     async def get_images_by_ids(self, session: AsyncSession, *, image_ids: list[int]) -> list[Image]: ...
 
     async def get_images_by_ids_any_status(
@@ -107,6 +116,13 @@ class CatalogStore(Protocol):
         *,
         limit: int | None = None,
     ) -> list[Image]: ...
+
+    async def map_image_ids_by_illust_page(
+        self,
+        session: AsyncSession,
+        *,
+        keys: list[tuple[int, int]],
+    ) -> dict[tuple[int, int], int]: ...
 
     async def get_image_by_illust_page(
         self,
@@ -156,6 +172,15 @@ class CatalogStore(Protocol):
         illust_id: int,
         now: str,
     ) -> list[int]: ...
+
+    async def set_status_for_import(
+        self,
+        session: AsyncSession,
+        *,
+        import_id: int,
+        status: int,
+        now_expr: object | None = None,
+    ) -> int: ...
 
     async def delete_images_by_ids(
         self,
@@ -262,6 +287,9 @@ class SqliteCatalogStore:
     async def get_image_by_id(self, session: AsyncSession, *, image_id: int) -> Image | None:
         return await get_image_by_id(session, image_id=image_id)
 
+    async def get_image_by_id_any_status(self, session: AsyncSession, *, image_id: int) -> Image | None:
+        return await get_image_by_id_any_status(session, image_id=image_id)
+
     async def get_images_by_ids(self, session: AsyncSession, *, image_ids: list[int]) -> list[Image]:
         return await get_images_by_ids(session, image_ids=image_ids)
 
@@ -288,6 +316,14 @@ class SqliteCatalogStore:
         limit: int | None = None,
     ) -> list[Image]:
         return await list_enabled_images(session, limit=limit)
+
+    async def map_image_ids_by_illust_page(
+        self,
+        session: AsyncSession,
+        *,
+        keys: list[tuple[int, int]],
+    ) -> dict[tuple[int, int], int]:
+        return await map_image_ids_by_illust_page(session, keys=keys)
 
     async def get_image_by_illust_page(
         self,
@@ -365,6 +401,21 @@ class SqliteCatalogStore:
         now: str,
     ) -> list[int]:
         return await heal_broken_images_for_illust(session, illust_id=illust_id, now=now)
+
+    async def set_status_for_import(
+        self,
+        session: AsyncSession,
+        *,
+        import_id: int,
+        status: int,
+        now_expr: object | None = None,
+    ) -> int:
+        return await set_status_for_import(
+            session,
+            import_id=import_id,
+            status=status,
+            now_expr=now_expr,
+        )
 
     async def delete_images_by_ids(
         self,

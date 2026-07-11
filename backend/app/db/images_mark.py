@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from sqlalchemy import update
-from sqlalchemy.ext.asyncio import AsyncEngine
+import sqlalchemy as sa
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.coerce import truncate_text
 from app.core.redact import redact_text
@@ -57,7 +58,7 @@ async def mark_image_ok(engine: AsyncEngine, *, image_id: int, now: str) -> None
 
 
 async def heal_broken_images_for_illust(
-    session,
+    session: AsyncSession,
     *,
     illust_id: int,
     now: str,
@@ -66,8 +67,6 @@ async def heal_broken_images_for_illust(
 
     Caller owns commit. Returns healed image ids (for engine re-index / R2 prewarm).
     """
-    from sqlalchemy import select
-
     rows = (
         await session.execute(
             select(Image.id).where(Image.illust_id == int(illust_id)).where(Image.status == 3)
@@ -87,4 +86,30 @@ async def heal_broken_images_for_illust(
             )
         )
     return healed_ids
+
+
+async def set_status_for_import(
+    session: AsyncSession,
+    *,
+    import_id: int,
+    status: int,
+    now_expr: object | None = None,
+) -> int:
+    """Bulk-set status for all images created by an import (admin rollback).
+
+    Caller owns commit. Returns rowcount when available (0 if unknown).
+    """
+    values: dict[str, object] = {"status": int(status)}
+    if now_expr is not None:
+        values["updated_at"] = now_expr
+    else:
+        values["updated_at"] = sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
+    result = await session.execute(
+        update(Image).where(Image.created_import_id == int(import_id)).values(**values)
+    )
+    try:
+        rc = int(getattr(result, "rowcount", 0) or 0)
+    except Exception:
+        return 0
+    return rc if rc > 0 else 0
 

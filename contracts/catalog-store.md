@@ -17,13 +17,16 @@ Implementation:
 | `upsert_hydrated_image_page` | Hydrate metadata write + `proxy_path` from returned id (tags stay in handler) |
 | `bulk_upsert_import_rows` | Bulk import chunk: CASE-merge nullable metadata + fill empty `proxy_path`; returns ids (tags / Import counters stay in handler) |
 | `get_image_by_id` / `get_images_by_ids` | Public delivery + engine hydrate DTO (status=1) |
+| `get_image_by_id_any_status` | Admin/manual resolve by PK (any status) |
 | `get_images_by_ids_any_status` | Engine event publish by id (any status; full row) |
 | `get_images_by_illust_id` | Engine event publish by illust (any status; page_index order) |
 | `list_enabled_images` | Engine full snapshot rows (status=1, id order; optional limit) |
+| `map_image_ids_by_illust_page` | Import tag link map: `(illust_id, page_index) → image_id` |
 | `get_image_by_illust_page` | Legacy public routes by (illust_id, page_index), status=1 only |
 | `list_images` | Public cursor list with filters (status=1); returns `(rows, next_cursor)` |
 | `mark_image_ok` / `mark_image_failure` | Delivery quality feedback |
 | `heal_broken_images_for_illust` | After heal hydrate: status `3` → `1` for all pages of an illust; returns healed ids |
+| `set_status_for_import` | Admin import rollback: bulk set status by `created_import_id` |
 | `delete_images_by_ids` | Admin hard-delete image rows by id; returns ids that existed (caller owns tags / commit / engine publish) |
 | `clear_all_images` | Admin wipe of all image rows; returns rowcount (caller owns tags / commit / empty engine snapshot) |
 
@@ -36,8 +39,10 @@ Public delivery/get paths adopt the port progressively:
 - Go engine hydrate after pick → `catalog.get_image_by_id` / `get_images_by_ids`
 - Engine event/snapshot load → `catalog.get_images_by_ids_any_status` / `get_images_by_illust_id` / `list_enabled_images` (tags still joined in `random_engine_sync`)
 - `hydrate_metadata` page upsert → `catalog.upsert_hydrated_image_page`
-- `import_images` chunk image upsert → `catalog.bulk_upsert_import_rows` (tags + Import progress counters remain in handler)
+- `import_images` chunk image upsert → `catalog.bulk_upsert_import_rows` + `map_image_ids_by_illust_page` for tag links (Tag/ImageTag + Import counters remain in handler)
 - `heal_url` status recovery → `catalog.heal_broken_images_for_illust`
+- Admin import rollback → `catalog.set_status_for_import`
+- Admin manual hydrate `image_id` → illust resolve → `catalog.get_image_by_id_any_status`
 - Admin `DELETE /admin/api/images/{id}` + `POST /admin/api/images/bulk-delete` → `catalog.delete_images_by_ids` (image_tags remain in handler)
 - Admin `POST /admin/api/images/clear` → `catalog.clear_all_images` (image_tags / Tag wipe remain in handler)
 - Worker `build_default_dispatcher` builds one `CatalogStore` and injects into import/hydrate/heal

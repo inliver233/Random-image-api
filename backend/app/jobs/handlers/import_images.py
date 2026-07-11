@@ -21,7 +21,6 @@ from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
 from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.db.catalog import CatalogStore, build_catalog_store
 from app.db.models.image_tags import ImageTag
-from app.db.models.images import Image
 from app.db.models.imports import Import
 from app.db.models.jobs import JobRow
 from app.db.models.tags import Tag
@@ -211,17 +210,7 @@ def build_import_images_handler(engine: AsyncEngine, *, catalog: CatalogStore | 
                             )
                             tag_id_by_name = {str(name): int(tag_id) for (tag_id, name) in tag_rows}
 
-                            img_rows = (
-                                (
-                                    await session.execute(
-                                        sa.select(Image.id, Image.illust_id, Image.page_index).where(
-                                            sa.tuple_(Image.illust_id, Image.page_index).in_(keys)
-                                        )
-                                    )
-                                )
-                                .all()
-                            )
-                            image_id_by_key = {(int(illust_id), int(page_index)): int(img_id) for (img_id, illust_id, page_index) in img_rows}
+                            image_id_by_key = await catalog_store.map_image_ids_by_illust_page(session, keys=list(keys))
 
                             image_tag_rows: list[dict[str, Any]] = []
                             for key, lst in tags_by_key.items():

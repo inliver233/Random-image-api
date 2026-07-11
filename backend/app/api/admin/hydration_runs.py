@@ -21,7 +21,7 @@ from app.core.request_id import get_or_create_request_id
 from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
 from app.db.models.hydration_runs import HydrationRun
-from app.db.models.images import Image
+from app.core.random_delivery import resolve_catalog_store
 from app.db.models.jobs import JobRow
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 
@@ -214,13 +214,14 @@ async def create_manual_hydration_job(
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
             illust_id = body.get("illust_id")
             image_id = body.get("image_id")
             if illust_id is None and image_id is not None:
-                image = await session.get(Image, int(image_id))
+                image = await catalog.get_image_by_id_any_status(session, image_id=int(image_id))
                 if image is None:
                     raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
                 illust_id = int(image.illust_id)
