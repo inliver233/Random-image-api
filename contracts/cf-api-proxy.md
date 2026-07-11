@@ -68,3 +68,5 @@ python scripts/edge/probe-api-proxy.py --bases https://a,https://b --secret … 
 ```
 
 Flip `CF_API_PROXY_ENABLED=true` only after all bases report `service_ok` and secret matches Worker `PROXY_SECRET`.
+
+Offline pure helpers: `edge/api-worker/src/pure.js` + `test/proxy_vectors.json` (`npm test` in `edge/api-worker`).

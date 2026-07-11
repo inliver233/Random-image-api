@@ -22,13 +22,22 @@
  * - R2 is optional Mode B2; binding absent = direct+Cache only.
  */
 
-const ALLOWED_PREFIXES = ["/img-original/", "/img-master/", "/img-/", "/c/"];
-const ALLOWED_EXT = new Set(["jpg", "jpeg", "png", "gif", "webp"]);
+import {
+  authorizePrewarmSecrets,
+  filterPrewarmPaths,
+  parseSignedPath,
+  resolveFallbackHosts,
+  resolveR2Mode,
+  resolveVerifySecrets,
+  r2ObjectKey,
+  timingSafeEqual,
+  validPath,
+} from "./pure.js";
+
 const DEFAULT_ORIGIN = "i.pximg.net";
 const REFERER = "https://www.pixiv.net/";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-const BUILTIN_MIRRORS = new Set(["i.pixiv.cat", "i.pixiv.re", "i.pixiv.nl"]);
 
 // Soft circuit breaker for origin 403 storms (isolate per isolate; best-effort).
 // When open, skip origin and go straight to emergency mirrors if configured.
@@ -59,13 +68,6 @@ function b64urlDecodeToUtf8(s) {
   return new TextDecoder().decode(b64urlDecodeToBytes(s));
 }
 
-function timingSafeEqual(a, b) {
-  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
 async function hmacSign(secret, msg) {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -76,16 +78,6 @@ async function hmacSign(secret, msg) {
   );
   const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg));
   return b64urlEncodeBytes(sig);
-}
-
-/** Primary secret first, then IMAGE_EDGE_SECRET_PREVIOUS for rotation window. */
-function resolveVerifySecrets(env) {
-  const primary = String(env.IMAGE_EDGE_SECRET || "").trim();
-  const previous = String(env.IMAGE_EDGE_SECRET_PREVIOUS || "").trim();
-  const out = [];
-  if (primary) out.push(primary);
-  if (previous && previous !== primary) out.push(previous);
-  return out;
 }
 
 async function verifySignature(secrets, exp, path, sig) {
@@ -134,25 +126,6 @@ function noteOriginSample(status, env, nowMs = Date.now()) {
   }
 }
 
-function parseSignedPath(pathname) {
-  // /u/{exp}/{sig}/{b64path}
-  const m = String(pathname || "").match(/^\/u\/(\d+)\/([A-Za-z0-9_-]+)\/([A-Za-z0-9_-]+)$/);
-  if (!m) return null;
-  return { exp: Number(m[1]), sig: m[2], b64path: m[3] };
-}
-
-function validPath(path) {
-  if (typeof path !== "string" || !path.startsWith("/") || path.includes("..") || path.includes("\\")) {
-    return false;
-  }
-  if (path.includes("://") || path.includes("@") || path.includes("?")) return false;
-  // Contract allowlist only — do not accept arbitrary /img-* beyond documented prefixes.
-  const okPrefix = ALLOWED_PREFIXES.some((p) => path.startsWith(p));
-  if (!okPrefix) return false;
-  const ext = path.split(".").pop()?.toLowerCase() || "";
-  return ALLOWED_EXT.has(ext);
-}
-
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
@@ -171,52 +144,6 @@ function jsonError(status, message, extraHeaders = {}) {
       ...extraHeaders,
     },
   });
-}
-
-function isAllowedMirrorHost(host) {
-  const h = String(host || "").trim().toLowerCase();
-  if (!h) return false;
-  if (BUILTIN_MIRRORS.has(h)) return true;
-  // Allow same-org worker emergency origins only (not open proxy).
-  if (h.endsWith(".workers.dev")) return true;
-  return false;
-}
-
-/** Ordered unique hosts from FALLBACK_MIRROR_HOSTS (csv) + legacy FALLBACK_MIRROR_HOST. */
-function resolveFallbackHosts(env) {
-  const out = [];
-  const seen = new Set();
-  const push = (raw) => {
-    const host = String(raw || "").trim().toLowerCase();
-    if (!host || seen.has(host) || !isAllowedMirrorHost(host)) return;
-    seen.add(host);
-    out.push(host);
-  };
-  for (const part of String(env.FALLBACK_MIRROR_HOSTS || "").split(",")) push(part);
-  push(env.FALLBACK_MIRROR_HOST);
-  return out;
-}
-
-/**
- * R2 modes (only when env.R2 binding is present):
- *   off          — ignore R2
- *   read_through — Cache miss → R2 → origin; origin 200 → async R2 put (default)
- *   r2_only      — Cache miss → R2 only; never hit pximg (SLA mode when prewarmed)
- */
-function resolveR2Mode(env) {
-  if (!env || !env.R2) return "off";
-  const raw = String(env.R2_MODE || "read_through")
-    .trim()
-    .toLowerCase()
-    .replace(/-/g, "_");
-  if (raw === "off" || raw === "0" || raw === "false" || raw === "disabled") return "off";
-  if (raw === "r2_only" || raw === "r2only" || raw === "only") return "r2_only";
-  return "read_through";
-}
-
-/** Stable object key: pximg + path (same shape as Cache API key path). */
-function r2ObjectKey(path) {
-  return `pximg${path}`;
 }
 
 function originFetchInit(env) {
@@ -358,9 +285,8 @@ function scheduleR2Put(env, ctx, path, body, contentType) {
 
 function authorizePrewarm(request, env) {
   const expected = String(env.PREWARM_SECRET || env.IMAGE_EDGE_SECRET || "").trim();
-  if (!expected) return false;
   const got = String(request.headers.get("X-Prewarm-Secret") || "").trim();
-  return timingSafeEqual(got, expected);
+  return authorizePrewarmSecrets(expected, got);
 }
 
 /**
@@ -390,16 +316,7 @@ async function handlePrewarm(request, env, ctx) {
   } catch {
     return jsonError(400, "Invalid JSON");
   }
-  const rawPaths = Array.isArray(body?.paths) ? body.paths : [];
-  const paths = [];
-  const seen = new Set();
-  for (const p of rawPaths) {
-    const path = String(p || "");
-    if (!validPath(path) || seen.has(path)) continue;
-    seen.add(path);
-    paths.push(path);
-    if (paths.length >= 50) break;
-  }
+  const paths = filterPrewarmPaths(Array.isArray(body?.paths) ? body.paths : [], 50);
   if (!paths.length) {
     return jsonError(400, "No valid paths");
   }

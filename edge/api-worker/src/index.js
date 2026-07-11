@@ -18,53 +18,13 @@
  *     backend sticky-picks via CF_API_PROXY_BASE_URLS
  */
 
-const DEFAULT_ALLOWED = [
-  "oauth.secure.pixiv.net",
-  "app-api.pixiv.net",
-  "public-api.secure.pixiv.net",
-];
-
-const STRIP_REQ_HEADERS = new Set([
-  "cf-connecting-ip",
-  "cf-ipcountry",
-  "cf-ray",
-  "cf-visitor",
-  "cf-ew-via",
-  "cf-worker",
-  "x-forwarded-for",
-  "x-forwarded-proto",
-  "x-forwarded-host",
-  "x-real-ip",
-  "true-client-ip",
-  "x-proxy-secret", // never forward our gate secret upstream
-  "host",
-  "connection",
-  "content-length", // fetch recalculates
-  "transfer-encoding",
-]);
-
-function parseAllowedHosts(env) {
-  const raw = String(env.ALLOWED_HOSTS || "").trim();
-  const out = [];
-  const seen = new Set();
-  const push = (h) => {
-    const host = String(h || "")
-      .trim()
-      .toLowerCase()
-      .replace(/^\.+|\.+$/g, "");
-    if (!host || host.includes("/") || host.includes(":") || host.includes("@")) return;
-    if (seen.has(host)) return;
-    seen.add(host);
-    out.push(host);
-  };
-  if (raw) {
-    for (const part of raw.split(/[,;\s]+/)) push(part);
-  }
-  if (!out.length) {
-    for (const h of DEFAULT_ALLOWED) push(h);
-  }
-  return out;
-}
+import {
+  authorizeSecret,
+  hostAllowed,
+  parseAllowedHosts,
+  parseProxyPath,
+  STRIP_REQ_HEADERS,
+} from "./pure.js";
 
 function corsHeaders() {
   return {
@@ -86,36 +46,10 @@ function jsonError(status, message, extra = {}) {
   });
 }
 
-function timingSafeEqual(a, b) {
-  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
 function authorize(request, env) {
   const expected = String(env.PROXY_SECRET || "").trim();
-  if (!expected) return true; // open within allowlist only (ops may rely on obscure worker URL)
   const got = String(request.headers.get("X-Proxy-Secret") || "").trim();
-  return timingSafeEqual(got, expected);
-}
-
-/**
- * Parse /p/{host}/{path...}
- * Returns { host, pathWithQuery } or null.
- */
-function parseProxyPath(url) {
-  const pathname = url.pathname || "";
-  // /p/host  or /p/host/rest
-  const m = pathname.match(/^\/p\/([^/]+)(\/.*)?$/);
-  if (!m) return null;
-  const host = String(m[1] || "")
-    .trim()
-    .toLowerCase();
-  if (!host) return null;
-  const rest = m[2] || "/";
-  const pathWithQuery = rest + (url.search || "");
-  return { host, pathWithQuery };
+  return authorizeSecret(expected, got);
 }
 
 function buildUpstreamHeaders(request, host) {
@@ -163,7 +97,7 @@ export default {
     if (!parsed) {
       return jsonError(400, "Bad path; use /p/{host}/{path}");
     }
-    if (!allowed.includes(parsed.host)) {
+    if (!hostAllowed(parsed.host, allowed)) {
       return jsonError(403, "Host not allowed", { host: parsed.host });
     }
 

@@ -63,8 +63,9 @@ url = f"{base}/u/{exp}/{sig}/{base64url_nopad(path.encode())}"
 
 `exp = now + IMAGE_EDGE_SIGN_TTL_SECONDS` (default 604800).
 
-Frozen cross-language vectors: `edge/img-worker/test/sign_vectors.json`  
-(Python: `backend/tests/test_image_edge.py::test_sign_image_edge_matches_frozen_worker_vectors`).
+Frozen cross-language vectors:
+- HMAC: `edge/img-worker/test/sign_vectors.json` (Python: `test_sign_image_edge_matches_frozen_worker_vectors`)
+- Path allow/deny: `edge/img-worker/test/path_vectors.json` (Python: `test_is_edge_allowed_path_matches_frozen_path_vectors`; Worker: `npm test` in `edge/img-worker`)
 
 ## Allowed paths (Worker)
 

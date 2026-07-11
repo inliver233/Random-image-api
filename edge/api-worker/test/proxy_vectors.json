@@ -1,0 +1,42 @@
+{
+  "description": "Frozen URL/host shapes for CF API proxy Worker",
+  "default_hosts": [
+    "oauth.secure.pixiv.net",
+    "app-api.pixiv.net",
+    "public-api.secure.pixiv.net"
+  ],
+  "parse_ok": [
+    {
+      "pathname": "/p/app-api.pixiv.net/v1/illust/detail",
+      "search": "?illust_id=1",
+      "host": "app-api.pixiv.net",
+      "pathWithQuery": "/v1/illust/detail?illust_id=1"
+    },
+    {
+      "pathname": "/p/oauth.secure.pixiv.net/auth/token",
+      "search": "",
+      "host": "oauth.secure.pixiv.net",
+      "pathWithQuery": "/auth/token"
+    },
+    {
+      "pathname": "/p/app-api.pixiv.net",
+      "search": "",
+      "host": "app-api.pixiv.net",
+      "pathWithQuery": "/"
+    }
+  ],
+  "parse_reject": [
+    "/healthz",
+    "/",
+    "/p/",
+    "/proxy/app-api.pixiv.net/x",
+    "/u/1/sig/path"
+  ],
+  "host_reject_in_allowlist_parse": [
+    "evil.com",
+    "app-api.pixiv.net.evil.com",
+    "host/with/slash",
+    "host:443",
+    "user@host"
+  ]
+}

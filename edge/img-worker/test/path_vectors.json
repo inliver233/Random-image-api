@@ -1,0 +1,25 @@
+{
+  "description": "Frozen path allow/deny for image edge (Worker validPath + Python path gates)",
+  "accept": [
+    "/img-original/img/2020/01/01/00/00/00/12345_p0.jpg",
+    "/img-master/img/2020/01/01/00/00/00/12345_p0_master1200.jpg",
+    "/c/600x1200_90_webp/img-master/img/2020/01/01/00/00/00/99_p0_master1200.jpg",
+    "/img-original/img/2021/06/15/12/30/00/999_p0.webp",
+    "/img-original/img/x/1_p0.png",
+    "/img-original/img/x/1_p0.gif",
+    "/img-/legacy/path_p0.jpeg"
+  ],
+  "reject": [
+    { "path": "../etc/passwd.jpg", "reason": "relative_escape" },
+    { "path": "/img-original/../secret.jpg", "reason": "dotdot" },
+    { "path": "/img-original/x\\y.jpg", "reason": "backslash" },
+    { "path": "img-original/no-leading-slash.jpg", "reason": "no_slash" },
+    { "path": "/img-original/x.jpg?q=1", "reason": "query" },
+    { "path": "/img-original/x@evil.jpg", "reason": "at" },
+    { "path": "https://evil.example/x.jpg", "reason": "scheme" },
+    { "path": "/open/proxy/x.jpg", "reason": "bad_prefix" },
+    { "path": "/img-original/x.exe", "reason": "bad_ext" },
+    { "path": "/img-original/x", "reason": "no_ext" },
+    { "path": "", "reason": "empty" }
+  ]
+}

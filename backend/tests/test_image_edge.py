@@ -56,6 +56,20 @@ def test_sign_image_edge_path_matches_worker_contract() -> None:
     assert url == f"https://img.example.com/u/{exp}/{expect_sig}/{expect_b64path}"
 
 
+def test_is_edge_allowed_path_matches_frozen_path_vectors() -> None:
+    """Parity with edge/img-worker/test/path_vectors.json (Worker validPath)."""
+    import json
+
+    from app.core.image_edge import is_edge_allowed_path
+
+    vectors_path = Path(__file__).resolve().parents[2] / "edge" / "img-worker" / "test" / "path_vectors.json"
+    payload = json.loads(vectors_path.read_text(encoding="utf-8"))
+    for path in payload["accept"]:
+        assert is_edge_allowed_path(path) is True, path
+    for row in payload["reject"]:
+        assert is_edge_allowed_path(str(row["path"])) is False, row
+
+
 def test_sign_image_edge_matches_frozen_worker_vectors() -> None:
     """Parity with edge/img-worker/test/sign_vectors.json (cross-language contract)."""
     import json
