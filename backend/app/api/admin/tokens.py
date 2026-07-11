@@ -210,7 +210,7 @@ async def create_token(
         await session.commit()
         await session.refresh(row)
 
-    return {"ok": True, "token_id": str(row.id), "request_id": rid}
+    return admin_ok(request, payload={"token_id": str(row.id)}, request_id=rid)
 
 
 @router.put("/tokens/{token_id}")
@@ -247,7 +247,7 @@ async def update_token(
 
         await session.commit()
 
-    return {"ok": True, "token_id": str(token_id), "request_id": rid}
+    return admin_ok(request, payload={"token_id": str(token_id)}, request_id=rid)
 
 
 @router.delete("/tokens/{token_id}")
@@ -275,7 +275,7 @@ async def delete_token(
             await session.delete(row)
             await session.commit()
 
-        return {"ok": True, "token_id": str(token_id), "request_id": rid}
+        return admin_ok(request, payload={"token_id": str(token_id)}, request_id=rid)
 
     return await with_sqlite_busy_retry(_op)
 
@@ -408,13 +408,9 @@ async def test_refresh_token(
     if picked_proxy is not None:
         proxy_details = {"endpoint_id": str(picked_proxy.endpoint_id), "pool_id": str(picked_proxy.pool_id)}
 
-    return {
-        "ok": True,
-        "expires_in": int(token.expires_in),
+    return admin_ok(request, payload={"expires_in": int(token.expires_in),
         "user_id": token.user_id,
-        "proxy": proxy_details,
-        "request_id": rid,
-    }
+        "proxy": proxy_details}, request_id=rid)
 
 
 @router.post("/tokens/{token_id}/reset-failures")
@@ -448,4 +444,4 @@ async def reset_failures(
 
         await session.commit()
 
-    return {"ok": True, "token_id": str(token_id), "request_id": rid}
+    return admin_ok(request, payload={"token_id": str(token_id)}, request_id=rid)

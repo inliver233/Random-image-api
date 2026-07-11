@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
+from app.core.admin_json import admin_ok
 from app.core.recommendation import DEFAULT_RECOMMENDATION, DEFAULT_SCORE_WEIGHTS, as_bool
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_config_cache import invalidate_runtime_config_cache
@@ -332,9 +333,7 @@ async def get_settings(
         random_defaults["recommendation"] = _normalize_recommendation(None, strict=False)
         random_defaults["dedup"] = _normalize_dedup(None, strict=False)
 
-    return {
-        "ok": True,
-        "settings": {
+    return admin_ok(request, payload={"settings": {
             "proxy": {
                 "enabled": bool(runtime.proxy_enabled),
                 "fail_closed": bool(runtime.proxy_fail_closed),
@@ -351,9 +350,7 @@ async def get_settings(
             "random": random_defaults,
             "security": {"hide_origin_url_in_public_json": bool(runtime.hide_origin_url_in_public_json)},
             "rate_limit": dict(runtime.rate_limit),
-        },
-        "request_id": rid,
-    }
+        }}, request_id=rid)
 
 
 @router.put("/settings")
@@ -593,4 +590,4 @@ async def update_settings(
     except Exception:
         invalidate_runtime_config_cache()
 
-    return {"ok": True, "updated": len(updates), "request_id": rid}
+    return admin_ok(request, payload={"updated": len(updates)}, request_id=rid)

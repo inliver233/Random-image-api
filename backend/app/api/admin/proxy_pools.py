@@ -190,7 +190,7 @@ async def create_proxy_pool(
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Proxy pool name exists", status_code=400) from exc
         await session.refresh(row)
 
-    return {"ok": True, "pool_id": str(row.id), "request_id": rid}
+    return admin_ok(request, payload={"pool_id": str(row.id)}, request_id=rid)
 
 
 @router.put("/proxy-pools/{pool_id}")
@@ -226,7 +226,7 @@ async def update_proxy_pool(
             await session.rollback()
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Proxy pool name exists", status_code=400) from exc
 
-    return {"ok": True, "pool_id": str(pool_id), "request_id": rid}
+    return admin_ok(request, payload={"pool_id": str(pool_id)}, request_id=rid)
 
 
 @router.post("/proxy-pools/{pool_id}/endpoints")
@@ -309,11 +309,7 @@ async def set_proxy_pool_endpoints(
 
         await session.commit()
 
-    return {
-        "ok": True,
-        "pool_id": str(pool_id),
+    return admin_ok(request, payload={"pool_id": str(pool_id),
         "created": created,
         "updated": updated,
-        "removed": removed,
-        "request_id": rid,
-    }
+        "removed": removed}, request_id=rid)

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
+from app.core.admin_json import admin_ok
 from app.core.random_engine_client import engine_health, random_engine_base_url
 from app.core.random_engine_sync import push_engine_snapshot
 from app.core.request_id import get_or_create_request_id
@@ -95,14 +96,10 @@ async def cleanup_request_logs_endpoint(
             keep_days=int(cfg["keep_days"]),
             max_delete_rows=int(cfg["max_delete_rows"]),
         )
-        return {
-            "ok": True,
-            "dry_run": True,
+        return admin_ok(request, payload={"dry_run": True,
             "cutoff": preview.cutoff,
             "would_delete": int(preview.would_delete),
-            "has_more": bool(preview.has_more),
-            "request_id": rid,
-        }
+            "has_more": bool(preview.has_more)}, request_id=rid)
 
     result = await cleanup_request_logs(
         engine,
@@ -110,14 +107,10 @@ async def cleanup_request_logs_endpoint(
         max_delete_rows=int(cfg["max_delete_rows"]),
         chunk_size=int(cfg["chunk_size"]),
     )
-    return {
-        "ok": True,
-        "dry_run": False,
+    return admin_ok(request, payload={"dry_run": False,
         "cutoff": result.cutoff,
         "deleted": int(result.deleted),
-        "has_more": bool(result.has_more),
-        "request_id": rid,
-    }
+        "has_more": bool(result.has_more)}, request_id=rid)
 
 
 @router.get("/maintenance/random-engine")
@@ -130,23 +123,21 @@ async def random_engine_status(
     settings = getattr(request.app.state, "settings", None)
     base = random_engine_base_url(settings) if settings is not None else None
     enabled = bool(getattr(settings, "random_engine_enabled", False)) if settings is not None else False
-    out: dict[str, Any] = {
-        "ok": True,
+    payload: dict[str, Any] = {
         "enabled": enabled,
         "url": base or "",
         "healthy": False,
         "health": None,
-        "request_id": rid,
     }
     if not base:
-        return out
+        return admin_ok(request, payload=payload, request_id=rid)
     client = getattr(request.app.state, "httpx_client", None)
     if client is None:
-        return out
+        return admin_ok(request, payload=payload, request_id=rid)
     health = await engine_health(client, base, timeout_s=1.0)
-    out["healthy"] = health is not None
-    out["health"] = health
-    return out
+    payload["healthy"] = health is not None
+    payload["health"] = health
+    return admin_ok(request, payload=payload, request_id=rid)
 
 
 @router.post("/maintenance/random-engine/snapshot")
@@ -193,10 +184,6 @@ async def random_engine_push_snapshot(
             message="random-engine snapshot failed",
             status_code=502,
         )
-    return {
-        "ok": True,
-        "revision": revision,
-        "engine": result,
-        "request_id": rid,
-    }
+    return admin_ok(request, payload={"revision": revision,
+        "engine": result}, request_id=rid)
 

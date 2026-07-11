@@ -10,6 +10,7 @@ from sqlalchemy.orm import aliased
 
 from app.api.admin.deps import get_admin_claims
 from app.core.bindings_recompute import recompute_token_proxy_bindings
+from app.core.admin_json import admin_ok
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
@@ -260,16 +261,12 @@ async def list_bindings(
             }
         )
 
-    return {
-        "ok": True,
-        "items": items,
+    return admin_ok(request, payload={"items": items,
         "summary": {
             "pool_id": str(pool_id),
             "pool_endpoints_total": int(endpoints_total),
             "pool_endpoints_enabled": int(endpoints_enabled),
-        },
-        "request_id": rid,
-    }
+        }}, request_id=rid)
 
 
 @router.post("/bindings/recompute")
@@ -304,7 +301,7 @@ async def recompute_bindings(
             )
             await session.commit()
 
-        return {"ok": True, "pool_id": str(pool_id), "request_id": rid, **result}
+        return admin_ok(request, payload={"pool_id": str(pool_id) **result}, request_id=rid)
 
     return await with_sqlite_busy_retry(_op)
 
@@ -360,13 +357,9 @@ async def set_binding_override(
             binding.updated_at = now
             await session.commit()
 
-        return {
-            "ok": True,
-            "binding_id": str(binding_id),
+        return admin_ok(request, payload={"binding_id": str(binding_id),
             "override_proxy_id": str(override_proxy_id),
-            "override_expires_at": expires_at,
-            "request_id": rid,
-        }
+            "override_expires_at": expires_at}, request_id=rid)
 
     return await with_sqlite_busy_retry(_op)
 
@@ -398,6 +391,6 @@ async def clear_binding_override(
             binding.updated_at = now
             await session.commit()
 
-        return {"ok": True, "binding_id": str(binding_id), "request_id": rid}
+        return admin_ok(request, payload={"binding_id": str(binding_id)}, request_id=rid)
 
     return await with_sqlite_busy_retry(_op)

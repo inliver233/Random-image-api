@@ -14,7 +14,7 @@ from starlette.datastructures import UploadFile
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
-from app.core.admin_json import admin_cursor_list
+from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.data_files import get_sqlite_db_dir, make_file_ref
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -316,16 +316,12 @@ async def create_import(
         total, accepted, deduped, error_total, errors, preview = _parse_import_text(body.text, preview_limit=20)
 
     if body.dry_run:
-        return {
-            "ok": True,
-            "import_id": "",
+        return admin_ok(request, payload={"import_id": "",
             "job_id": "",
             "accepted": accepted,
             "deduped": deduped,
             "errors": [asdict(e) for e in errors[:200]],
-            "preview": preview,
-            "request_id": rid,
-        }
+            "preview": preview}, request_id=rid)
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
@@ -410,17 +406,13 @@ async def create_import(
             await execute_claimed_job(engine, dispatcher, job_row=claimed, worker_id=worker_id)
             executed_inline = True
 
-    return {
-        "ok": True,
-        "import_id": str(import_id),
+    return admin_ok(request, payload={"import_id": str(import_id),
         "job_id": str(job_id),
         "executed_inline": executed_inline,
         "accepted": accepted,
         "deduped": deduped,
         "errors": [asdict(e) for e in errors[:200]],
-        "preview": preview,
-        "request_id": rid,
-    }
+        "preview": preview}, request_id=rid)
 
 
 @router.post("/imports/{import_id}/rollback")
@@ -459,12 +451,8 @@ async def rollback_import(
 
     updated = await with_sqlite_busy_retry(_op)
 
-    return {
-        "ok": True,
-        "mode": body.mode,
-        "updated": updated,
-        "request_id": rid,
-    }
+    return admin_ok(request, payload={"mode": body.mode,
+        "updated": updated}, request_id=rid)
 
 
 @router.get("/imports")
@@ -583,9 +571,7 @@ async def get_import(
         except Exception:
             detail = {}
 
-    return {
-        "ok": True,
-        "item": {
+    return admin_ok(request, payload={"item": {
             "import": {
                 "id": str(imp.id),
                 "created_at": imp.created_at,
@@ -609,6 +595,4 @@ async def get_import(
                 else None
             ),
             "detail": detail,
-        },
-        "request_id": rid,
-    }
+        }}, request_id=rid)

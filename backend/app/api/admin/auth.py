@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
+from app.core.admin_json import admin_ok
 from app.core.request_id import get_or_create_request_id
 from app.core.security import create_jwt
 from fastapi import Depends
@@ -41,11 +42,11 @@ async def login(request: Request) -> dict[str, Any]:
 
     token = create_jwt(secret_key=settings.secret_key, subject=settings.admin_username, ttl_s=3600)
     rid = get_or_create_request_id(request)
-    return {"ok": True, "token": token, "request_id": rid}
+    return admin_ok(request, payload={"token": token}, request_id=rid)
 
 
 @router.post("/logout")
 async def logout(request: Request, _claims: dict[str, Any] = Depends(get_admin_claims)) -> dict[str, Any]:
     _ = _claims
     rid = get_or_create_request_id(request)
-    return {"ok": True, "request_id": rid}
+    return admin_ok(request, request_id=rid)

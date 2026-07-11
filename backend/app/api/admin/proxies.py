@@ -10,7 +10,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
-from app.core.admin_json import admin_cursor_list
+from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.crypto import FieldEncryptor
 from app.core.errors import ApiError, ErrorCode
@@ -533,14 +533,10 @@ async def import_proxy_endpoints(
 
     await with_sqlite_busy_retry(_op)
 
-    return {
-        "ok": True,
-        "created": created,
+    return admin_ok(request, payload={"created": created,
         "updated": updated,
         "skipped": skipped,
-        "errors": errors[:200],
-        "request_id": rid,
-    }
+        "errors": errors[:200]}, request_id=rid)
 
 
 @router.put("/proxies/endpoints/{endpoint_id}")
@@ -570,7 +566,7 @@ async def update_proxy_endpoint(
         row.updated_at = now
         await session.commit()
 
-    return {"ok": True, "endpoint_id": str(endpoint_id), "enabled": enabled, "request_id": rid}
+    return admin_ok(request, payload={"endpoint_id": str(endpoint_id), "enabled": enabled}, request_id=rid)
 
 
 @router.post("/proxies/endpoints/{endpoint_id}/reset-failures")
@@ -602,7 +598,7 @@ async def reset_proxy_failures(
 
         await session.commit()
 
-    return {"ok": True, "endpoint_id": str(endpoint_id), "request_id": rid}
+    return admin_ok(request, payload={"endpoint_id": str(endpoint_id)}, request_id=rid)
 
 
 @router.post("/proxies/endpoints/cleanup-invalid-hosts")
@@ -654,15 +650,11 @@ async def cleanup_invalid_hosts(
             affected_pool_ids = [int(r[0]) for r in pool_rows]
 
         if dry_run:
-            return {
-                "ok": True,
-                "dry_run": True,
+            return admin_ok(request, payload={"dry_run": True,
                 "invalid_hosts": sorted(invalid_hosts),
                 "matched": len(endpoint_ids),
                 "endpoint_ids": [str(x) for x in endpoint_ids[:200]],
-                "affected_pool_ids": [str(x) for x in affected_pool_ids],
-                "request_id": rid,
-            }
+                "affected_pool_ids": [str(x) for x in affected_pool_ids]}, request_id=rid)
 
         disabled = 0
         memberships_removed = 0
@@ -751,9 +743,7 @@ async def cleanup_invalid_hosts(
 
         await session.commit()
 
-    return {
-        "ok": True,
-        "dry_run": False,
+    return admin_ok(request, payload={"dry_run": False,
         "invalid_hosts": sorted(invalid_hosts),
         "matched": len(endpoint_ids),
         "disabled": int(disabled),
@@ -762,9 +752,7 @@ async def cleanup_invalid_hosts(
         "deleted": int(deleted),
         "affected_pool_ids": [str(x) for x in affected_pool_ids],
         "bindings": binding_results,
-        "warnings": warnings,
-        "request_id": rid,
-    }
+        "warnings": warnings}, request_id=rid)
 
 
 @router.post("/proxies/easy-proxies/import")
@@ -1050,25 +1038,23 @@ async def import_easy_proxies(
 
     await with_sqlite_busy_retry(_op)
 
-    resp: dict[str, Any] = {
-        "ok": True,
+    payload: dict[str, Any] = {
         "created": created,
         "updated": updated,
         "skipped": skipped,
         "errors": errors[:200],
         "warnings": warnings[:50],
-        "request_id": rid,
     }
     if attach_pool_id is not None:
-        resp["attach"] = {
+        payload["attach"] = {
             "pool_id": str(attach_pool_id),
             "endpoints_total": int(attach_total),
             "created": int(attach_created),
             "updated": int(attach_updated),
         }
     if binding_result is not None:
-        resp["bindings"] = {"pool_id": str(attach_pool_id), **binding_result}
-    return resp
+        payload["bindings"] = {"pool_id": str(attach_pool_id), **binding_result}
+    return admin_ok(request, payload=payload, request_id=rid)
 
 
 @router.post("/proxies/probe")
@@ -1099,4 +1085,4 @@ async def probe_proxies(
 
     job_id = await with_sqlite_busy_retry(_op)
 
-    return {"ok": True, "job_id": str(job_id), "request_id": rid}
+    return admin_ok(request, payload={"job_id": str(job_id)}, request_id=rid)

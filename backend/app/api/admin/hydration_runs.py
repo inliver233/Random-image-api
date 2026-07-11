@@ -270,13 +270,9 @@ async def create_manual_hydration_job(
             )
 
             if existing is not None:
-                return {
-                    "ok": True,
-                    "created": False,
+                return admin_ok(request, payload={"created": False,
                     "job_id": str(int(existing.id)),
-                    "illust_id": str(int(illust_id)),
-                    "request_id": rid,
-                }
+                    "illust_id": str(int(illust_id))}, request_id=rid)
 
             job = JobRow(
                 type="hydrate_metadata",
@@ -297,13 +293,9 @@ async def create_manual_hydration_job(
             await session.flush()
             await session.commit()
 
-            return {
-                "ok": True,
-                "created": True,
+            return admin_ok(request, payload={"created": True,
                 "job_id": str(int(job.id)),
-                "illust_id": str(int(illust_id)),
-                "request_id": rid,
-            }
+                "illust_id": str(int(illust_id))}, request_id=rid)
 
     return await with_sqlite_busy_retry(_op)
 
@@ -369,12 +361,8 @@ async def create_hydration_run(
 
     run_id, job_id = await with_sqlite_busy_retry(_op)
 
-    return {
-        "ok": True,
-        "hydration_run_id": str(run_id),
-        "job_id": str(job_id),
-        "request_id": rid,
-    }
+    return admin_ok(request, payload={"hydration_run_id": str(run_id),
+        "job_id": str(job_id)}, request_id=rid)
 
 
 async def _set_run_and_job_status(
@@ -430,13 +418,9 @@ async def _set_run_and_job_status(
 
             await session.commit()
 
-        return {
-            "ok": True,
-            "hydration_run_id": str(run_id),
+        return admin_ok(request, payload={"hydration_run_id": str(run_id),
             "status": target_status,
-            "job_status": job_status if job is not None else "",
-            "request_id": rid,
-        }
+            "job_status": job_status if job is not None else ""}, request_id=rid)
 
     return await with_sqlite_busy_retry(_op)
 

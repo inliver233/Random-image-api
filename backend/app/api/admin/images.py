@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
-from app.core.admin_json import admin_cursor_list
+from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.db.models.image_tags import ImageTag
@@ -231,7 +231,7 @@ async def delete_admin_image(
             await session.delete(row)
             await session.commit()
 
-        return {"ok": True, "image_id": str(int(image_id)), "request_id": rid}
+        return admin_ok(request, payload={"image_id": str(int(image_id))}, request_id=rid)
 
     return await with_sqlite_busy_retry(_op)
 
@@ -265,13 +265,9 @@ async def bulk_delete_admin_images(
             await session.commit()
 
         missing = max(0, int(len(ids)) - int(found))
-        return {
-            "ok": True,
-            "requested": int(len(ids)),
+        return admin_ok(request, payload={"requested": int(len(ids)),
             "deleted": int(deleted),
-            "missing": int(missing),
-            "request_id": rid,
-        }
+            "missing": int(missing)}, request_id=rid)
 
     return await with_sqlite_busy_retry(_op)
 
@@ -321,12 +317,8 @@ async def clear_admin_images(
 
             await session.commit()
 
-        return {
-            "ok": True,
-            "deleted_image_tags": _safe_rowcount(result_links),
+        return admin_ok(request, payload={"deleted_image_tags": _safe_rowcount(result_links),
             "deleted_images": _safe_rowcount(result_images),
-            "deleted_tags": _safe_rowcount(result_tags) if result_tags is not None else 0,
-            "request_id": rid,
-        }
+            "deleted_tags": _safe_rowcount(result_tags) if result_tags is not None else 0}, request_id=rid)
 
     return await with_sqlite_busy_retry(_op)
