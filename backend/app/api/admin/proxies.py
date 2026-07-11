@@ -25,7 +25,7 @@ from app.core.admin_request import (
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.crypto import FieldEncryptor
 from app.core.errors import ApiError, ErrorCode
-from app.core.proxy_uri import parse_proxy_uri
+from app.core.proxy_uri import mask_proxy_uri, parse_proxy_uri
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
 from app.db.models.jobs import JobRow
@@ -38,22 +38,6 @@ from app.easy_proxies.client import EasyProxiesError, easy_proxies_auth, easy_pr
 from app.easy_proxies.normalize import normalize_exported_proxy_host, resolve_export_host
 
 router = APIRouter()
-
-
-def _mask_proxy_uri(*, scheme: str, host: str, port: int, username: str, password_set: bool) -> str:
-    scheme = (scheme or "").strip().lower()
-    host = (host or "").strip()
-    username = (username or "").strip()
-    if ":" in host and not host.startswith("["):
-        host = f"[{host}]"
-
-    auth = ""
-    if username:
-        auth = f"{username}@"
-        if password_set:
-            auth = f"{username}:***@"
-
-    return f"{scheme}://{auth}{host}:{int(port)}"
 
 
 def _sanitize_source_ref(value: str | None) -> str | None:
@@ -182,7 +166,7 @@ async def list_proxy_endpoints(
             "host": str(p.host),
             "port": int(p.port),
             "invalid_host": str(p.host or "").strip().lower() in invalid_hosts,
-            "uri_masked": _mask_proxy_uri(
+            "uri_masked": mask_proxy_uri(
                 scheme=str(p.scheme),
                 host=str(p.host),
                 port=int(p.port),

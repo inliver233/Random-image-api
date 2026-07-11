@@ -57,6 +57,30 @@ def build_proxy_uri(
     return f"{scheme_n}://{auth}{host_part}:{int(port)}"
 
 
+def mask_proxy_uri(
+    *,
+    scheme: str,
+    host: str,
+    port: int,
+    username: str,
+    password_set: bool,
+) -> str:
+    """Admin/list display URI: never include password plaintext (*** when set)."""
+    scheme_n = (scheme or "").strip().lower()
+    host_n = (host or "").strip()
+    username_n = (username or "").strip()
+    if ":" in host_n and not host_n.startswith("["):
+        host_n = f"[{host_n}]"
+
+    auth = ""
+    if username_n:
+        auth = f"{username_n}@"
+        if password_set:
+            auth = f"{username_n}:***@"
+
+    return f"{scheme_n}://{auth}{host_n}:{int(port)}"
+
+
 def _strip_authority(rest: str) -> str:
     for sep in ("/", "?", "#"):
         idx = rest.find(sep)
