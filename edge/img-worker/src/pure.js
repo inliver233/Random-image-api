@@ -35,6 +35,8 @@ export function validPath(path) {
   if (typeof path !== "string" || !path.startsWith("/") || path.includes("..") || path.includes("\\")) {
     return false;
   }
+  // Match BFF is_edge_allowed_path: never accept double-slash (//) paths.
+  if (path.includes("//")) return false;
   if (path.includes("://") || path.includes("@") || path.includes("?")) return false;
   // Contract allowlist only — do not accept arbitrary /img-* beyond documented prefixes.
   const okPrefix = ALLOWED_PREFIXES.some((p) => path.startsWith(p));

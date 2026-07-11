@@ -146,7 +146,7 @@ def pximg_path_from_original_url(original_url: str) -> str | None:
 def is_edge_allowed_path(path: str) -> bool:
     """Match Worker allowlist so we never mint signed URLs the edge will reject."""
     p = (path or "").strip()
-    if not p.startswith("/") or ".." in p or "\\" in p or p.startswith("//"):
+    if not p.startswith("/") or ".." in p or "\\" in p or "//" in p:
         return False
     if "://" in p or "@" in p or "?" in p:
         return False

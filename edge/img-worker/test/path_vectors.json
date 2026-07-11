@@ -20,6 +20,8 @@
     { "path": "/open/proxy/x.jpg", "reason": "bad_prefix" },
     { "path": "/img-original/x.exe", "reason": "bad_ext" },
     { "path": "/img-original/x", "reason": "no_ext" },
+    { "path": "/img-original//x.jpg", "reason": "double_slash" },
+    { "path": "//img-original/x.jpg", "reason": "leading_double_slash" },
     { "path": "", "reason": "empty" }
   ]
 }

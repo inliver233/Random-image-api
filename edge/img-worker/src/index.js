@@ -307,12 +307,37 @@ async function handlePrewarm(request, env, ctx) {
   }
 
   const cache = caches.default;
+  const ttl = Number(env.CACHE_TTL_SECONDS || 604800);
+  const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
   let ok = 0;
   let failed = 0;
+  let cacheWarmed = 0;
+  let alreadyR2 = 0;
   for (const path of paths) {
     try {
-      const existing = await env.R2.head(r2ObjectKey(path));
+      const cacheKey = new Request(new URL(`/pximg${path}`, new URL(request.url).origin), {
+        method: "GET",
+      });
+      // R2 hit: still warm this POP's Cache API (contract: prewarm warms Cache).
+      const existing = await tryR2Get(env, path);
       if (existing) {
+        const contentType = existing.httpMetadata?.contentType || "application/octet-stream";
+        const headers = successHeaders({
+          contentType,
+          contentLength: existing.size,
+          etag: existing.httpEtag,
+          lastModified: existing.uploaded ? new Date(existing.uploaded).toUTCString() : null,
+          ttl,
+          via: "r2",
+          originHost,
+          circuitOpen: false,
+          edgeVia: "r2-prewarm",
+        });
+        headers.set("X-Edge-Cache", "MISS");
+        const buf = await existing.arrayBuffer();
+        ctx.waitUntil(cache.put(cacheKey, new Response(buf, { status: 200, headers })));
+        alreadyR2 += 1;
+        cacheWarmed += 1;
         ok += 1;
         continue;
       }
@@ -327,8 +352,6 @@ async function handlePrewarm(request, env, ctx) {
       await env.R2.put(r2ObjectKey(path), buf, {
         httpMetadata: { contentType },
       });
-      const ttl = Number(env.CACHE_TTL_SECONDS || 604800);
-      const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
       const headers = successHeaders({
         contentType,
         contentLength: buf.byteLength,
@@ -341,24 +364,32 @@ async function handlePrewarm(request, env, ctx) {
         edgeVia: "r2-prewarm",
       });
       headers.set("X-Edge-Cache", "MISS");
-      const cacheKey = new Request(new URL(`/pximg${path}`, new URL(request.url).origin), {
-        method: "GET",
-      });
       ctx.waitUntil(cache.put(cacheKey, new Response(buf, { status: 200, headers })));
+      cacheWarmed += 1;
       ok += 1;
     } catch {
       failed += 1;
     }
   }
 
-  return new Response(JSON.stringify({ ok: true, prewarmed: ok, failed, total: paths.length }), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-      ...corsHeaders(),
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      prewarmed: ok,
+      failed,
+      total: paths.length,
+      cache_warmed: cacheWarmed,
+      already_r2: alreadyR2,
+    }),
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        ...corsHeaders(),
+      },
     },
-  });
+  );
 }
 
 export default {

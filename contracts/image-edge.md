@@ -108,6 +108,8 @@ Body: { "paths": ["/img-original/img/.../x_p0.jpg", ...] }   // max 50, allowlis
 ```
 
 Fetches each path via the same origin/mirror chain and stores into R2 (+ warms Cache).
+If the object is already in R2, Worker still loads it and warms this POP's Cache API
+(response fields: `prewarmed`, `failed`, `cache_warmed`, `already_r2`).
 
 BFF adapter (`backend/app/core/r2_prewarm.py`, default off):
 
