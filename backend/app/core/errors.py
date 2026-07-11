@@ -99,6 +99,7 @@ _ASCII_MESSAGE_MAP: dict[str, str] = {
     "upstream request failed after attempts.": "多次尝试后上游请求仍失败",
     "invalid proxy endpoint": "代理节点配置无效",
     "unsupported conflict_policy": "conflict_policy 参数不支持",
+    "random_engine_url not configured": "未配置 RANDOM_ENGINE_URL",
 }
 
 

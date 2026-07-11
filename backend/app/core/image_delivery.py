@@ -70,6 +70,7 @@ async def deliver_public_image_from_request(
     """Resolve runtime + proxy/mirror query flags, then deliver a known image row."""
     engine = request.app.state.engine
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
+    job_queue = getattr(request.app.state, "job_queue", None)
     runtime = await resolve_runtime_for_request(request, engine)
     resolved = resolve_proxy_mirror(
         runtime=runtime,
@@ -96,6 +97,7 @@ async def deliver_public_image_from_request(
         hydrate_reason=str(hydrate_reason),
         mark_fail_on_upstream=bool(mark_fail_on_upstream),
         catalog=catalog,
+        job_queue=job_queue,
     )
 
 
@@ -119,6 +121,7 @@ async def deliver_known_image(
     cache_control_stream: str = "public, max-age=31536000, immutable",
     mark_fail_on_upstream: bool = False,
     catalog: CatalogStore | None = None,
+    job_queue: Any | None = None,
 ) -> Any:
     """Shared edge-prefer + local stream path for /i and legacy routes."""
     store = resolve_catalog_store(catalog)
@@ -142,6 +145,7 @@ async def deliver_known_image(
                     illust_id=int(image.illust_id),
                     needs_hydrate=bool(needs_hydrate),
                     hydrate_reason=str(hydrate_reason),
+                    queue=job_queue,
                 )
             observe_image_delivery(path="edge_redirect")
             resp = build_edge_redirect_response(edge_url=edge_url, cache_control=cache_control_edge)
@@ -208,6 +212,7 @@ async def deliver_known_image(
                 illust_id=int(image.illust_id),
                 needs_hydrate=bool(needs_hydrate),
                 hydrate_reason=str(hydrate_reason),
+                queue=job_queue,
             )
             return attach_background(resp, background_tasks)
         return resp

@@ -86,7 +86,7 @@ def test_compare_filters_requires_engine_url(tmp_path: Path, monkeypatch) -> Non
         body = resp.json()
         assert body.get("ok") is False
         assert body.get("code") == "BAD_REQUEST"
-        # normalize_error_message maps unmapped ASCII → default zh BAD_REQUEST text.
+        assert "RANDOM_ENGINE_URL" in str(body.get("message") or "")
 
 
 def test_compare_filters_match_and_delta(tmp_path: Path, monkeypatch) -> None:
