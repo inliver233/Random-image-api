@@ -12,7 +12,7 @@ from app.core.random_delivery import (
     attach_background,
     build_edge_redirect_response,
     deliver_random_image_stream,
-    schedule_edge_side_effects,
+    schedule_pick_side_effects,
 )
 from app.core.random_pick_context import build_random_pick_context
 from app.core.random_query import no_match_error_from_filters
@@ -24,7 +24,6 @@ from app.core.random_request import (
     prefer_image_edge,
 )
 from app.core.random_response import build_json_body, build_simple_json_body, resolve_public_item_urls
-from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.db.tags_get import get_tag_names_for_image
 from app.db.session import create_sessionmaker
@@ -158,20 +157,12 @@ async def random_image(
                 tags = await get_tag_names_for_image(session, image_id=image.id)
 
         # JSON/redirect never prove bytes — never mark_image_ok here.
-        schedule_edge_side_effects(
+        schedule_pick_side_effects(
             background_tasks=background_tasks,
             engine=engine,
-            image_id=int(image.id),
-            illust_id=int(image.illust_id),
-            user_id=int(image.user_id) if getattr(image, "user_id", None) is not None else None,
-            anti_repeat_enabled=bool(pick_ctx.anti_repeat_enabled),
-            dedup_window_s=float(pick_ctx.dedup_window_s),
-            dedup_max_images=int(pick_ctx.dedup_max_images),
-            dedup_max_authors=int(pick_ctx.dedup_max_authors),
-            needs_hydrate=needs_opportunistic_hydrate(image),
+            image=image,
+            pick_ctx=pick_ctx,
             hydrate_reason="random",
-            mark_ok_on_edge=False,
-            should_mark_ok=False,
         )
 
         if format == "image" and redirect == 1:

@@ -17,6 +17,7 @@ from app.core.admin_request import (
     require_positive_id,
 )
 from app.core.errors import ApiError, ErrorCode
+from app.core.proxy_routing import invalidate_proxy_pool_caches
 from app.core.request_id import get_or_create_request_id
 from app.db.models.proxy_endpoints import ProxyEndpoint
 from app.db.models.proxy_pool_endpoints import ProxyPoolEndpoint
@@ -157,6 +158,7 @@ async def create_proxy_pool(
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Proxy pool name exists", status_code=400) from exc
         await session.refresh(row)
 
+    invalidate_proxy_pool_caches()
     return admin_ok(request, payload={"pool_id": str(row.id)}, request_id=rid)
 
 
@@ -192,6 +194,7 @@ async def update_proxy_pool(
             await session.rollback()
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Proxy pool name exists", status_code=400) from exc
 
+    invalidate_proxy_pool_caches()
     return admin_ok(request, payload={"pool_id": str(pool_id)}, request_id=rid)
 
 
@@ -274,6 +277,7 @@ async def set_proxy_pool_endpoints(
 
         await session.commit()
 
+    invalidate_proxy_pool_caches()
     return admin_ok(request, payload={"pool_id": str(pool_id),
         "created": created,
         "updated": updated,

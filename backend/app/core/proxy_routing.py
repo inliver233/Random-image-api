@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import time
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -14,6 +15,13 @@ from app.core.proxy_uri import build_proxy_uri
 from app.core.runtime_settings import RuntimeConfig
 from app.core.time import iso_utc_ms
 from app.db.session import with_sqlite_busy_retry
+
+# Short TTL for pool membership / eligible endpoint lists under concurrent hydrate.
+# Blacklist updates still apply within a couple seconds; pick remains weighted per call.
+_POOL_LIST_TTL_S = 2.0
+_POOL_ENDPOINTS_TTL_S = 1.5
+_enabled_pools_cache: tuple[float, int, tuple[int, ...]] | None = None  # (mono, engine_id, ids)
+_pool_endpoints_cache: dict[tuple[int, int], tuple[float, list[Any]]] = {}  # (engine_id, pool_id) -> (mono, rows)
 
 
 _PIXIV_HOST_SUFFIXES = (
@@ -132,6 +140,13 @@ async def first_enabled_pool_id(engine: AsyncEngine) -> int | None:
 
 
 async def _list_enabled_pool_ids(engine: AsyncEngine) -> list[int]:
+    global _enabled_pools_cache
+    now = time.monotonic()
+    engine_id = id(engine)
+    cached = _enabled_pools_cache
+    if cached is not None and cached[1] == engine_id and (now - cached[0]) < _POOL_LIST_TTL_S:
+        return list(cached[2])
+
     sql = "SELECT id FROM proxy_pools WHERE enabled=1 ORDER BY id ASC;"
 
     async def _op() -> list[int]:
@@ -150,7 +165,9 @@ async def _list_enabled_pool_ids(engine: AsyncEngine) -> list[int]:
             out.append(pool_id)
         return out
 
-    return await with_sqlite_busy_retry(_op)
+    ids = await with_sqlite_busy_retry(_op)
+    _enabled_pools_cache = (time.monotonic(), engine_id, tuple(ids))
+    return ids
 
 
 async def _pool_health_stats(engine: AsyncEngine, *, pool_id: int, now_iso: str) -> dict[str, Any]:
@@ -190,7 +207,19 @@ WHERE pp.id = :pool_id AND pp.enabled = 1;
     return await with_sqlite_busy_retry(_op)
 
 
-async def _pick_endpoint_in_pool(engine: AsyncEngine, *, pool_id: int, now_iso: str) -> tuple[int, str, str, int, str, str] | None:
+async def _load_eligible_endpoint_rows(
+    engine: AsyncEngine,
+    *,
+    pool_id: int,
+    now_iso: str,
+) -> list[Any]:
+    """Eligible endpoint rows for a pool; short TTL cache under concurrent hydrate picks."""
+    cache_key = (id(engine), int(pool_id))
+    now = time.monotonic()
+    hit = _pool_endpoints_cache.get(cache_key)
+    if hit is not None and (now - hit[0]) < _POOL_ENDPOINTS_TTL_S:
+        return list(hit[1])
+
     sql = """
 SELECT pe.id, pe.scheme, pe.host, pe.port, pe.username, pe.password_enc, ppe.weight, pe.last_ok_at, pe.last_fail_at
 FROM proxy_pools pp
@@ -203,44 +232,61 @@ WHERE pp.id = :pool_id AND pp.enabled = 1
 ORDER BY pe.id ASC;
 """.strip()
 
-    async def _op() -> tuple[int, str, str, int, str, str] | None:
+    async def _op() -> list[Any]:
         async with engine.connect() as conn:
             result = await conn.exec_driver_sql(sql, {"pool_id": int(pool_id), "now": now_iso})
-            rows = result.fetchall()
-        ok_weighted: list[tuple[int, int]] = []
-        unknown_weighted: list[tuple[int, int]] = []
-        fail_weighted: list[tuple[int, int]] = []
+            return list(result.fetchall())
 
-        for r in rows:
-            endpoint_id = int(r[0])
-            weight = int(r[6] or 0)
-            last_ok_at = str(r[7]).strip() if r[7] is not None else ""
-            last_fail_at = str(r[8]).strip() if r[8] is not None else ""
+    rows = await with_sqlite_busy_retry(_op)
+    _pool_endpoints_cache[cache_key] = (time.monotonic(), rows)
+    # Bound cache size (admin may create many pools over process lifetime).
+    if len(_pool_endpoints_cache) > 64:
+        oldest_key = min(_pool_endpoints_cache.items(), key=lambda kv: kv[1][0])[0]
+        _pool_endpoints_cache.pop(oldest_key, None)
+    return list(rows)
 
-            if last_ok_at and (not last_fail_at or last_ok_at >= last_fail_at):
-                ok_weighted.append((endpoint_id, weight))
-            elif not last_ok_at and not last_fail_at:
-                unknown_weighted.append((endpoint_id, weight))
-            else:
-                fail_weighted.append((endpoint_id, weight))
 
-        weighted = ok_weighted or unknown_weighted or fail_weighted
-        chosen_id = _weighted_choice(weighted)
-        if chosen_id is None:
-            return None
-        for r in rows:
-            if int(r[0]) == int(chosen_id):
-                return (
-                    int(r[0]),
-                    str(r[1]),
-                    str(r[2]),
-                    int(r[3]),
-                    str(r[4] or ""),
-                    str(r[5] or ""),
-                )
+async def _pick_endpoint_in_pool(engine: AsyncEngine, *, pool_id: int, now_iso: str) -> tuple[int, str, str, int, str, str] | None:
+    rows = await _load_eligible_endpoint_rows(engine, pool_id=int(pool_id), now_iso=str(now_iso))
+    ok_weighted: list[tuple[int, int]] = []
+    unknown_weighted: list[tuple[int, int]] = []
+    fail_weighted: list[tuple[int, int]] = []
+
+    for r in rows:
+        endpoint_id = int(r[0])
+        weight = int(r[6] or 0)
+        last_ok_at = str(r[7]).strip() if r[7] is not None else ""
+        last_fail_at = str(r[8]).strip() if r[8] is not None else ""
+
+        if last_ok_at and (not last_fail_at or last_ok_at >= last_fail_at):
+            ok_weighted.append((endpoint_id, weight))
+        elif not last_ok_at and not last_fail_at:
+            unknown_weighted.append((endpoint_id, weight))
+        else:
+            fail_weighted.append((endpoint_id, weight))
+
+    weighted = ok_weighted or unknown_weighted or fail_weighted
+    chosen_id = _weighted_choice(weighted)
+    if chosen_id is None:
         return None
+    for r in rows:
+        if int(r[0]) == int(chosen_id):
+            return (
+                int(r[0]),
+                str(r[1]),
+                str(r[2]),
+                int(r[3]),
+                str(r[4] or ""),
+                str(r[5] or ""),
+            )
+    return None
 
-    return await with_sqlite_busy_retry(_op)
+
+def invalidate_proxy_pool_caches() -> None:
+    """Drop pool/endpoint list caches (call after admin pool/endpoint mutations if needed)."""
+    global _enabled_pools_cache
+    _enabled_pools_cache = None
+    _pool_endpoints_cache.clear()
 
 
 async def _load_token_binding(

@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from app.core.errors import ApiError, ErrorCode
-from app.core.proxy_routing import resolve_pool_id_for_host, select_proxy_uri_for_url, should_use_proxy_for_host
+from app.core.proxy_routing import (
+    invalidate_proxy_pool_caches,
+    resolve_pool_id_for_host,
+    select_proxy_uri_for_url,
+    should_use_proxy_for_host,
+)
 from app.core.runtime_settings import load_runtime_config
 from app.db.models.base import Base
 from app.db.models.proxy_endpoints import ProxyEndpoint
@@ -28,6 +33,7 @@ def test_proxy_route_pools_suffix_matching_prefers_longest() -> None:
 
 
 def test_select_proxy_uri_for_url_uses_configured_pool(tmp_path: Path, monkeypatch) -> None:
+    invalidate_proxy_pool_caches()
     db_path = tmp_path / "proxy_pool_routing.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
 
@@ -106,6 +112,7 @@ def test_select_proxy_uri_for_url_uses_configured_pool(tmp_path: Path, monkeypat
 
 
 def test_select_proxy_uri_for_url_falls_back_when_preferred_pool_empty(tmp_path: Path, monkeypatch) -> None:
+    invalidate_proxy_pool_caches()
     db_path = tmp_path / "proxy_pool_routing_fallback.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
 
@@ -180,6 +187,7 @@ def test_select_proxy_uri_for_url_falls_back_when_preferred_pool_empty(tmp_path:
 
 
 def test_select_proxy_uri_for_url_proxy_required_includes_pool_stats_when_all_blacklisted(tmp_path: Path, monkeypatch) -> None:
+    invalidate_proxy_pool_caches()
     db_path = tmp_path / "proxy_pool_routing_blacklisted.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
 
@@ -262,6 +270,7 @@ def test_select_proxy_uri_for_url_proxy_required_includes_pool_stats_when_all_bl
 
 
 def test_select_proxy_uri_for_url_prefers_last_ok_over_fail(tmp_path: Path, monkeypatch) -> None:
+    invalidate_proxy_pool_caches()
     db_path = tmp_path / "proxy_pool_routing_prefers_ok.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
 
@@ -352,6 +361,7 @@ def test_select_proxy_uri_for_url_prefers_last_ok_over_fail(tmp_path: Path, monk
 
 
 def test_select_proxy_uri_for_url_ignores_disabled_preferred_pool(tmp_path: Path, monkeypatch) -> None:
+    invalidate_proxy_pool_caches()
     db_path = tmp_path / "proxy_pool_routing_disabled_preferred.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
 

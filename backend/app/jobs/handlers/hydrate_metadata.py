@@ -22,7 +22,7 @@ from app.core.errors import ApiError, ErrorCode
 from app.core.failover import classify_pixiv_rate_limit, pixiv_rate_limit_backoff_seconds
 from app.core.metrics import TOKEN_REFRESH_FAIL_TOTAL
 from app.core.proxy_health import proxy_endpoint_fail_values_immediate, proxy_endpoint_ok_values
-from app.core.proxy_routing import select_proxy_uri_for_url
+from app.core.proxy_routing import invalidate_proxy_pool_caches, select_proxy_uri_for_url
 from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.core.redact import redact_text
 from app.core.runtime_settings import RuntimeConfig, load_runtime_config
@@ -227,6 +227,7 @@ def build_hydrate_metadata_handler(
                 await session.commit()
 
         await with_sqlite_busy_retry(_op)
+        invalidate_proxy_pool_caches()
 
     async def _mark_proxy_fail(
         endpoint_id: int,
@@ -264,6 +265,7 @@ def build_hydrate_metadata_handler(
                 await session.commit()
 
         await with_sqlite_busy_retry(_op)
+        invalidate_proxy_pool_caches()
 
     async def _set_token_proxy_override(
         *,

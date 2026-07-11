@@ -25,6 +25,7 @@ from app.core.admin_request import (
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.crypto import FieldEncryptor
 from app.core.errors import ApiError, ErrorCode
+from app.core.proxy_routing import invalidate_proxy_pool_caches
 from app.core.proxy_uri import mask_proxy_uri, parse_proxy_uri
 from app.core.source_ref import sanitize_source_ref
 from app.core.request_id import get_or_create_request_id
@@ -449,6 +450,7 @@ async def import_proxy_endpoints(
 
     await with_sqlite_busy_retry(_op)
 
+    invalidate_proxy_pool_caches()
     return admin_ok(request, payload={"created": created,
         "updated": updated,
         "skipped": skipped,
@@ -481,6 +483,7 @@ async def update_proxy_endpoint(
         row.updated_at = now
         await session.commit()
 
+    invalidate_proxy_pool_caches()
     return admin_ok(request, payload={"endpoint_id": str(endpoint_id), "enabled": enabled}, request_id=rid)
 
 
@@ -512,6 +515,7 @@ async def reset_proxy_failures(
 
         await session.commit()
 
+    invalidate_proxy_pool_caches()
     return admin_ok(request, payload={"endpoint_id": str(endpoint_id)}, request_id=rid)
 
 
@@ -657,6 +661,7 @@ async def cleanup_invalid_hosts(
 
         await session.commit()
 
+    invalidate_proxy_pool_caches()
     return admin_ok(request, payload={"dry_run": False,
         "invalid_hosts": sorted(invalid_hosts),
         "matched": len(endpoint_ids),
@@ -952,6 +957,7 @@ async def import_easy_proxies(
 
     await with_sqlite_busy_retry(_op)
 
+    invalidate_proxy_pool_caches()
     payload: dict[str, Any] = {
         "created": created,
         "updated": updated,

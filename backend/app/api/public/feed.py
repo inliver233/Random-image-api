@@ -8,7 +8,7 @@ from app.core.errors import ApiError, ErrorCode
 from app.core.imgproxy import load_imgproxy_config_from_settings
 from app.core.metrics import observe_random_engine_pick
 from app.core.proxy_mirror import resolve_proxy_mirror
-from app.core.random_delivery import schedule_edge_side_effects
+from app.core.random_delivery import schedule_pick_side_effects
 from app.core.random_engine_pick import (
     build_engine_filters,
     build_engine_pick_payload,
@@ -23,7 +23,6 @@ from app.core.random_response import (
     build_simple_item_payload,
     resolve_public_item_urls,
 )
-from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.db.session import create_sessionmaker
 
@@ -151,20 +150,12 @@ async def feed_images(
         imgproxy_cfg = None
 
     def _append_item(image: Any, items_out: list[dict[str, Any]]) -> None:
-        schedule_edge_side_effects(
+        schedule_pick_side_effects(
             background_tasks=background_tasks,
             engine=engine,
-            image_id=int(image.id),
-            illust_id=int(image.illust_id),
-            user_id=int(image.user_id) if getattr(image, "user_id", None) is not None else None,
-            anti_repeat_enabled=bool(pick_ctx.anti_repeat_enabled),
-            dedup_window_s=float(pick_ctx.dedup_window_s),
-            dedup_max_images=int(pick_ctx.dedup_max_images),
-            dedup_max_authors=int(pick_ctx.dedup_max_authors),
-            needs_hydrate=needs_opportunistic_hydrate(image),
+            image=image,
+            pick_ctx=pick_ctx,
             hydrate_reason="feed",
-            mark_ok_on_edge=False,
-            should_mark_ok=False,
         )
         urls = resolve_public_item_urls(
             image=image,

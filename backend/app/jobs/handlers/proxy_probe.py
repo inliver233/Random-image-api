@@ -20,6 +20,7 @@ from app.core.proxy_health import (
     proxy_endpoint_fail_values_threshold,
     proxy_endpoint_ok_values,
 )
+from app.core.proxy_routing import invalidate_proxy_pool_caches
 from app.core.proxy_uri import build_proxy_uri
 from app.core.redact import redact_text
 from app.core.time import iso_utc_ms
@@ -199,5 +200,7 @@ def build_proxy_probe_handler(
                 await session.commit()
 
         await with_sqlite_busy_retry(_op)
+        # Blacklist / health changes must drop eligible-endpoint cache immediately.
+        invalidate_proxy_pool_caches()
 
     return _handler

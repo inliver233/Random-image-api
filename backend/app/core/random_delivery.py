@@ -130,6 +130,34 @@ def schedule_edge_side_effects(
     )
 
 
+def schedule_pick_side_effects(
+    *,
+    background_tasks: BackgroundTasks,
+    engine: Any,
+    image: Any,
+    pick_ctx: Any,
+    hydrate_reason: str,
+    mark_ok_on_edge: bool = False,
+    should_mark_ok: bool = False,
+) -> None:
+    """Thin wrapper: anti-repeat / hydrate / optional mark_ok from RandomPickContext + image."""
+    schedule_edge_side_effects(
+        background_tasks=background_tasks,
+        engine=engine,
+        image_id=int(image.id),
+        illust_id=int(image.illust_id),
+        user_id=int(image.user_id) if getattr(image, "user_id", None) is not None else None,
+        anti_repeat_enabled=bool(pick_ctx.anti_repeat_enabled),
+        dedup_window_s=float(pick_ctx.dedup_window_s),
+        dedup_max_images=int(pick_ctx.dedup_max_images),
+        dedup_max_authors=int(pick_ctx.dedup_max_authors),
+        needs_hydrate=needs_opportunistic_hydrate(image),
+        hydrate_reason=str(hydrate_reason),
+        mark_ok_on_edge=bool(mark_ok_on_edge),
+        should_mark_ok=bool(should_mark_ok),
+    )
+
+
 def build_edge_redirect_response(
     *,
     edge_url: str,
