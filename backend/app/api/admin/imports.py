@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from starlette.datastructures import UploadFile
 
 from app.api.admin.deps import get_admin_claims
+from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.data_files import get_sqlite_db_dir, make_file_ref
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -473,17 +474,9 @@ async def list_imports(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if limit < 1 or limit > 200:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported limit", status_code=400)
-
-    cursor_i: int | None = None
-    cursor_raw = (cursor or "").strip()
-    if cursor_raw:
-        if not cursor_raw.isdigit():
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
-        cursor_i = int(cursor_raw)
-        if cursor_i <= 0:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
+    parsed = parse_admin_int_cursor(limit=limit, cursor=cursor, limit_max=200)
+    limit = parsed.limit
+    cursor_i = parsed.cursor_i
 
     rid = get_or_create_request_id(request)
     engine = request.app.state.engine

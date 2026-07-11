@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.api.admin.deps import get_admin_claims
+from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.crypto import FieldEncryptor
 from app.core.errors import ApiError, ErrorCode
@@ -75,17 +76,9 @@ async def list_proxy_endpoints(
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
-    if limit < 1 or limit > 500:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported limit", status_code=400)
-
-    cursor_i: int | None = None
-    cursor_raw = (cursor or "").strip()
-    if cursor_raw:
-        if not cursor_raw.isdigit():
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
-        cursor_i = int(cursor_raw)
-        if cursor_i <= 0:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
+    parsed = parse_admin_int_cursor(limit=limit, cursor=cursor, limit_max=500)
+    limit = parsed.limit
+    cursor_i = parsed.cursor_i
 
     rid = get_or_create_request_id(request)
 

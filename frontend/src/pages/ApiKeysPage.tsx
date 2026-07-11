@@ -1,9 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, Modal, Skeleton, Space, Switch, Table, Typography } from "antd";
+import { Alert, Button, Form, Input, Modal, Space, Switch, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 
-import { messageFromError, requestIdDescription, requestIdFromError } from "../admin/errors";
+import { CursorTableCard } from "../admin/CursorTableCard";
+import { messageFromError, requestIdFromError } from "../admin/errors";
 import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
@@ -185,38 +186,19 @@ export function ApiKeysPage() {
         <Alert type="error" showIcon message={actionErrorMessage} description={actionErrorRequestId ? `请求ID: ${actionErrorRequestId}` : ""} />
       ) : null}
 
-      {listQuery.isLoading ? (
-        <Skeleton active />
-      ) : listQuery.isError ? (
-        <Alert
-          type="error"
-          showIcon
-          message="加载 API Keys 失败"
-          description={requestIdDescription(listQuery.error)}
-        />
-      ) : items.length === 0 ? (
-        <Alert type="info" showIcon message="暂无 API Key" description="创建后可用于公网接口鉴权（X-API-Key）。" />
-      ) : (
-        <Card>
-          {requestId ? <Typography.Text type="secondary">请求ID: {requestId}</Typography.Text> : null}
-          <Table<ApiKeyItem>
-            rowKey={(row) => row.id}
-            columns={columns}
-            dataSource={items}
-            pagination={false}
-            size="small"
-            scroll={{ x: 1100 }}
-            style={{ marginTop: 12 }}
-          />
-          {nextCursor ? (
-            <div style={{ marginTop: 12 }}>
-              <Button onClick={() => loadMore.mutate(nextCursor)} loading={loadMore.isPending}>
-                加载更多
-              </Button>
-            </div>
-          ) : null}
-        </Card>
-      )}
+      <CursorTableCard<ApiKeyItem>
+        columns={columns}
+        items={items}
+        rowKey={(row) => row.id}
+        query={listQuery}
+        loadMore={loadMore}
+        nextCursor={nextCursor}
+        listRequestId={requestId}
+        errorMessage="加载 API Keys 失败"
+        emptyMessage="暂无 API Key"
+        emptyDescription="创建后可用于公网接口鉴权（X-API-Key）。"
+        scrollX={1100}
+      />
 
       <Modal
         title="创建 API Key"

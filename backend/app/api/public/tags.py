@@ -4,8 +4,8 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
-from app.core.errors import ApiError, ErrorCode
 from app.core.public_json import public_cursor_list_json
+from app.core.public_search_query import parse_public_search_query
 from app.db.session import create_sessionmaker
 from app.db.tags_list import list_tags as db_list_tags
 
@@ -19,17 +19,17 @@ async def list_tags(
     limit: int = 50,
     cursor: str | None = None,
 ) -> Any:
-    if limit < 1 or limit > 100:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported limit", status_code=400)
-
-    q_norm = (q or "").strip()
-    if q_norm and len(q_norm) > 200:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported q", status_code=400)
+    parsed = parse_public_search_query(q=q, limit=limit, cursor=cursor, cursor_kind="str")
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
     async with Session() as session:
-        items, next_cursor = await db_list_tags(session, limit=limit, cursor=cursor, q=q_norm or None)
+        items, next_cursor = await db_list_tags(
+            session,
+            limit=parsed.limit,
+            cursor=parsed.cursor_s,
+            q=parsed.q,
+        )
 
     return public_cursor_list_json(
         request,
