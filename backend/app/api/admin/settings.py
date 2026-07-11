@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
 from app.core.admin_json import admin_ok
+from app.core.admin_request import load_json_object
 from app.core.recommendation import DEFAULT_RECOMMENDATION, DEFAULT_SCORE_WEIGHTS, as_bool
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_config_cache import invalidate_runtime_config_cache
@@ -291,13 +292,7 @@ def _normalize_recommendation(value: Any, *, strict: bool) -> dict[str, Any]:
 
 
 async def _load_settings_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     settings = data.get("settings") if "settings" in data else data
     if not isinstance(settings, dict):

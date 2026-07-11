@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
+from app.core.admin_request import load_json_object
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.db.models.image_tags import ImageTag
@@ -156,12 +157,7 @@ async def list_admin_images(
 
 
 async def _load_bulk_delete_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     raw_ids = data.get("image_ids", None)
     if raw_ids is None:
@@ -273,12 +269,7 @@ async def bulk_delete_admin_images(
 
 
 async def _load_clear_images_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     confirm = data.get("confirm", False)
     if confirm not in {True, 1, "1", "true", "yes", "y", "on"}:

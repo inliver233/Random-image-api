@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_json import admin_ok
+from app.core.admin_request import load_json_object, parse_bool, parse_bool_optional
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.errors import ApiError, ErrorCode
 from app.core.proxy_routing import select_proxy_uri_for_url
@@ -23,44 +24,10 @@ from app.pixiv.refresh_backoff import refresh_backoff_seconds
 router = APIRouter()
 
 
-def _parse_bool(value: Any, *, default: bool) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"1", "true", "yes", "y", "on"}:
-            return True
-        if v in {"0", "false", "no", "n", "off"}:
-            return False
-    return default
-
-
-def _parse_bool_strict(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"1", "true", "yes", "y", "on"}:
-            return True
-        if v in {"0", "false", "no", "n", "off"}:
-            return False
-    return None
 
 
 async def _load_create_token_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     refresh_token = str(data.get("refresh_token") or "").strip()
     if not refresh_token:
@@ -72,7 +39,7 @@ async def _load_create_token_json(request: Request) -> dict[str, Any]:
     label = str(label_raw).strip() if label_raw is not None else None
     label = label if label else None
 
-    enabled = _parse_bool(data.get("enabled"), default=True)
+    enabled = parse_bool(data.get("enabled"), default=True)
 
     weight_raw = data.get("weight", 1.0)
     try:
@@ -91,13 +58,7 @@ async def _load_create_token_json(request: Request) -> dict[str, Any]:
 
 
 async def _load_update_token_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
     if not data:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing fields", status_code=400)
 
@@ -114,7 +75,7 @@ async def _load_update_token_json(request: Request) -> dict[str, Any]:
         out["label"] = label
 
     if "enabled" in data:
-        enabled = _parse_bool_strict(data.get("enabled"))
+        enabled = parse_bool_optional(data.get("enabled"))
         if enabled is None:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported enabled", status_code=400)
         out["enabled"] = bool(enabled)

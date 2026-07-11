@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
 from app.core.admin_json import admin_ok
+from app.core.admin_request import load_json_object, parse_bool
 from app.core.random_engine_client import engine_health, random_engine_base_url
 from app.core.random_engine_sync import push_engine_snapshot
 from app.core.request_id import get_or_create_request_id
@@ -22,29 +23,9 @@ from app.db.request_logs_cleanup import (
 router = APIRouter()
 
 
-def _parse_bool(value: Any, *, default: bool) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"1", "true", "yes", "y", "on"}:
-            return True
-        if v in {"0", "false", "no", "n", "off"}:
-            return False
-    return default
-
 
 async def _load_cleanup_request_logs_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     keep_days_raw = data.get("keep_days", DEFAULT_REQUEST_LOGS_KEEP_DAYS)
     try:
@@ -70,7 +51,7 @@ async def _load_cleanup_request_logs_json(request: Request) -> dict[str, Any]:
     if chunk_size < 1 or chunk_size > 100_000:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported chunk_size", status_code=400)
 
-    dry_run = _parse_bool(data.get("dry_run"), default=False)
+    dry_run = parse_bool(data.get("dry_run"), default=False)
 
     return {
         "keep_days": int(keep_days),

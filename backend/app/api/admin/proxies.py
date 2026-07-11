@@ -11,6 +11,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
+from app.core.admin_request import load_json_object, parse_bool_optional
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.crypto import FieldEncryptor
 from app.core.errors import ApiError, ErrorCode
@@ -220,28 +221,9 @@ def _parse_easy_conflict_policy(value: Any) -> str:
     return v
 
 
-def _parse_bool_strict(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"1", "true", "yes", "y", "on"}:
-            return True
-        if v in {"0", "false", "no", "n", "off"}:
-            return False
-    return None
-
 
 async def _load_import_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     text = str(data.get("text") or "")
     if not text.strip():
@@ -254,17 +236,11 @@ async def _load_import_json(request: Request) -> dict[str, Any]:
 
 
 async def _load_update_endpoint_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
     if "enabled" not in data:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing enabled", status_code=400)
 
-    enabled = _parse_bool_strict(data.get("enabled"))
+    enabled = parse_bool_optional(data.get("enabled"))
     if enabled is None:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported enabled", status_code=400)
 
@@ -272,13 +248,7 @@ async def _load_update_endpoint_json(request: Request) -> dict[str, Any]:
 
 
 async def _load_easy_import_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     base_url = str(data.get("base_url") or "").strip()
     password = str(data.get("password") or "").strip()
@@ -315,7 +285,7 @@ async def _load_easy_import_json(request: Request) -> dict[str, Any]:
 
     recompute_bindings = False
     if "recompute_bindings" in data:
-        v = _parse_bool_strict(data.get("recompute_bindings"))
+        v = parse_bool_optional(data.get("recompute_bindings"))
         if v is None:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid recompute_bindings", status_code=400)
         recompute_bindings = bool(v)
@@ -331,7 +301,7 @@ async def _load_easy_import_json(request: Request) -> dict[str, Any]:
 
     strict = True
     if "strict" in data:
-        v = _parse_bool_strict(data.get("strict"))
+        v = parse_bool_optional(data.get("strict"))
         if v is None:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid strict", status_code=400)
         strict = bool(v)
@@ -413,7 +383,7 @@ async def _load_cleanup_invalid_hosts_json(request: Request) -> dict[str, Any]:
     for key in ("dry_run", "delete_orphans", "recompute_bindings", "strict"):
         if key not in data:
             continue
-        v = _parse_bool_strict(data.get(key))
+        v = parse_bool_optional(data.get(key))
         if v is None:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Invalid {key}", status_code=400)
         out[key] = bool(v)

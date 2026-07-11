@@ -11,6 +11,7 @@ from sqlalchemy.orm import aliased
 from app.api.admin.deps import get_admin_claims
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.admin_json import admin_ok
+from app.core.admin_request import load_json_object, parse_bool
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
@@ -23,21 +24,6 @@ from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 
 router = APIRouter()
 
-
-def _parse_bool(value: Any, *, default: bool) -> bool:
-    if value is None:
-        return bool(default)
-    if isinstance(value, bool):
-        return bool(value)
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"1", "true", "yes", "y", "on"}:
-            return True
-        if v in {"0", "false", "no", "n", "off"}:
-            return False
-    return bool(default)
 
 
 def _fnv1a64(text: str) -> int:
@@ -101,13 +87,7 @@ def _compute_primary_assignments_soft(
 
 
 async def _load_recompute_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     try:
         pool_id = int(data.get("pool_id"))
@@ -129,19 +109,13 @@ async def _load_recompute_json(request: Request) -> dict[str, Any]:
     if max_tokens_per_proxy <= 0 or max_tokens_per_proxy > 1000:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid max_tokens_per_proxy", status_code=400)
 
-    strict = _parse_bool(data.get("strict"), default=True)
+    strict = parse_bool(data.get("strict"), default=True)
 
     return {"pool_id": pool_id, "max_tokens_per_proxy": max_tokens_per_proxy, "strict": strict}
 
 
 async def _load_override_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     try:
         override_proxy_id = int(data.get("override_proxy_id"))

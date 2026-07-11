@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
+from app.core.admin_request import load_json_object, parse_bool_optional
 from app.core.api_keys import api_key_hint, hmac_sha256_hex
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -17,30 +18,6 @@ from app.db.models.api_keys import ApiKey
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 
 router = APIRouter()
-
-
-def _as_bool(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"true", "1", "yes", "y", "on"}:
-            return True
-        if v in {"false", "0", "no", "n", "off"}:
-            return False
-    return None
-
-
-async def _load_json_object(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
-    return data
 
 
 @router.get("/api-keys")
@@ -95,11 +72,11 @@ async def create_api_key(
     _ = _claims
     rid = get_or_create_request_id(request)
 
-    body = await _load_json_object(request)
+    body = await load_json_object(request)
     name = str(body.get("name") or "").strip()
     api_key = str(body.get("api_key") or "").strip()
     description = str(body.get("description") or "").strip() or None
-    enabled_v = _as_bool(body.get("enabled"))
+    enabled_v = parse_bool_optional(body.get("enabled"))
     enabled = bool(enabled_v) if enabled_v is not None else True
 
     if not name or len(name) > 100:
@@ -159,9 +136,9 @@ async def update_api_key(
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid api_key_id", status_code=400)
 
     rid = get_or_create_request_id(request)
-    body = await _load_json_object(request)
+    body = await load_json_object(request)
 
-    enabled_v = _as_bool(body.get("enabled")) if "enabled" in body else None
+    enabled_v = parse_bool_optional(body.get("enabled")) if "enabled" in body else None
     description_raw = body.get("description") if "description" in body else None
     description = str(description_raw).strip() if isinstance(description_raw, str) else None
     if description is not None and not description:

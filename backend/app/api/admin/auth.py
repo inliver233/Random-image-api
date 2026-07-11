@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
 from app.core.admin_json import admin_ok
+from app.core.admin_request import load_json_object
 from app.core.request_id import get_or_create_request_id
 from app.core.security import create_jwt
 from fastapi import Depends
@@ -16,13 +17,7 @@ router = APIRouter()
 
 
 async def _load_login_json(request: Request) -> tuple[str, str]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     username = str(data.get("username") or "").strip()
     password = str(data.get("password") or "")

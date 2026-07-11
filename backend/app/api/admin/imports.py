@@ -15,6 +15,7 @@ from starlette.datastructures import UploadFile
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
+from app.core.admin_request import parse_bool
 from app.core.data_files import get_sqlite_db_dir, make_file_ref
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -153,21 +154,6 @@ def _parse_import_text(
     return total, accepted, deduped, error_total, errors, preview
 
 
-def _parse_bool(value: Any, *, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"1", "true", "yes", "y", "on"}:
-            return True
-        if v in {"0", "false", "no", "n", "off"}:
-            return False
-    return default
-
 
 def _validate_import_create(data: dict[str, Any]) -> ImportCreateRequest:
     try:
@@ -289,8 +275,8 @@ async def _load_import_request(request: Request) -> ImportUpload:
         body = _validate_import_create(
             {
                 "text": "pixiv_batch_downloader_json" if input_format == "pixiv_batch_downloader_json" else raw.decode("utf-8", errors="replace"),
-                "dry_run": _parse_bool(form.get("dry_run"), default=False),
-                "hydrate_on_import": _parse_bool(form.get("hydrate_on_import"), default=False),
+                "dry_run": parse_bool(form.get("dry_run"), default=False),
+                "hydrate_on_import": parse_bool(form.get("hydrate_on_import"), default=False),
                 "source": str(form.get("source") or "manual"),
             }
         )

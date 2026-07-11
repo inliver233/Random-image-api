@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
+from app.core.admin_request import load_json_object
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
@@ -101,13 +102,7 @@ async def _latest_jobs_by_run_ids(session, *, run_ids: list[str]) -> dict[str, J
 
 
 async def _load_create_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     run_type = str(data.get("type") or "backfill").strip().lower() or "backfill"
     if run_type not in {"backfill", "manual"}:
@@ -123,13 +118,7 @@ async def _load_create_json(request: Request) -> dict[str, Any]:
 
 
 async def _load_manual_job_json(request: Request) -> dict[str, int | None]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     illust_id_raw = data.get("illust_id")
     image_id_raw = data.get("image_id")

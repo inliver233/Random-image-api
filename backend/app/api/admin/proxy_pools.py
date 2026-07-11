@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_json import admin_ok
+from app.core.admin_request import load_json_object, parse_bool
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.db.models.proxy_endpoints import ProxyEndpoint
@@ -18,30 +19,9 @@ from app.db.session import create_sessionmaker
 router = APIRouter()
 
 
-def _parse_bool(value: Any, *, default: bool) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v in {"1", "true", "yes", "y", "on"}:
-            return True
-        if v in {"0", "false", "no", "n", "off"}:
-            return False
-    return default
-
 
 async def _load_create_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     name = str(data.get("name") or "").strip()
     if not name:
@@ -53,18 +33,12 @@ async def _load_create_json(request: Request) -> dict[str, Any]:
     description = str(desc_raw).strip() if desc_raw is not None else None
     description = description if description else None
 
-    enabled = _parse_bool(data.get("enabled"), default=True)
+    enabled = parse_bool(data.get("enabled"), default=True)
     return {"name": name, "description": description, "enabled": enabled}
 
 
 async def _load_update_json(request: Request) -> dict[str, Any]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     out: dict[str, Any] = {}
 
@@ -82,7 +56,7 @@ async def _load_update_json(request: Request) -> dict[str, Any]:
         out["description"] = description if description else None
 
     if "enabled" in data:
-        out["enabled"] = _parse_bool(data.get("enabled"), default=True)
+        out["enabled"] = parse_bool(data.get("enabled"), default=True)
 
     if not out:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing fields", status_code=400)
@@ -91,13 +65,7 @@ async def _load_update_json(request: Request) -> dict[str, Any]:
 
 
 async def _load_set_endpoints_json(request: Request) -> list[dict[str, Any]]:
-    try:
-        data = await request.json()
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400) from exc
-
-    if not isinstance(data, dict):
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid JSON body", status_code=400)
+    data = await load_json_object(request)
 
     raw_items = data.get("items")
     if raw_items is None:
@@ -119,7 +87,7 @@ async def _load_set_endpoints_json(request: Request) -> list[dict[str, Any]]:
             continue
         seen.add(endpoint_id)
 
-        enabled = _parse_bool(raw.get("enabled"), default=True)
+        enabled = parse_bool(raw.get("enabled"), default=True)
 
         weight_raw = raw.get("weight", 1)
         try:
