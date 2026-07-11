@@ -45,4 +45,4 @@ Implementation:
 ## Ops
 
 `/healthz` → `modules.job_queue.backend` from `app.state.job_queue` (sqlite until a real alternate ships).
-Admin → `GET /admin/api/maintenance/modular-ports` → `job_queue.backend` / `requested`.
+Admin → `GET /admin/api/maintenance/modular-ports` → `job_queue.backend` / `requested` / `implemented` / `using_sqlite_fallback`.

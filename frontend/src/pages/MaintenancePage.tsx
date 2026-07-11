@@ -108,7 +108,12 @@ type ModularPortsStatusResponse = {
   ok: true;
   catalog: { backend: string };
   tags?: { backend: string };
-  job_queue: { backend: string; requested: string };
+  job_queue: {
+    backend: string;
+    requested: string;
+    implemented?: boolean;
+    using_sqlite_fallback?: boolean;
+  };
   recent_dedup: {
     configured_backend: string;
     active_backend: string;
@@ -429,6 +434,11 @@ export function MaintenancePage() {
                 {modularPortsStatus.data.job_queue.requested !== modularPortsStatus.data.job_queue.backend ? (
                   <Tag color="orange" style={{ marginLeft: 8 }}>
                     requested={modularPortsStatus.data.job_queue.requested}
+                  </Tag>
+                ) : null}
+                {modularPortsStatus.data.job_queue.using_sqlite_fallback ? (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    {modularPortsStatus.data.job_queue.requested}→sqlite fallback
                   </Tag>
                 ) : null}
               </Descriptions.Item>

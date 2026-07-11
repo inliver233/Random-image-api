@@ -300,6 +300,7 @@ async def modular_ports_status(
         job_requested = "sqlite"
     job_queue = getattr(request.app.state, "job_queue", None)
     job_queue_backend = str(getattr(job_queue, "backend", "sqlite") or "sqlite")
+    job_queue_implemented = job_requested in {"sqlite", "memory"}
     random_service = getattr(request.app.state, "random_service", None)
     random_backend = str(getattr(random_service, "backend", "default") or "default")
     random_pick = getattr(request.app.state, "random_pick", None)
@@ -317,6 +318,9 @@ async def modular_ports_status(
                 # Active port from app.state (sqlite until a real alternate ships).
                 "backend": job_queue_backend,
                 "requested": job_requested,
+                "implemented": job_queue_implemented,
+                # True when redis/nats requested but factory still serves sqlite.
+                "using_sqlite_fallback": (not job_queue_implemented) and job_queue_backend == "sqlite",
             },
             "recent_dedup": {
                 "configured_backend": recent_cfg,

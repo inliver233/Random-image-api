@@ -176,3 +176,122 @@ def test_dual_run_vector_quality_with_filters() -> None:
     assert payload["quality"]["samples"] == 16
     assert payload["quality"]["temperature"] == 0.8
     assert payload["quality"]["weights"]["bookmark"] == 1.0
+
+
+def test_dual_run_vector_merge_anti_repeat_excludes() -> None:
+    from app.core.random_engine_pick import merge_engine_exclude_ids
+
+    class _Ctx:
+        anti_repeat_enabled = True
+        recent_exclude_image_ids = [10, 11, 7]
+
+    merged = merge_engine_exclude_ids(pick_ctx=_Ctx(), exclude_image_ids={7, 8})
+    assert merged == {7, 8, 10, 11}
+
+    class _Off:
+        anti_repeat_enabled = False
+        recent_exclude_image_ids = [99]
+
+    assert merge_engine_exclude_ids(pick_ctx=_Off(), exclude_image_ids=[1]) == {1}
+
+
+def test_dual_run_vector_client_dedup_key_and_feed_limit() -> None:
+    filters = _parse(r18=0, seed="feed-seed")
+    payload = compose_engine_pick_payload(
+        r18=int(filters.r18),
+        r18_strict=1,
+        ai_type_raw=filters.ai_type_raw,
+        ai_type_i=filters.ai_type_i,
+        illust_type_i=filters.illust_type_i,
+        orientation_code=filters.orientation_map[filters.layout_norm],
+        min_width_i=0,
+        min_height_i=0,
+        min_pixels_i=0,
+        min_bookmarks_i=0,
+        min_views_i=0,
+        min_comments_i=0,
+        included=[],
+        excluded=[],
+        exclude_image_ids=[1, 2, 3],
+        user_id=None,
+        illust_id=None,
+        created_from_norm=None,
+        created_to_norm=None,
+        fail_cooldown_before="2026-01-01T00:00:00.000Z",
+        strategy_norm="random",
+        quality_samples_i=12,
+        pick_mode_raw="weighted",
+        temperature=1.0,
+        score_weights={},
+        multipliers={},
+        freshness_half_life_days=30.0,
+        velocity_smooth_days=7.0,
+        seed=filters.seed_norm,
+        limit=20,
+        client_dedup_key="bff-anti-repeat",
+    )
+    assert payload["limit"] == 20
+    assert payload["client_dedup_key"] == "bff-anti-repeat"
+    assert payload["filters"]["fail_cooldown_before"] == "2026-01-01T00:00:00.000Z"
+    assert payload["filters"]["exclude_image_ids"] == [1, 2, 3]
+    assert payload["seed"] == "feed-seed"
+    assert "quality" not in payload
+
+
+def _minimal_plan(*, anti_repeat_enabled: bool, recent_exclude: list[int] | None = None):
+    from types import SimpleNamespace
+
+    from app.core.random_pick_context import RandomPickContext
+
+    return RandomPickContext(
+        attempts=3,
+        attempts_source="test",
+        r18_strict=1,
+        r18_strict_source="test",
+        fail_cooldown_ms=0,
+        fail_cooldown_source="test",
+        fail_cooldown_before=None,
+        strategy_norm="random",
+        strategy_source="test",
+        quality_samples_i=12,
+        quality_samples_base=12,
+        quality_samples_multiplier=1,
+        quality_samples_scaled=False,
+        quality_samples_source="test",
+        pick_mode_raw="weighted",
+        temperature=1.0,
+        score_weights={},
+        multipliers={},
+        freshness_half_life_days=30.0,
+        velocity_smooth_days=7.0,
+        recommendation_source="test",
+        rec_override_keys=[],
+        time_boost_enabled=False,
+        anti_repeat_enabled=anti_repeat_enabled,
+        dedup_enabled_setting=anti_repeat_enabled,
+        dedup_window_s=60.0,
+        dedup_max_images=32,
+        dedup_max_authors=8,
+        dedup_strict=False,
+        dedup_image_penalty=0.0,
+        dedup_author_penalty=0.0,
+        recent_image_ids=set(recent_exclude or []),
+        recent_author_ids=set(),
+        recent_exclude_image_ids=list(recent_exclude or []),
+        pick_kwargs={},
+        debug_base={},
+        rng=SimpleNamespace(),
+        seed_norm="",
+    )
+
+
+def test_dual_run_vector_plan_injects_bff_anti_repeat_dedup_key() -> None:
+    filters = _parse()
+    plan = _minimal_plan(anti_repeat_enabled=True, recent_exclude=[5])
+    body = plan.build_engine_payload(filters=filters, exclude_image_ids=[5, 9], limit=1)
+    assert body["client_dedup_key"] == "bff-anti-repeat"
+    assert set(body["filters"]["exclude_image_ids"]) == {5, 9}
+
+    plan_off = _minimal_plan(anti_repeat_enabled=False)
+    body_off = plan_off.build_engine_payload(filters=filters, limit=1)
+    assert "client_dedup_key" not in body_off

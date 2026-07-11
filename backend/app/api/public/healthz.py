@@ -180,6 +180,14 @@ async def healthz(request: Request) -> Any:
                     str(getattr(getattr(request.app.state, "job_queue", None), "backend", "sqlite") or "sqlite")
                 ),
                 "requested": job_queue_requested,
+                "implemented": job_queue_requested in {"sqlite", "memory"},
+                "using_sqlite_fallback": (
+                    job_queue_requested not in {"sqlite", "memory"}
+                    and str(
+                        getattr(getattr(request.app.state, "job_queue", None), "backend", "sqlite") or "sqlite"
+                    )
+                    == "sqlite"
+                ),
             },
             # Catalog store dialect (sqlite default; postgres when DATABASE_URL is postgres*).
             "catalog": {
