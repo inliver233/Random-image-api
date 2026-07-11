@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -133,6 +134,9 @@ async def healthz(request: Request) -> Any:
         if rl_backend not in {"memory", "redis"}:
             rl_backend = "memory"
         redis_url_configured = bool(str(getattr(settings, "redis_url", "") or "").strip()) if settings is not None else False
+        job_queue_requested = str(os.environ.get("JOB_QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
+        if job_queue_requested not in {"sqlite", "memory", "redis", "nats"}:
+            job_queue_requested = "sqlite"
         modules = {
             "image_edge": {
                 "enabled_flag": bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False,
@@ -155,11 +159,18 @@ async def healthz(request: Request) -> Any:
             # Job claim port (SQLite today; Redis/NATS reserved). Config-only.
             "job_queue": {
                 "backend": "sqlite",
+                "requested": job_queue_requested,
             },
             # Catalog store dialect (sqlite default; postgres when DATABASE_URL is postgres*).
             "catalog": {
                 "backend": (
                     str(getattr(getattr(request.app.state, "catalog_store", None), "backend", "sqlite") or "sqlite")
+                ),
+            },
+            # Anti-repeat short window (memory default; redis reserved). Config-only.
+            "recent_dedup": {
+                "backend": (
+                    str(getattr(getattr(request.app.state, "recent_dedup", None), "backend", "memory") or "memory")
                 ),
             },
         }

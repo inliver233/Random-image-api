@@ -2,12 +2,92 @@ from __future__ import annotations
 
 from collections import deque
 from threading import Lock
+from typing import Protocol, runtime_checkable
 
 
 # Best-effort global de-dup (process-local): reduce short-term duplicates without extra DB writes.
 _RECENT_LOCK = Lock()
 _RECENT_IMAGES: deque[tuple[float, int]] = deque()
 _RECENT_AUTHORS: deque[tuple[float, int]] = deque()
+
+
+@runtime_checkable
+class RecentDedupPort(Protocol):
+    """Short-window anti-repeat store (memory today; Redis later without handler rewrite).
+
+    Semantics: process-local best-effort only. Fail-open is intentional — dedup must never
+    block /random. Cross-instance Redis is optional and must fail open to empty windows.
+    """
+
+    backend: str
+
+    def prune(self, now: float, *, window_s: float, max_images: int, max_authors: int) -> None: ...
+
+    def get_lists(
+        self, now: float, *, window_s: float, max_images: int, max_authors: int
+    ) -> tuple[list[int], list[int]]: ...
+
+    def get_sets(
+        self, now: float, *, window_s: float, max_images: int, max_authors: int
+    ) -> tuple[set[int], set[int]]: ...
+
+    def record(
+        self,
+        *,
+        now: float,
+        image_id: int,
+        user_id: int | None,
+        window_s: float,
+        max_images: int,
+        max_authors: int,
+    ) -> None: ...
+
+    def clear(self) -> None: ...
+
+
+class MemoryRecentDedup:
+    """Default: process-local deques (shared module state so module helpers stay coherent)."""
+
+    backend: str = "memory"
+
+    def prune(self, now: float, *, window_s: float, max_images: int, max_authors: int) -> None:
+        prune_recent(now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors))
+
+    def get_lists(
+        self, now: float, *, window_s: float, max_images: int, max_authors: int
+    ) -> tuple[list[int], list[int]]:
+        return get_recent_lists(
+            now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+        )
+
+    def get_sets(
+        self, now: float, *, window_s: float, max_images: int, max_authors: int
+    ) -> tuple[set[int], set[int]]:
+        return get_recent_sets(
+            now, window_s=float(window_s), max_images=int(max_images), max_authors=int(max_authors)
+        )
+
+    def record(
+        self,
+        *,
+        now: float,
+        image_id: int,
+        user_id: int | None,
+        window_s: float,
+        max_images: int,
+        max_authors: int,
+    ) -> None:
+        record_recent(
+            now=float(now),
+            image_id=int(image_id),
+            user_id=user_id,
+            window_s=float(window_s),
+            max_images=int(max_images),
+            max_authors=int(max_authors),
+        )
+
+    def clear(self) -> None:
+        clear_recent()
 
 
 def prune_recent(now: float, *, window_s: float, max_images: int, max_authors: int) -> None:
@@ -72,3 +152,12 @@ def record_recent(
         _RECENT_IMAGES.append((float(now), int(image_id_i)))
         if user_id_i is not None and user_id_i > 0:
             _RECENT_AUTHORS.append((float(now), int(user_id_i)))
+
+
+def build_recent_dedup(*, backend: str = "memory") -> RecentDedupPort:
+    """Build anti-repeat store. Only memory is implemented; redis reserved → memory."""
+    backend_norm = (backend or "memory").strip().lower()
+    if backend_norm not in {"memory"}:
+        # redis reserved — fall back to memory until implemented (fail-open for multi-instance).
+        backend_norm = "memory"
+    return MemoryRecentDedup()

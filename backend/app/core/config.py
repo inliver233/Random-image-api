@@ -47,6 +47,8 @@ class Settings:
     # Rate-limit backend for public API keys: memory (default) | redis (needs REDIS_URL).
     public_api_key_rate_limit_backend: str
     redis_url: str
+    # Short-window anti-repeat store: memory (default) | redis reserved (falls back to memory).
+    recent_dedup_backend: str
     random_totals_persist_interval_seconds: int
     # Optional Go random-engine BFF dual-run / cutover (empty = Python-only pick).
     random_engine_url: str
@@ -223,6 +225,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if public_api_key_rate_limit_backend not in {"memory", "redis"}:
         public_api_key_rate_limit_backend = "memory"
     redis_url = _get(env, "REDIS_URL", "") or _get(env, "PUBLIC_API_KEY_REDIS_URL", "")
+    # memory (default). redis reserved — factory falls back until implemented.
+    recent_dedup_backend = _get(env, "RECENT_DEDUP_BACKEND", "memory").lower()
+    if recent_dedup_backend not in {"memory", "redis"}:
+        recent_dedup_backend = "memory"
 
     random_totals_persist_interval_seconds = parse_int_env(
         "RANDOM_TOTALS_PERSIST_INTERVAL_SECONDS",
@@ -280,6 +286,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         public_api_key_burst=public_api_key_burst,
         public_api_key_rate_limit_backend=public_api_key_rate_limit_backend,
         redis_url=redis_url,
+        recent_dedup_backend=recent_dedup_backend,
         random_totals_persist_interval_seconds=random_totals_persist_interval_seconds,
         random_engine_url=random_engine_url,
         random_engine_enabled=random_engine_enabled,

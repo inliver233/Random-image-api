@@ -13,6 +13,7 @@ def test_load_settings_dev_defaults() -> None:
     assert s.admin_password == "admin"
     assert s.public_api_key_rate_limit_backend == "memory"
     assert s.redis_url == ""
+    assert s.recent_dedup_backend == "memory"
 
 
 def test_load_settings_api_key_rate_limit_backend() -> None:
@@ -30,6 +31,14 @@ def test_load_settings_api_key_rate_limit_backend() -> None:
 
     s3 = load_settings({"PUBLIC_API_KEY_REDIS_URL": "redis://alias:6379/1"})
     assert s3.redis_url == "redis://alias:6379/1"
+
+
+def test_load_settings_recent_dedup_backend() -> None:
+    s = load_settings({"RECENT_DEDUP_BACKEND": "redis"})
+    # redis is accepted as requested label; factory still returns memory until implemented.
+    assert s.recent_dedup_backend == "redis"
+    s2 = load_settings({"RECENT_DEDUP_BACKEND": "weird"})
+    assert s2.recent_dedup_backend == "memory"
 
 
 def test_load_settings_prod_requires_secrets() -> None:
