@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -295,7 +294,11 @@ async def modular_ports_status(
     )
     if recent_cfg not in {"memory", "redis"}:
         recent_cfg = "memory"
-    job_requested = str(os.environ.get("JOB_QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
+    job_requested = (
+        str(getattr(settings, "job_queue_backend", "sqlite") or "sqlite").strip().lower()
+        if settings is not None
+        else "sqlite"
+    )
     if job_requested not in {"sqlite", "memory", "redis", "nats"}:
         job_requested = "sqlite"
     job_queue = getattr(request.app.state, "job_queue", None)

@@ -49,6 +49,8 @@ class Settings:
     redis_url: str
     # Short-window anti-repeat store: memory (default) | redis (requires REDIS_URL; fail-open).
     recent_dedup_backend: str
+    # Job claim/enqueue port: sqlite (default) | memory | redis | nats (redis/nats reserved → sqlite).
+    job_queue_backend: str
     random_totals_persist_interval_seconds: int
     # Optional Go random-engine BFF dual-run / cutover (empty = Python-only pick).
     random_engine_url: str
@@ -233,6 +235,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     recent_dedup_backend = _get(env, "RECENT_DEDUP_BACKEND", "memory").lower()
     if recent_dedup_backend not in {"memory", "redis"}:
         recent_dedup_backend = "memory"
+    # sqlite (default). redis/nats reserved labels fall back inside build_job_queue.
+    job_queue_backend = _get(env, "JOB_QUEUE_BACKEND", "sqlite").lower()
+    if job_queue_backend not in {"sqlite", "memory", "redis", "nats"}:
+        job_queue_backend = "sqlite"
 
     random_totals_persist_interval_seconds = parse_int_env(
         "RANDOM_TOTALS_PERSIST_INTERVAL_SECONDS",
@@ -300,6 +306,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         public_api_key_rate_limit_backend=public_api_key_rate_limit_backend,
         redis_url=redis_url,
         recent_dedup_backend=recent_dedup_backend,
+        job_queue_backend=job_queue_backend,
         random_totals_persist_interval_seconds=random_totals_persist_interval_seconds,
         random_engine_url=random_engine_url,
         random_engine_enabled=random_engine_enabled,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
 from contextlib import asynccontextmanager
 
@@ -227,7 +226,7 @@ def create_app() -> FastAPI:
     app.state.random_pick = build_random_pick(database_url=str(settings.database_url))
     app.state.job_queue = build_job_queue(
         engine,
-        backend=str(os.environ.get("JOB_QUEUE_BACKEND", "sqlite") or "sqlite"),
+        backend=str(getattr(settings, "job_queue_backend", "sqlite") or "sqlite"),
     )
     app.state.recent_dedup = build_recent_dedup(
         backend=str(getattr(settings, "recent_dedup_backend", "memory") or "memory"),

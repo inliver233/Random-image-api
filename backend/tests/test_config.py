@@ -14,6 +14,7 @@ def test_load_settings_dev_defaults() -> None:
     assert s.public_api_key_rate_limit_backend == "memory"
     assert s.redis_url == ""
     assert s.recent_dedup_backend == "memory"
+    assert s.job_queue_backend == "sqlite"
 
 
 def test_load_settings_api_key_rate_limit_backend() -> None:
@@ -39,6 +40,24 @@ def test_load_settings_recent_dedup_backend() -> None:
     assert s.recent_dedup_backend == "redis"
     s2 = load_settings({"RECENT_DEDUP_BACKEND": "weird"})
     assert s2.recent_dedup_backend == "memory"
+
+
+def test_load_settings_job_queue_backend() -> None:
+    s = load_settings({})
+    assert s.job_queue_backend == "sqlite"
+
+    s_redis = load_settings({"JOB_QUEUE_BACKEND": "redis"})
+    # redis/nats accepted as requested labels; factory still serves sqlite until implemented.
+    assert s_redis.job_queue_backend == "redis"
+
+    s_nats = load_settings({"JOB_QUEUE_BACKEND": "nats"})
+    assert s_nats.job_queue_backend == "nats"
+
+    s_mem = load_settings({"JOB_QUEUE_BACKEND": "memory"})
+    assert s_mem.job_queue_backend == "memory"
+
+    s_weird = load_settings({"JOB_QUEUE_BACKEND": "weird"})
+    assert s_weird.job_queue_backend == "sqlite"
 
 
 def test_load_settings_prod_requires_secrets() -> None:

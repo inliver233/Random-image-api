@@ -378,8 +378,15 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
         cached_enabled_tokens: int | None = None
         cached_desired_concurrency = 1
 
-        job_queue = build_job_queue(engine, backend=parse_str_env("JOB_QUEUE_BACKEND", default="sqlite"))
-        log.info("job_queue_backend=%s", getattr(job_queue, "backend", "sqlite"))
+        job_queue = build_job_queue(
+            engine,
+            backend=str(getattr(settings, "job_queue_backend", "sqlite") or "sqlite"),
+        )
+        log.info(
+            "job_queue_backend=%s requested=%s",
+            getattr(job_queue, "backend", "sqlite"),
+            getattr(settings, "job_queue_backend", "sqlite"),
+        )
 
         refresher = EasyProxiesAutoRefresher(
             EasyProxiesAutoRefreshConfig(

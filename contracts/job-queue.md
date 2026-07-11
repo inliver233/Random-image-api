@@ -31,7 +31,13 @@ Implementation:
 
 | Env | Default | Role |
 | --- | --- | --- |
-| `JOB_QUEUE_BACKEND` | `sqlite` | `sqlite` (implemented). `redis` / `nats` reserved → sqlite until implemented |
+| `JOB_QUEUE_BACKEND` | `sqlite` | Loaded into `Settings.job_queue_backend`. `sqlite` / `memory` implemented (sqlite). `redis` / `nats` reserved labels → factory still serves `SqliteJobQueue`; ops surfaces `requested` vs `backend` + `using_sqlite_fallback` |
+
+Wire-up reads settings (not raw `os.environ` at call sites):
+
+- API: `app.state.job_queue = build_job_queue(engine, backend=settings.job_queue_backend)`
+- Worker: same via `load_settings().job_queue_backend`
+- `/healthz` + `GET /admin/api/maintenance/modular-ports` → `requested` from settings
 
 ## Semantics (must preserve on any backend)
 

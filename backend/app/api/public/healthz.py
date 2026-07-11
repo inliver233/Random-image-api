@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -136,7 +135,11 @@ async def healthz(request: Request) -> Any:
         if rl_backend not in {"memory", "redis"}:
             rl_backend = "memory"
         redis_url_configured = bool(str(getattr(settings, "redis_url", "") or "").strip()) if settings is not None else False
-        job_queue_requested = str(os.environ.get("JOB_QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
+        job_queue_requested = (
+            str(getattr(settings, "job_queue_backend", "sqlite") or "sqlite").strip().lower()
+            if settings is not None
+            else "sqlite"
+        )
         if job_queue_requested not in {"sqlite", "memory", "redis", "nats"}:
             job_queue_requested = "sqlite"
         modules = {
