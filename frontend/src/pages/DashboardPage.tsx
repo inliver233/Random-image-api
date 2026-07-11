@@ -114,6 +114,24 @@ type RandomEngineStatusResponse = {
   request_id: string;
 };
 
+type CfApiProxyStatusResponse = {
+  ok: true;
+  enabled_flag: boolean;
+  ready: boolean;
+  base_url_count: number;
+  has_secret: boolean;
+  request_id: string;
+};
+
+type R2PrewarmStatusResponse = {
+  ok: true;
+  enabled_flag: boolean;
+  ready: boolean;
+  url_configured: boolean;
+  secret_configured?: boolean;
+  request_id: string;
+};
+
 export function DashboardPage() {
   const navigate = useNavigate();
 
@@ -162,6 +180,18 @@ export function DashboardPage() {
     queryKey: ["admin", "maintenance", "random-engine"],
     queryFn: () => apiJson<RandomEngineStatusResponse>("/admin/api/maintenance/random-engine"),
     refetchInterval: 15_000,
+  });
+
+  const cfApiProxy = useQuery({
+    queryKey: ["admin", "maintenance", "cf-api-proxy"],
+    queryFn: () => apiJson<CfApiProxyStatusResponse>("/admin/api/maintenance/cf-api-proxy"),
+    refetchInterval: 30_000,
+  });
+
+  const r2Prewarm = useQuery({
+    queryKey: ["admin", "maintenance", "r2-prewarm"],
+    queryFn: () => apiJson<R2PrewarmStatusResponse>("/admin/api/maintenance/r2-prewarm"),
+    refetchInterval: 30_000,
   });
 
   const version = useQuery({
@@ -382,8 +412,14 @@ export function DashboardPage() {
         <Col xs={24} md={24} xl={24}>
           <Card title="模块端口 / 边缘切流（Phase 4）">
             <QueryState
-              queries={[modularPorts, imageEdge, randomEngine]}
-              errorMessages={["加载模块端口失败", "加载 Image Edge 失败", "加载 Random Engine 失败"]}
+              queries={[modularPorts, imageEdge, randomEngine, cfApiProxy, r2Prewarm]}
+              errorMessages={[
+                "加载模块端口失败",
+                "加载 Image Edge 失败",
+                "加载 Random Engine 失败",
+                "加载 CF API Proxy 失败",
+                "加载 R2 Prewarm 失败",
+              ]}
             >
               <Space direction="vertical" style={{ width: "100%" }}>
                 {modularPorts.data ? (
@@ -444,6 +480,37 @@ export function DashboardPage() {
                       </Tag>
                     </>
                   ) : null}
+                  {cfApiProxy.data ? (
+                    <Tag
+                      color={
+                        cfApiProxy.data.ready ? "green" : cfApiProxy.data.enabled_flag ? "orange" : undefined
+                      }
+                    >
+                      cf_api_proxy=
+                      {cfApiProxy.data.ready
+                        ? "ready"
+                        : cfApiProxy.data.enabled_flag
+                          ? "flag-on-not-ready"
+                          : "off"}
+                    </Tag>
+                  ) : null}
+                  {r2Prewarm.data ? (
+                    <Tag
+                      color={
+                        r2Prewarm.data.ready ? "green" : r2Prewarm.data.enabled_flag ? "orange" : undefined
+                      }
+                    >
+                      r2_prewarm=
+                      {r2Prewarm.data.ready
+                        ? "ready"
+                        : r2Prewarm.data.enabled_flag
+                          ? "flag-on-not-ready"
+                          : "off"}
+                      {!r2Prewarm.data.secret_configured && r2Prewarm.data.enabled_flag
+                        ? " · no-secret"
+                        : ""}
+                    </Tag>
+                  ) : null}
                   {randomEngine.data ? (
                     <>
                       <Tag
@@ -475,7 +542,13 @@ export function DashboardPage() {
 
                 <Typography.Text type="secondary">
                   请求ID:{" "}
-                  {[modularPorts.data?.request_id, imageEdge.data?.request_id, randomEngine.data?.request_id]
+                  {[
+                    modularPorts.data?.request_id,
+                    imageEdge.data?.request_id,
+                    cfApiProxy.data?.request_id,
+                    r2Prewarm.data?.request_id,
+                    randomEngine.data?.request_id,
+                  ]
                     .filter(Boolean)
                     .join(" / ") || "—"}
                 </Typography.Text>

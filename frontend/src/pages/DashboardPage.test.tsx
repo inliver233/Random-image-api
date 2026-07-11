@@ -195,6 +195,32 @@ describe("DashboardPage", () => {
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
+        if (url.endsWith("/admin/api/maintenance/cf-api-proxy")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              enabled_flag: false,
+              ready: false,
+              base_url_count: 0,
+              has_secret: false,
+              request_id: "req_cf",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.endsWith("/admin/api/maintenance/r2-prewarm")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              enabled_flag: true,
+              ready: false,
+              url_configured: true,
+              secret_configured: false,
+              request_id: "req_r2",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
         return new Response(JSON.stringify({ ok: false, code: "NOT_FOUND", message: "not found", request_id: "req_x", details: {} }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
@@ -241,6 +267,8 @@ describe("DashboardPage", () => {
     expect(await screen.findByText("redis→sqlite fallback")).toBeInTheDocument();
     expect(await screen.findByText("redis→memory fallback")).toBeInTheDocument();
     expect(await screen.findByText(/image_edge=flag-on-not-ready/)).toBeInTheDocument();
+    expect(await screen.findByText(/cf_api_proxy=off/)).toBeInTheDocument();
+    expect(await screen.findByText(/r2_prewarm=flag-on-not-ready/)).toBeInTheDocument();
     expect(await screen.findByText(/engine=enabled-not-ready/)).toBeInTheDocument();
     expect(await screen.findByText("engine index empty")).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:.*req_modular/)).toBeInTheDocument();
