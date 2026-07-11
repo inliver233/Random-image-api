@@ -1,13 +1,14 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Space, Switch, Table, Typography } from "antd";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Switch, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { CursorTableCard } from "../admin/CursorTableCard";
 import { yesNo } from "../admin/format";
-import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
+import { useCursorList } from "../hooks/useCursorList";
 
 type TokenItem = {
   id: string;
@@ -24,6 +25,7 @@ type TokenItem = {
 type TokensListResponse = {
   ok: true;
   items: TokenItem[];
+  next_cursor?: string | null;
   request_id: string;
 };
 
@@ -134,10 +136,29 @@ export function TokensPage() {
 
   const alerts = useActionAlerts();
 
-  const query = useQuery({
-    queryKey: ["admin", "tokens"],
-    queryFn: () => apiJson<TokensListResponse>("/admin/api/tokens"),
+  const TOKEN_PAGE_SIZE = 200;
+  const {
+    query: listQuery,
+    items,
+    nextCursor,
+    listRequestId,
+    loadMore,
+  } = useCursorList<TokenItem, TokensListResponse>({
+    queryKey: ["admin", "tokens", { limit: TOKEN_PAGE_SIZE }],
+    getItemId: (item) => item.id,
+    fetchPage: (cursor) => {
+      const sp = new URLSearchParams({ limit: String(TOKEN_PAGE_SIZE) });
+      if (cursor) sp.set("cursor", cursor);
+      return apiJson<TokensListResponse>(`/admin/api/tokens?${sp.toString()}`);
+    },
   });
+
+  React.useEffect(() => {
+    if (loadMore.isError) {
+      alerts.setError(loadMore.error, "加载更多失败");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run on loadMore error state
+  }, [loadMore.isError, loadMore.error]);
 
   const createToken = useMutation({
     mutationFn: (values: CreateTokenFormValues) =>
@@ -380,41 +401,33 @@ export function TokensPage() {
         </Form>
       </Modal>
 
-      <QueryState
-        query={query}
+      <CursorTableCard<TokenItem>
+        columns={columns({
+          onEdit: (row) => openEdit(row),
+          onTestRefresh: (id) => testRefresh.mutate(id),
+          onResetFailures: (id) => resetFailures.mutate(id),
+          onToggleEnabled: (row) =>
+            updateToken.mutate({
+              tokenId: row.id,
+              body: { enabled: !row.enabled },
+            }),
+          onDelete: (id) => deleteToken.mutate(id),
+          testPendingId: testRefresh.isPending ? testRefresh.variables ?? null : null,
+          resetPendingId: resetFailures.isPending ? resetFailures.variables ?? null : null,
+          updatePendingId: updateToken.isPending ? updateToken.variables?.tokenId ?? null : null,
+          deletePendingId: deleteToken.isPending ? deleteToken.variables ?? null : null,
+        })}
+        items={items}
+        rowKey={(row) => row.id}
+        query={listQuery}
+        loadMore={loadMore}
+        nextCursor={nextCursor}
+        listRequestId={listRequestId}
         errorMessage="加载令牌列表失败"
-        empty={Boolean(query.data && query.data.items.length === 0)}
         emptyMessage="暂无令牌"
         emptyDescription="请至少添加一个令牌，才能执行 Pixiv 接口相关任务。"
-      >
-        {query.data ? (
-          <Card>
-            <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
-            <Table<TokenItem>
-              rowKey={(row) => row.id}
-              columns={columns({
-                onEdit: (row) => openEdit(row),
-                onTestRefresh: (id) => testRefresh.mutate(id),
-                onResetFailures: (id) => resetFailures.mutate(id),
-                onToggleEnabled: (row) =>
-                  updateToken.mutate({
-                    tokenId: row.id,
-                    body: { enabled: !row.enabled },
-                  }),
-                onDelete: (id) => deleteToken.mutate(id),
-                testPendingId: testRefresh.isPending ? testRefresh.variables ?? null : null,
-                resetPendingId: resetFailures.isPending ? resetFailures.variables ?? null : null,
-                updatePendingId: updateToken.isPending ? updateToken.variables?.tokenId ?? null : null,
-                deletePendingId: deleteToken.isPending ? deleteToken.variables ?? null : null,
-              })}
-              dataSource={query.data.items}
-              pagination={false}
-              size="small"
-              style={{ marginTop: 12 }}
-            />
-          </Card>
-        ) : null}
-      </QueryState>
+        scrollX={1200}
+      />
     </Space>
   );
 }

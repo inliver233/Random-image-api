@@ -116,6 +116,13 @@ export function ProxyPoolsPage() {
 
   const alerts = useActionAlerts();
 
+  React.useEffect(() => {
+    if (endpointsList.loadMore.isError) {
+      alerts.setError(endpointsList.loadMore.error, "加载更多节点失败");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run on loadMore error state
+  }, [endpointsList.loadMore.isError, endpointsList.loadMore.error]);
+
   const createPool = useMutation({
     mutationFn: (values: CreatePoolFormValues) =>
       apiJson<CreateProxyPoolResponse>("/admin/api/proxy-pools", {
@@ -522,6 +529,18 @@ export function ProxyPoolsPage() {
               >
                 加载更多节点
               </Button>
+            ) : null}
+            {endpointsList.loadMore.isError ? (
+              <Alert
+                type="error"
+                showIcon
+                message={
+                  endpointsList.loadMore.error instanceof Error
+                    ? endpointsList.loadMore.error.message
+                    : "加载更多节点失败"
+                }
+                style={{ marginTop: 12 }}
+              />
             ) : null}
           </>
         )}

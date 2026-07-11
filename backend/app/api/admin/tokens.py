@@ -7,7 +7,8 @@ import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
-from app.core.admin_json import admin_ok
+from app.core.admin_cursor_query import parse_admin_int_cursor, slice_id_cursor_page
+from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.admin_request import (
     load_json_object,
     parse_bool,
@@ -91,24 +92,27 @@ async def _load_update_token_json(request: Request) -> dict[str, Any]:
 @router.get("/tokens")
 async def list_tokens(
     request: Request,
+    limit: int = 200,
+    cursor: str | None = None,
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
+    parsed = parse_admin_int_cursor(limit=limit, cursor=cursor, limit_max=500)
+    limit = parsed.limit
+    cursor_i = parsed.cursor_i
     rid = get_or_create_request_id(request)
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
 
+    stmt = sa.select(PixivToken).order_by(PixivToken.id.desc()).limit(int(limit) + 1)
+    if cursor_i is not None:
+        stmt = stmt.where(PixivToken.id < int(cursor_i))
+
     async with Session() as session:
-        tokens = (
-            (
-                await session.execute(
-                    sa.select(PixivToken).order_by(PixivToken.id.desc())
-                )
-            )
-            .scalars()
-            .all()
-        )
+        tokens = (await session.execute(stmt)).scalars().all()
+
+    page, next_cursor = slice_id_cursor_page(list(tokens), int(limit))
 
     items = [
         {
@@ -124,10 +128,10 @@ async def list_tokens(
             "last_error_code": t.last_error_code,
             "last_error_msg": t.last_error_msg,
         }
-        for t in tokens
+        for t in page
     ]
 
-    return admin_ok(request, payload={"items": items}, request_id=rid)
+    return admin_cursor_list(request, items=items, next_cursor=next_cursor, request_id=rid)
 
 
 @router.post("/tokens")
