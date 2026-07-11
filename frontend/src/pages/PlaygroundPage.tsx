@@ -324,10 +324,14 @@ export function PlaygroundPage() {
 
               <Form.Item noStyle shouldUpdate={(prev, next) => prev.strategy !== next.strategy}>
                 {({ getFieldValue }) => (
-                  <Form.Item label="质量抽样数量（quality，留空=服务端默认）" name="quality_samples">
+                  <Form.Item
+                    label="质量抽样数量（quality，留空=服务端默认）"
+                    name="quality_samples"
+                    extra="与服务端一致：硬上限 200。"
+                  >
                     <InputNumber
                       min={1}
-                      max={1000}
+                      max={200}
                       placeholder="留空使用服务端默认"
                       style={{ width: "100%" }}
                       disabled={getFieldValue("strategy") !== "quality"}

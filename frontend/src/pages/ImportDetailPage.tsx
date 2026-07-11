@@ -223,17 +223,22 @@ export function ImportDetailPage() {
                     const total = Number(query.data?.item.import.total || 0);
                     const base = accepted > 0 ? accepted : total > 0 ? total : 0;
                     const success = Number(query.data?.item.import.success || 0);
+                    const failed = Number(query.data?.item.import.failed || 0);
                     if (base <= 0) return 0;
-                    const percent = Math.round((success / base) * 100);
+                    // Progress = processed (success + failed) / accepted, not success-only.
+                    const percent = Math.round(((success + failed) / base) * 100);
                     return Math.max(0, Math.min(100, percent));
                   })()}
-                  status={
-                    query.data.item.job.status === "completed"
-                      ? "success"
-                      : query.data.item.job.status === "failed" || query.data.item.job.status === "dlq"
-                        ? "exception"
-                        : "active"
-                  }
+                  status={(() => {
+                    const status = String(query.data.item.job.status || "");
+                    const failed = Number(query.data?.item.import.failed || 0);
+                    if (status === "failed" || status === "dlq") return "exception";
+                    if (status === "completed") {
+                      // Completed with failures is not pure green success.
+                      return failed > 0 ? "exception" : "success";
+                    }
+                    return "active";
+                  })()}
                 />
               </div>
             ) : null}

@@ -33,7 +33,9 @@ export function LoginPage() {
       ? "登录已失效，请重新登录。"
       : reason === "missing_token"
         ? "请先登录后再访问管理后台。"
-        : null;
+        : reason === "logout"
+          ? "已退出登录。"
+          : null;
 
   const onFinish = async (values: LoginFormValues) => {
     setLoading(true);

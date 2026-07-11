@@ -70,21 +70,34 @@ def _sanitize_source_ref(value: str | None) -> str | None:
 @router.get("/proxies/endpoints")
 async def list_proxy_endpoints(
     request: Request,
+    limit: int = 50,
+    cursor: str | None = None,
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
     _ = _claims
+    if limit < 1 or limit > 500:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported limit", status_code=400)
+
+    cursor_i: int | None = None
+    cursor_raw = (cursor or "").strip()
+    if cursor_raw:
+        if not cursor_raw.isdigit():
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
+        cursor_i = int(cursor_raw)
+        if cursor_i <= 0:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
+
     rid = get_or_create_request_id(request)
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
     async with Session() as session:
-        endpoints = (
-            (
-                await session.execute(sa.select(ProxyEndpoint).order_by(ProxyEndpoint.id.desc()))
-            )
-            .scalars()
-            .all()
-        )
+        stmt = sa.select(ProxyEndpoint).order_by(ProxyEndpoint.id.desc()).limit(int(limit) + 1)
+        if cursor_i is not None:
+            stmt = stmt.where(ProxyEndpoint.id < int(cursor_i))
+        rows = (await session.execute(stmt)).scalars().all()
+        endpoints = list(rows[: int(limit)])
+        next_cursor_i = int(endpoints[-1].id) if len(rows) > int(limit) and endpoints else None
 
         endpoint_ids = [int(p.id) for p in endpoints]
 
@@ -196,7 +209,12 @@ async def list_proxy_endpoints(
         for p in endpoints
     ]
 
-    return {"ok": True, "items": items, "request_id": rid}
+    return {
+        "ok": True,
+        "items": items,
+        "next_cursor": str(next_cursor_i) if next_cursor_i is not None else "",
+        "request_id": rid,
+    }
 
 
 def _parse_conflict_policy(value: Any) -> str:

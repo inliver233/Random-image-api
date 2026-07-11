@@ -32,7 +32,11 @@ describe("ProxiesPage", () => {
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
-        if (url.endsWith("/admin/api/proxies/endpoints")) {
+        if (
+          (url.includes("/admin/api/proxies/endpoints?") || url.endsWith("/admin/api/proxies/endpoints")) &&
+          !url.includes("/import") &&
+          !/\/endpoints\/\d+/.test(url)
+        ) {
           endpointsCalls += 1;
           return new Response(
             JSON.stringify({
@@ -56,6 +60,7 @@ describe("ProxiesPage", () => {
                   bindings: { primary_count: 1, override_count: 0 },
                 },
               ],
+              next_cursor: "",
               request_id: `req_proxies_${endpointsCalls}`,
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },

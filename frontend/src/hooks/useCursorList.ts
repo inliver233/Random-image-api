@@ -25,11 +25,15 @@ export function useCursorList<TItem, TResponse extends { items: TItem[]; next_cu
   });
 
   React.useEffect(() => {
-    // New filter/queryKey → bump generation so in-flight load-more is ignored.
+    // New filter/queryKey → bump generation so in-flight load-more is ignored,
+    // and clear the list so stale items from the previous filter don't flash.
     const prev = queryKeyRef.current;
     queryKeyRef.current = queryKey;
     if (JSON.stringify(prev) !== JSON.stringify(queryKey)) {
       generationRef.current += 1;
+      setItems([]);
+      setNextCursor("");
+      setListRequestId(null);
     }
   }, [queryKey]);
 

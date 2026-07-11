@@ -4,6 +4,7 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useEffect, useState } from "react";
 
 import { ApiError, apiJson } from "../api/client";
+import { useCursorList } from "../hooks/useCursorList";
 
 type ProxyEndpointItem = {
   id: string;
@@ -36,6 +37,7 @@ type ProxyEndpointItem = {
 type ProxiesEndpointsResponse = {
   ok: true;
   items: ProxyEndpointItem[];
+  next_cursor?: string;
   request_id: string;
 };
 
@@ -232,9 +234,20 @@ const columns = (actions: {
 export function ProxiesPage() {
   const queryClient = useQueryClient();
 
-  const query = useQuery({
-    queryKey: ["admin", "proxies", "endpoints"],
-    queryFn: () => apiJson<ProxiesEndpointsResponse>("/admin/api/proxies/endpoints"),
+  const {
+    query,
+    items: endpointItems,
+    nextCursor,
+    listRequestId,
+    loadMore,
+  } = useCursorList<ProxyEndpointItem, ProxiesEndpointsResponse>({
+    queryKey: ["admin", "proxies", "endpoints", { limit: 50 }],
+    getItemId: (item) => item.id,
+    fetchPage: (cursor) => {
+      const sp = new URLSearchParams({ limit: "50" });
+      if (cursor) sp.set("cursor", cursor);
+      return apiJson<ProxiesEndpointsResponse>(`/admin/api/proxies/endpoints?${sp.toString()}`);
+    },
   });
 
   const poolsQuery = useQuery({
@@ -814,13 +827,11 @@ export function ProxiesPage() {
             message="加载代理节点失败"
             description={requestIdFromError(query.error) ? `请求ID: ${requestIdFromError(query.error)}` : ""}
           />
-        ) : !query.data ? (
-          <Skeleton active />
-        ) : query.data.items.length === 0 ? (
+        ) : endpointItems.length === 0 && !query.isFetching ? (
           <Alert type="info" showIcon message="暂无代理节点" description="请先导入代理节点以启用代理路由。" />
         ) : (
           <>
-            <Typography.Text type="secondary">请求ID: {query.data.request_id}</Typography.Text>
+            {listRequestId ? <Typography.Text type="secondary">请求ID: {listRequestId}</Typography.Text> : null}
             <Table<ProxyEndpointItem>
               rowKey={(row) => row.id}
               columns={columns({
@@ -829,12 +840,27 @@ export function ProxiesPage() {
                 onResetFailures: (row) => resetEndpointFailures.mutate({ endpointId: row.id }),
                 resetPendingId: resetEndpointFailures.isPending ? resetEndpointFailures.variables?.endpointId ?? null : null,
               })}
-              dataSource={query.data.items}
+              dataSource={endpointItems}
               pagination={false}
               size="small"
               scroll={{ x: 1500 }}
               style={{ marginTop: 12 }}
             />
+            {nextCursor ? (
+              <div style={{ marginTop: 12 }}>
+                <Button onClick={() => loadMore.mutate(nextCursor)} loading={loadMore.isPending}>
+                  加载更多
+                </Button>
+              </div>
+            ) : null}
+            {loadMore.isError ? (
+              <Alert
+                type="error"
+                showIcon
+                message={loadMore.error instanceof Error ? loadMore.error.message : "加载更多失败"}
+                style={{ marginTop: 12 }}
+              />
+            ) : null}
           </>
         )}
       </Card>

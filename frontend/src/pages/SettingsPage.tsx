@@ -326,8 +326,12 @@ export function SettingsPage() {
             <Typography.Title level={5} style={{ marginTop: 12 }}>
               随机接口设置
             </Typography.Title>
-            <Form.Item label="默认尝试次数" name="random_default_attempts">
-              <InputNumber min={0} max={1000} style={{ width: 200 }} />
+            <Form.Item
+              label="默认尝试次数"
+              name="random_default_attempts"
+              extra="与公开接口 runtime 校验一致：1–10。"
+            >
+              <InputNumber min={1} max={10} style={{ width: 200 }} />
             </Form.Item>
             <Form.Item label="默认严格 R18 过滤" name="random_default_r18_strict" valuePropName="checked">
               <Switch />
