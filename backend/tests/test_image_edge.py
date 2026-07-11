@@ -245,6 +245,17 @@ def test_random_image_redirect_prefers_image_edge(tmp_path: Path, monkeypatch) -
         assert loc.startswith("https://img.example.com/u/")
         assert resp.headers.get("x-image-edge") == "1"
 
+        local = client.get(
+            "/random?format=image&redirect=1&local=1",
+            headers={"X-Request-Id": "req_edge_redir_local"},
+            follow_redirects=False,
+        )
+        assert local.status_code == 302
+        local_loc = local.headers.get("location") or ""
+        assert local_loc.startswith("/i/")
+        assert local.headers.get("x-image-edge") != "1"
+        assert not local_loc.startswith("https://img.example.com/")
+
 
 def test_random_simple_json_proxy_prefers_image_edge(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "image_edge_random.db"

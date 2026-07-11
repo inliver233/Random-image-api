@@ -213,12 +213,13 @@ async def random_image(
 
         if format == "image" and redirect == 1:
             # Prefer CF image edge as primary public delivery when configured.
-            # Explicit local mirror/proxy overrides keep the local /i/ fallback path.
+            # Explicit local mirror/proxy overrides (incl. local=1) keep the local /i/ fallback path.
             edge_url = None
             if prefer_image_edge(
                 proxy_override=proxy_override,
                 pixiv_cat=int(pixiv_cat),
                 pximg_mirror_host_override=pximg_mirror_host_override,
+                force_local=force_local_from_query(request.query_params),
             ):
                 edge_url = resolve_image_edge_redirect_url(
                     settings=request.app.state.settings,

@@ -21,7 +21,7 @@ def test_random_attempts_retries_on_upstream_failure(tmp_path: Path, monkeypatch
 
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("DATABASE_URL", db_url)
-    monkeypatch.setattr("app.api.public.random.random.random", lambda: 0.0)
+    monkeypatch.setattr("app.core.random_pick_context.random.random", lambda: 0.0)
 
     app = create_app()
 
@@ -82,7 +82,7 @@ def test_random_attempts_exhausted_returns_502(tmp_path: Path, monkeypatch) -> N
 
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("DATABASE_URL", db_url)
-    monkeypatch.setattr("app.api.public.random.random.random", lambda: 0.0)
+    monkeypatch.setattr("app.core.random_pick_context.random.random", lambda: 0.0)
 
     app = create_app()
 

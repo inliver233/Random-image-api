@@ -22,7 +22,7 @@ def test_fail_cooldown_skips_recent_failures(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setenv("APP_ENV", "dev")
     monkeypatch.setenv("DATABASE_URL", db_url)
     monkeypatch.setenv("RANDOM_FAIL_COOLDOWN_SECONDS", "3600")
-    monkeypatch.setattr("app.api.public.random.random.random", lambda: 0.0)
+    monkeypatch.setattr("app.core.random_pick_context.random.random", lambda: 0.0)
 
     app = create_app()
 
