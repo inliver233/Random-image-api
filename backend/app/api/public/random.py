@@ -33,6 +33,7 @@ from app.core.recommendation import (
     quality_score,
     score_image_with_time_boosts,
 )
+from app.core.random_engine_pick import build_engine_pick_payload, try_pick_via_engine
 from app.core.runtime_config_cache import get_cached_runtime_config
 from app.core.time import iso_utc_ms
 from app.db.images_mark import mark_image_failure, mark_image_ok
@@ -717,6 +718,86 @@ async def random_image(
         session: Any,
         exclude_image_ids: list[int] | None = None,
     ) -> tuple[Any, dict[str, Any]] | tuple[None, dict[str, Any]]:
+        # Optional Go random-engine path (feature flag). On any miss/unavailable, fall back to Python.
+        settings = getattr(request.app.state, "settings", None)
+        engine_enabled = bool(getattr(settings, "random_engine_enabled", False))
+        engine_url = str(getattr(settings, "random_engine_url", "") or "").strip().rstrip("/")
+        httpx_client = getattr(request.app.state, "httpx_client", None)
+        if engine_enabled and engine_url and httpx_client is not None:
+            base_exclude = list(exclude_image_ids or [])
+            exclude_set: set[int] = set(int(x) for x in base_exclude)
+            if bool(anti_repeat_enabled) and recent_exclude_image_ids:
+                exclude_set.update(int(x) for x in recent_exclude_image_ids)
+
+            orientation_str = "any"
+            ori = orientation_map[layout_norm]
+            if ori == 1:
+                orientation_str = "portrait"
+            elif ori == 2:
+                orientation_str = "landscape"
+            elif ori == 3:
+                orientation_str = "square"
+
+            engine_filters: dict[str, Any] = {
+                "r18": int(r18),
+                "r18_strict": int(r18_strict),
+                "ai_type": ai_type_raw if ai_type_i is not None else "any",
+                "illust_type": str(illust_type_i) if illust_type_i is not None else "any",
+                "orientation": orientation_str,
+                "min_width": int(min_width_i),
+                "min_height": int(min_height_i),
+                "min_pixels": int(min_pixels_i),
+                "min_bookmarks": int(min_bookmarks_i),
+                "min_views": int(min_views_i),
+                "min_comments": int(min_comments_i),
+                "included_tags": included,
+                "excluded_tags": excluded,
+                "exclude_image_ids": list(exclude_set),
+            }
+            if user_id is not None:
+                engine_filters["user_id"] = int(user_id)
+            if illust_id is not None:
+                engine_filters["illust_id"] = int(illust_id)
+            if created_from_norm is not None:
+                engine_filters["created_from"] = created_from_norm
+            if created_to_norm is not None:
+                engine_filters["created_to"] = created_to_norm
+            if fail_cooldown_before is not None:
+                engine_filters["fail_cooldown_before"] = fail_cooldown_before
+
+            quality_params: dict[str, Any] | None = None
+            if strategy_norm == "quality":
+                quality_params = {
+                    "samples": int(quality_samples_i),
+                    "pick_mode": pick_mode_raw,
+                    "temperature": float(temperature),
+                    "weights": score_weights,
+                    "multipliers": multipliers,
+                    "freshness_half_life_days": float(freshness_half_life_days),
+                    "velocity_smooth_days": float(velocity_smooth_days),
+                }
+
+            payload = build_engine_pick_payload(
+                filters=engine_filters,
+                strategy=strategy_norm,
+                quality=quality_params,
+                seed=seed_norm or None,
+                limit=1,
+                debug=False,
+            )
+            timeout_s = float(getattr(settings, "random_engine_timeout_ms", 800) or 800) / 1000.0
+            image, eng_meta = await try_pick_via_engine(
+                client=httpx_client,
+                base_url=engine_url,
+                session=session,
+                payload=payload,
+                timeout_s=timeout_s,
+            )
+            if image is not None:
+                return image, {**debug_base, "attempts_used": 1, **eng_meta}
+            # Soft no-match from a healthy engine: still fall back to Python (index may be stale).
+            # Hard unavailable also falls through.
+
         if strategy_norm == "random":
             base_exclude = list(exclude_image_ids or [])
             exclude_set: set[int] = set(int(x) for x in base_exclude)

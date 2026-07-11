@@ -42,6 +42,10 @@ class Settings:
     public_api_key_rpm: int
     public_api_key_burst: int
     random_totals_persist_interval_seconds: int
+    # Optional Go random-engine BFF dual-run / cutover (empty = Python-only pick).
+    random_engine_url: str
+    random_engine_enabled: bool
+    random_engine_timeout_ms: int
 
     @property
     def is_prod(self) -> bool:
@@ -206,6 +210,14 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         random_totals_persist_interval_seconds = 15
     random_totals_persist_interval_seconds = max(2, min(int(random_totals_persist_interval_seconds), 300))
 
+    random_engine_url = _get(env, "RANDOM_ENGINE_URL", "").rstrip("/")
+    random_engine_enabled = _get_bool(env, "RANDOM_ENGINE_ENABLED", False) and bool(random_engine_url)
+    try:
+        random_engine_timeout_ms = int(_get(env, "RANDOM_ENGINE_TIMEOUT_MS", "800") or "800")
+    except Exception:
+        random_engine_timeout_ms = 800
+    random_engine_timeout_ms = max(50, min(int(random_engine_timeout_ms), 10_000))
+
     settings = Settings(
         app_env=app_env,
         database_url=database_url,
@@ -230,6 +242,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         public_api_key_rpm=public_api_key_rpm,
         public_api_key_burst=public_api_key_burst,
         random_totals_persist_interval_seconds=random_totals_persist_interval_seconds,
+        random_engine_url=random_engine_url,
+        random_engine_enabled=random_engine_enabled,
+        random_engine_timeout_ms=random_engine_timeout_ms,
     )
 
     if settings.is_prod:

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
+from app.core.random_engine_client import engine_health, random_engine_base_url
+from app.core.random_engine_sync import push_engine_snapshot
 from app.core.request_id import get_or_create_request_id
 from app.db.request_logs_cleanup import (
     DEFAULT_REQUEST_LOGS_CHUNK_SIZE,
@@ -113,6 +116,87 @@ async def cleanup_request_logs_endpoint(
         "cutoff": result.cutoff,
         "deleted": int(result.deleted),
         "has_more": bool(result.has_more),
+        "request_id": rid,
+    }
+
+
+@router.get("/maintenance/random-engine")
+async def random_engine_status(
+    request: Request,
+    _claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    _ = _claims
+    rid = get_or_create_request_id(request)
+    settings = getattr(request.app.state, "settings", None)
+    base = random_engine_base_url(settings) if settings is not None else None
+    enabled = bool(getattr(settings, "random_engine_enabled", False)) if settings is not None else False
+    out: dict[str, Any] = {
+        "ok": True,
+        "enabled": enabled,
+        "url": base or "",
+        "healthy": False,
+        "health": None,
+        "request_id": rid,
+    }
+    if not base:
+        return out
+    client = getattr(request.app.state, "httpx_client", None)
+    if client is None:
+        return out
+    health = await engine_health(client, base, timeout_s=1.0)
+    out["healthy"] = health is not None
+    out["health"] = health
+    return out
+
+
+@router.post("/maintenance/random-engine/snapshot")
+async def random_engine_push_snapshot(
+    request: Request,
+    _claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    _ = _claims
+    rid = get_or_create_request_id(request)
+    settings = getattr(request.app.state, "settings", None)
+    base = random_engine_base_url(settings) if settings is not None else None
+    if not base:
+        raise ApiError(
+            code=ErrorCode.BAD_REQUEST,
+            message="RANDOM_ENGINE_URL not configured",
+            status_code=400,
+        )
+    client = getattr(request.app.state, "httpx_client", None)
+    if client is None:
+        raise ApiError(code=ErrorCode.INTERNAL_ERROR, message="HTTP client unavailable", status_code=500)
+
+    limit: int | None = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict) and body.get("limit") is not None:
+            limit = int(body["limit"])
+            if limit < 1:
+                limit = None
+    except Exception:
+        limit = None
+
+    revision = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    result = await push_engine_snapshot(
+        request.app.state.engine,
+        base_url=base,
+        client=client,
+        revision=revision,
+        limit=limit,
+        timeout_s=120.0,
+    )
+    if result is None:
+        raise ApiError(
+            code=ErrorCode.UPSTREAM_STREAM_ERROR,
+            message="random-engine snapshot failed",
+            status_code=502,
+        )
+    return {
+        "ok": True,
+        "revision": revision,
+        "engine": result,
         "request_id": rid,
     }
 

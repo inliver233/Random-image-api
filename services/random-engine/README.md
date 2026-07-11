@@ -1,4 +1,4 @@
-# Random Engine (Go skeleton)
+# Random Engine (Go)
 
 Internal high-performance **pick** service for Random-image-api.
 
@@ -13,27 +13,52 @@ Internal high-performance **pick** service for Random-image-api.
 | `strategy=quality` K≤32 | P99 ≤ ~5ms |
 | No image I/O | metadata only |
 
-## Run (skeleton)
+## Run
 
 ```bash
 cd services/random-engine
+go test ./...
 go run ./cmd/random-engine
 # GET  http://127.0.0.1:8091/healthz
 # POST http://127.0.0.1:8091/v1/pick
+# POST http://127.0.0.1:8091/v1/admin/snapshot
+# POST http://127.0.0.1:8091/v1/admin/events
 ```
 
-Skeleton accepts picks against an **empty index** (`NO_MATCH`) until control plane posts a snapshot.
+Env:
 
-## Next implementation steps
+| Var | Default | Meaning |
+| --- | --- | --- |
+| `RANDOM_ENGINE_ADDR` | `:8091` | Listen address |
 
-1. Columnar arrays + roaring (or bitset) filters  
-2. `POST /v1/admin/snapshot` full load  
-3. `POST /v1/admin/events` incremental  
-4. Dual-run harness vs Python `random_pick` + quality scoring  
-5. BFF feature flag `RANDOM_ENGINE_URL`
+## BFF dual-run (Python)
+
+Optional cutover — default **off** (Python SQLite pick remains primary):
+
+| Env | Default | Meaning |
+| --- | --- | --- |
+| `RANDOM_ENGINE_URL` | empty | e.g. `http://127.0.0.1:8091` |
+| `RANDOM_ENGINE_ENABLED` | `0` | set `1` to try engine first on `/random` |
+| `RANDOM_ENGINE_TIMEOUT_MS` | `800` | pick timeout; on fail → Python fallback |
+
+Admin:
+
+- `GET /admin/api/maintenance/random-engine` — health
+- `POST /admin/api/maintenance/random-engine/snapshot` — push full enabled index from SQLite
+
+After starting the engine, push a snapshot before enabling the flag, or picks will fall through to Python.
+
+## Implemented
+
+1. In-memory index sorted by `random_key` (ring sample)
+2. Filters aligned with Python `random_pick` (r18, tags, geometry, popularity, fail cooldown, …)
+3. `strategy=random` and `strategy=quality` (weighted / best)
+4. `POST /v1/admin/snapshot` full replace
+5. `POST /v1/admin/events` incremental rebuild
+6. BFF feature flag + admin snapshot push
 
 ## Non-goals (this service)
 
-- Pixiv OAuth / hydrate  
-- Residential proxies  
+- Pixiv OAuth / hydrate
+- Residential proxies
 - Streaming image bytes (CF Worker / local `/i/`)
