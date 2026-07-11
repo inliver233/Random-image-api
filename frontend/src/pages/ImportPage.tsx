@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 import { ActionAlerts } from "../admin/ActionAlerts";
 import { CursorTableCard } from "../admin/CursorTableCard";
 import { jobStatusTag } from "../admin/jobStatus";
+import { PendingAlert } from "../admin/PendingAlert";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
@@ -296,7 +297,7 @@ export function ImportPage() {
         </Form>
       </Card>
 
-      {mutation.isPending ? <Alert type="info" showIcon message="正在导入..." /> : null}
+      <PendingAlert pending={mutation.isPending} message="正在导入..." />
 
       {result ? (
         <Space direction="vertical" style={{ width: "100%" }} size="middle">

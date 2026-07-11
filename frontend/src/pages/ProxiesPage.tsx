@@ -4,6 +4,7 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useEffect, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { PendingAlert } from "../admin/PendingAlert";
 import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
@@ -518,7 +519,7 @@ export function ProxiesPage() {
           </Button>
         </Form>
 
-        {manualImport.isPending ? <Alert type="info" showIcon message="正在导入代理节点..." style={{ marginTop: 12 }} /> : null}
+        <PendingAlert pending={manualImport.isPending} message="正在导入代理节点..." style={{ marginTop: 12 }} />
         {manualResult ? (
           <Alert
             type="success"
@@ -679,7 +680,7 @@ export function ProxiesPage() {
           </Button>
         </Form>
 
-        {easyImport.isPending ? <Alert type="info" showIcon message="正在从外部代理服务导入..." style={{ marginTop: 12 }} /> : null}
+        <PendingAlert pending={easyImport.isPending} message="正在从外部代理服务导入..." style={{ marginTop: 12 }} />
         {easyResult ? (
           <>
             <Alert
@@ -736,7 +737,7 @@ export function ProxiesPage() {
           <InputNumber min={1} max={200} value={probeConcurrency} onChange={(v) => setProbeConcurrency(typeof v === "number" ? v : 10)} />
         </Space>
 
-        {probe.isPending ? <Alert type="info" showIcon message="探测任务入队中..." style={{ marginBottom: 12 }} /> : null}
+        <PendingAlert pending={probe.isPending} message="探测任务入队中..." style={{ marginBottom: 12 }} />
         <div style={{ marginBottom: 12 }}>
           <ActionAlerts
             message={probeAlerts.message}

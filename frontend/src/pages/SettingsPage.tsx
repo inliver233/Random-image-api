@@ -3,6 +3,7 @@ import { Alert, Button, Card, Form, InputNumber, Select, Space, Switch, Typograp
 import React, { useEffect } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { PendingAlert } from "../admin/PendingAlert";
 import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
@@ -197,7 +198,7 @@ export function SettingsPage() {
         </Button>
       </Space>
 
-      {save.isPending ? <Alert type="info" showIcon message="正在保存设置..." /> : null}
+      <PendingAlert pending={save.isPending} message="正在保存设置..." />
       <ActionAlerts
         message={alerts.message}
         requestId={alerts.requestId}

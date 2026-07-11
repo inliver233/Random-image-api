@@ -3,6 +3,7 @@ import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, T
 import React, { useEffect, useMemo, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
+import { PendingAlert } from "../admin/PendingAlert";
 import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
@@ -345,7 +346,7 @@ export function RecommendationPage() {
         </Button>
       </Space>
 
-      {save.isPending ? <Alert type="info" showIcon message="正在保存推荐配置..." /> : null}
+      <PendingAlert pending={save.isPending} message="正在保存推荐配置..." />
       <ActionAlerts
         message={saveAlerts.message}
         requestId={saveAlerts.requestId}
@@ -505,7 +506,7 @@ export function RecommendationPage() {
                 </Button>
               </Space>
 
-              {preview.isPending ? <Alert type="info" showIcon message="正在预览..." /> : null}
+              <PendingAlert pending={preview.isPending} message="正在预览..." />
               <ActionAlerts
                 message={previewAlerts.message}
                 requestId={previewAlerts.requestId}

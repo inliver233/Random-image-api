@@ -42,6 +42,48 @@ def attach_background(resp: Any, background_tasks: BackgroundTasks) -> Any:
     return resp
 
 
+def schedule_mark_ok_if_needed(
+    *,
+    background_tasks: BackgroundTasks,
+    engine: Any,
+    image_id: int,
+    should_mark_ok: bool,
+    now: str | None = None,
+) -> None:
+    """Queue mark_image_ok only when the caller proved delivery and the row needs it."""
+    if not should_mark_ok:
+        return
+    background_tasks.add_task(
+        best_effort,
+        mark_image_ok,
+        engine,
+        image_id=int(image_id),
+        now=now or iso_utc_ms(),
+        timeout_s=1.5,
+    )
+
+
+def schedule_hydrate_if_needed(
+    *,
+    background_tasks: BackgroundTasks,
+    engine: Any,
+    illust_id: int,
+    needs_hydrate: bool,
+    hydrate_reason: str,
+) -> None:
+    """Queue opportunistic hydrate metadata enqueue when the image still needs it."""
+    if not needs_hydrate:
+        return
+    background_tasks.add_task(
+        best_effort,
+        enqueue_opportunistic_hydrate_metadata,
+        engine,
+        illust_id=int(illust_id),
+        reason=str(hydrate_reason),
+        timeout_s=2.5,
+    )
+
+
 def schedule_edge_side_effects(
     *,
     background_tasks: BackgroundTasks,
@@ -71,19 +113,20 @@ def schedule_edge_side_effects(
             )
         except Exception:
             pass
-    if mark_ok_on_edge and should_mark_ok:
-        background_tasks.add_task(
-            best_effort, mark_image_ok, engine, image_id=int(image_id), now=iso_utc_ms(), timeout_s=1.5
+    if mark_ok_on_edge:
+        schedule_mark_ok_if_needed(
+            background_tasks=background_tasks,
+            engine=engine,
+            image_id=image_id,
+            should_mark_ok=should_mark_ok,
         )
-    if needs_hydrate:
-        background_tasks.add_task(
-            best_effort,
-            enqueue_opportunistic_hydrate_metadata,
-            engine,
-            illust_id=int(illust_id),
-            reason=str(hydrate_reason),
-            timeout_s=2.5,
-        )
+    schedule_hydrate_if_needed(
+        background_tasks=background_tasks,
+        engine=engine,
+        illust_id=illust_id,
+        needs_hydrate=needs_hydrate,
+        hydrate_reason=hydrate_reason,
+    )
 
 
 def build_edge_redirect_response(

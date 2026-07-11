@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import BackgroundTasks
-from fastapi.responses import RedirectResponse
 
 from app.core.errors import ApiError, ErrorCode
 from app.core.http_stream import stream_url
@@ -15,14 +14,15 @@ from app.core.random_delivery import (
     attach_background,
     best_effort,
     build_edge_redirect_response,
+    schedule_hydrate_if_needed,
+    schedule_mark_ok_if_needed,
     should_mark_image_ok,
 )
 from app.core.random_request import force_local_from_query, prefer_image_edge
 from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.core.time import iso_utc_ms
-from app.db.images_mark import mark_image_failure, mark_image_ok
-from app.jobs.enqueue import enqueue_opportunistic_hydrate_metadata
+from app.db.images_mark import mark_image_failure
 
 # Re-export for callers that import mark-ok helper from image_delivery.
 __all__ = (
@@ -131,14 +131,14 @@ async def deliver_known_image(
             original_url=str(image.original_url),
         )
         if edge_url:
-            if needs_hydrate and background_tasks is not None:
-                background_tasks.add_task(
-                    best_effort,
-                    enqueue_opportunistic_hydrate_metadata,
-                    engine,
+            # Edge 302 does not prove bytes were served — never mark_image_ok here.
+            if background_tasks is not None:
+                schedule_hydrate_if_needed(
+                    background_tasks=background_tasks,
+                    engine=engine,
                     illust_id=int(image.illust_id),
-                    reason=str(hydrate_reason),
-                    timeout_s=2.5,
+                    needs_hydrate=bool(needs_hydrate),
+                    hydrate_reason=str(hydrate_reason),
                 )
             resp = build_edge_redirect_response(edge_url=edge_url, cache_control=cache_control_edge)
             if background_tasks is not None:
@@ -178,19 +178,21 @@ async def deliver_known_image(
             range_header=request.headers.get("Range"),
         )
         if background_tasks is not None:
-            if should_mark_ok:
-                background_tasks.add_task(
-                    best_effort, mark_image_ok, engine, image_id=int(image.id), now=now, timeout_s=1.5
-                )
-            if needs_hydrate:
-                background_tasks.add_task(
-                    best_effort,
-                    enqueue_opportunistic_hydrate_metadata,
-                    engine,
-                    illust_id=int(image.illust_id),
-                    reason=str(hydrate_reason),
-                    timeout_s=2.5,
-                )
+            # Local stream proved bytes — mark ok when the row still needs it.
+            schedule_mark_ok_if_needed(
+                background_tasks=background_tasks,
+                engine=engine,
+                image_id=int(image.id),
+                should_mark_ok=bool(should_mark_ok),
+                now=now,
+            )
+            schedule_hydrate_if_needed(
+                background_tasks=background_tasks,
+                engine=engine,
+                illust_id=int(image.illust_id),
+                needs_hydrate=bool(needs_hydrate),
+                hydrate_reason=str(hydrate_reason),
+            )
             return attach_background(resp, background_tasks)
         return resp
     except Exception as exc:
