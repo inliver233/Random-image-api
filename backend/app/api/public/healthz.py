@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.core.data_files import ensure_sqlite_parent_dir
 from app.core.env_parse import parse_int_env
 from app.core.errors import ErrorCode, error_body
+from app.core.cf_api_proxy import load_cf_api_proxy_config_from_settings
 from app.core.image_edge import load_image_edge_config_from_settings
 from app.core.random_engine_client import random_engine_base_url
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
@@ -125,6 +126,7 @@ async def healthz(request: Request) -> Any:
         # Optional dual-stack readiness (config only — no outbound probes on /healthz).
         settings = getattr(request.app.state, "settings", None)
         edge_cfg = load_image_edge_config_from_settings(settings) if settings is not None else None
+        cf_api_cfg = load_cf_api_proxy_config_from_settings(settings) if settings is not None else None
         engine_url = random_engine_base_url(settings) if settings is not None else None
         rl_backend = (
             str(getattr(settings, "public_api_key_rate_limit_backend", "memory") or "memory").lower()
@@ -142,6 +144,12 @@ async def healthz(request: Request) -> Any:
                 "enabled_flag": bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False,
                 "ready": edge_cfg is not None,
                 "base_url_count": len(edge_cfg.base_urls) if edge_cfg is not None else 0,
+            },
+            "cf_api_proxy": {
+                "enabled_flag": bool(getattr(settings, "cf_api_proxy_enabled", False)) if settings is not None else False,
+                "ready": cf_api_cfg is not None,
+                "base_url_count": len(cf_api_cfg.base_urls) if cf_api_cfg is not None else 0,
+                "has_secret": bool(cf_api_cfg.secret) if cf_api_cfg is not None else False,
             },
             "random_engine": {
                 "url_configured": bool(engine_url),

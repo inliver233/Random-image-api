@@ -10,6 +10,7 @@ from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
 from app.core.admin_json import admin_ok
 from app.core.admin_request import load_json_object_optional, load_json_object, parse_bool, parse_int_in_range
+from app.core.cf_api_proxy import load_cf_api_proxy_config_from_settings
 from app.core.image_edge import load_image_edge_config_from_settings
 from app.core.random_defaults import resolve_fail_cooldown_ms, resolve_r18_strict
 from app.core.random_engine_client import engine_filter_count, engine_health, random_engine_base_url
@@ -135,6 +136,43 @@ async def image_edge_status(
             "sign_ttl_seconds": int(cfg.sign_ttl_seconds) if cfg is not None else int(ttl),
             "has_secret": bool(secret),
             "has_secret_previous": bool(secret_previous) and secret_previous != secret,
+            "missing": missing,
+        },
+        request_id=rid,
+    )
+
+
+@router.get("/maintenance/cf-api-proxy")
+async def cf_api_proxy_status(
+    request: Request,
+    _claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    """Read-only CF API egress pool status (never returns secrets).
+
+    Ops surface for Phase 5: whether hydrate/OAuth prefer CF Worker egress.
+    """
+    _ = _claims
+    rid = get_or_create_request_id(request)
+    settings = getattr(request.app.state, "settings", None)
+    flag_enabled = bool(getattr(settings, "cf_api_proxy_enabled", False)) if settings is not None else False
+    raw_bases = list(getattr(settings, "cf_api_proxy_base_urls", None) or []) if settings is not None else []
+    secret = str(getattr(settings, "cf_api_proxy_secret", "") or "").strip() if settings is not None else ""
+    cfg = load_cf_api_proxy_config_from_settings(settings) if settings is not None else None
+    ready = cfg is not None
+    missing: list[str] = []
+    if not flag_enabled:
+        missing.append("CF_API_PROXY_ENABLED")
+    if not raw_bases:
+        missing.append("CF_API_PROXY_BASE_URLS")
+    # Secret is optional but recommended when Worker PROXY_SECRET is set.
+    return admin_ok(
+        request,
+        payload={
+            "enabled_flag": flag_enabled,
+            "ready": ready,
+            "base_urls": list(cfg.base_urls) if cfg is not None else list(raw_bases),
+            "base_url_count": len(cfg.base_urls) if cfg is not None else len(raw_bases),
+            "has_secret": bool(secret),
             "missing": missing,
         },
         request_id=rid,

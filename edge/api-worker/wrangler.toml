@@ -1,0 +1,12 @@
+name = "random-image-api-proxy"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# Non-secret defaults. Put PROXY_SECRET via:
+#   wrangler secret put PROXY_SECRET
+[vars]
+# Comma-separated exact hosts (no scheme/port). Empty → built-in Pixiv OAuth + App API hosts.
+ALLOWED_HOSTS = "oauth.secure.pixiv.net,app-api.pixiv.net,public-api.secure.pixiv.net"
+
+# Optional custom domain:
+# routes = [{ pattern = "api-edge.example.com/*", zone_name = "example.com" }]

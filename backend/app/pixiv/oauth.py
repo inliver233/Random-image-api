@@ -108,6 +108,8 @@ async def refresh_access_token(
     proxy: str | None = None,
     timeout_s: float = 30.0,
     client_time: str | None = None,
+    request_url: str | None = None,
+    extra_headers: Mapping[str, str] | None = None,
 ) -> PixivOauthToken:
     refresh_token = (refresh_token or "").strip()
     if not refresh_token:
@@ -118,6 +120,11 @@ async def refresh_access_token(
 
     client_time = client_time or _now_client_time()
     headers = config.build_headers(client_time=client_time)
+    if extra_headers:
+        for k, v in extra_headers.items():
+            if v is None:
+                continue
+            headers[str(k)] = str(v)
 
     payload = {
         "client_id": config.client_id,
@@ -128,7 +135,7 @@ async def refresh_access_token(
         "include_policy": "1",
     }
 
-    url = config.base_url.rstrip("/") + OAUTH_TOKEN_PATH
+    url = (request_url or "").strip() or (config.base_url.rstrip("/") + OAUTH_TOKEN_PATH)
 
     async with httpx.AsyncClient(
         transport=transport,

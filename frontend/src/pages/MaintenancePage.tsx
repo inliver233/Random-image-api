@@ -67,6 +67,17 @@ type ImageEdgeStatusResponse = {
   request_id: string;
 };
 
+type CfApiProxyStatusResponse = {
+  ok: true;
+  enabled_flag: boolean;
+  ready: boolean;
+  base_urls: string[];
+  base_url_count: number;
+  has_secret: boolean;
+  missing: string[];
+  request_id: string;
+};
+
 type ApiKeyRateLimitStatusResponse = {
   ok: true;
   required: boolean;
@@ -101,6 +112,12 @@ export function MaintenancePage() {
   const imageEdgeStatus = useQuery({
     queryKey: ["admin", "maintenance", "image-edge"],
     queryFn: () => apiJson<ImageEdgeStatusResponse>("/admin/api/maintenance/image-edge"),
+    refetchInterval: 30_000,
+  });
+
+  const cfApiProxyStatus = useQuery({
+    queryKey: ["admin", "maintenance", "cf-api-proxy"],
+    queryFn: () => apiJson<CfApiProxyStatusResponse>("/admin/api/maintenance/cf-api-proxy"),
     refetchInterval: 30_000,
   });
 
@@ -199,6 +216,7 @@ export function MaintenancePage() {
       ? String((health as { snapshot_revision: string }).snapshot_revision)
       : null;
   const edge = imageEdgeStatus.data;
+  const cfApi = cfApiProxyStatus.data;
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -238,6 +256,41 @@ export function MaintenancePage() {
         </QueryState>
 
         <Button onClick={() => void imageEdgeStatus.refetch()} loading={imageEdgeStatus.isFetching}>
+          刷新状态
+        </Button>
+      </Card>
+
+      <Card title="CF API Proxy（hydrate/OAuth 出口）">
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          只读配置状态（不展示密钥）。hydrate 的 OAuth refresh 与 illust detail 优先经 CF Worker
+          出口；失败回退住宅代理池。默认{" "}
+          <Typography.Text code>CF_API_PROXY_ENABLED=false</Typography.Text>
+          。部署见 <Typography.Text code>edge/api-worker</Typography.Text>。
+        </Typography.Paragraph>
+
+        <QueryState query={cfApiProxyStatus}>
+          {cfApi ? (
+            <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
+              <Descriptions.Item label="开关 flag">
+                {cfApi.enabled_flag ? <Tag color="blue">ENABLED</Tag> : <Tag>OFF</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="可走 CF">
+                {cfApi.ready ? <Tag color="green">ready</Tag> : <Tag color="orange">not ready</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="Base URLs">
+                {cfApi.base_urls?.length ? cfApi.base_urls.join(", ") : "（未配置）"}
+              </Descriptions.Item>
+              <Descriptions.Item label="共享密钥">
+                {cfApi.has_secret ? "已配置" : "未配置（可选）"}
+              </Descriptions.Item>
+              <Descriptions.Item label="缺失项">
+                {cfApi.missing?.length ? cfApi.missing.join(", ") : "—"}
+              </Descriptions.Item>
+            </Descriptions>
+          ) : null}
+        </QueryState>
+
+        <Button onClick={() => void cfApiProxyStatus.refetch()} loading={cfApiProxyStatus.isFetching}>
           刷新状态
         </Button>
       </Card>

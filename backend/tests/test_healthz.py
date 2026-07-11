@@ -30,6 +30,10 @@ def test_healthz_ok_includes_request_id() -> None:
     modules = body.get("modules") or {}
     assert modules["image_edge"]["ready"] is False
     assert modules["image_edge"]["enabled_flag"] is False
+    assert modules["cf_api_proxy"]["ready"] is False
+    assert modules["cf_api_proxy"]["enabled_flag"] is False
+    assert modules["cf_api_proxy"]["base_url_count"] == 0
+    assert modules["cf_api_proxy"]["has_secret"] is False
     assert modules["random_engine"]["enabled"] is False
     assert modules["random_engine"]["url_configured"] is False
     assert modules["api_key_rate_limit"]["backend"] == "memory"
