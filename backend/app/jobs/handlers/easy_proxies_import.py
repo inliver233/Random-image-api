@@ -7,9 +7,9 @@ import httpx
 import sqlalchemy as sa
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
-from urllib.parse import urlparse, urlunparse
 
 from app.core.bindings_recompute import recompute_token_proxy_bindings
+from app.core.source_ref import sanitize_source_ref
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor
 from app.core.proxy_uri import parse_proxy_uri
@@ -29,30 +29,6 @@ def _parse_conflict_policy(value: Any) -> str:
     if v not in {"skip_non_easy_proxies", "skip", "overwrite"}:
         raise JobPermanentError("payload.conflict_policy invalid")
     return v
-
-
-def _sanitize_source_ref(value: str | None) -> str | None:
-    raw = str(value or "").strip()
-    if not raw:
-        return None
-
-    try:
-        parsed = urlparse(raw)
-    except Exception:
-        return raw[:200]
-
-    if not parsed.scheme or not parsed.netloc:
-        return raw[:200]
-
-    host = parsed.hostname
-    if not host:
-        return raw[:200]
-
-    port = parsed.port
-    netloc = f"{host}:{int(port)}" if port else host
-    path = parsed.path or ""
-
-    return urlunparse((parsed.scheme, netloc, path, "", "", ""))
 
 
 def build_easy_proxies_import_handler(engine: AsyncEngine, *, transport: httpx.BaseTransport | None = None) -> Any:
@@ -106,7 +82,7 @@ def build_easy_proxies_import_handler(engine: AsyncEngine, *, transport: httpx.B
         if recompute_bindings and attach_pool_id is None:
             raise JobPermanentError("payload.recompute_bindings requires attach_pool_id")
 
-        base_url_ref = _sanitize_source_ref(base_url) or base_url
+        base_url_ref = sanitize_source_ref(base_url) or base_url
         export_host = resolve_export_host(base_url=base_url, host_override=host_override)
 
         try:
