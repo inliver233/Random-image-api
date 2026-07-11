@@ -21,6 +21,61 @@ OPPORTUNISTIC_HYDRATE_REF_TYPE = "opportunistic_hydrate"
 OPPORTUNISTIC_HYDRATE_PRIORITY = -10
 
 
+def new_pending_job(
+    *,
+    type: str,
+    payload_json: str,
+    priority: int = 0,
+    ref_type: str | None = None,
+    ref_id: str | None = None,
+    max_attempts: int = 3,
+    updated_at: str | None = None,
+) -> JobRow:
+    """Construct a pending JobRow with the canonical insert shape.
+
+    Use with an open session for multi-entity transactions (import + job, run + job).
+    Prefer JobQueuePort.enqueue for standalone inserts.
+    """
+    job = JobRow(
+        type=str(type),
+        status="pending",
+        priority=int(priority),
+        payload_json=str(payload_json),
+        ref_type=ref_type,
+        ref_id=ref_id,
+        max_attempts=int(max_attempts),
+    )
+    if updated_at is not None:
+        job.updated_at = str(updated_at)
+    return job
+
+
+async def enqueue_pending_in_session(
+    session: Any,
+    *,
+    type: str,
+    payload_json: str,
+    priority: int = 0,
+    ref_type: str | None = None,
+    ref_id: str | None = None,
+    max_attempts: int = 3,
+    updated_at: str | None = None,
+) -> JobRow:
+    """Add + flush a pending job on an existing session (caller owns commit)."""
+    job = new_pending_job(
+        type=type,
+        payload_json=payload_json,
+        priority=priority,
+        ref_type=ref_type,
+        ref_id=ref_id,
+        max_attempts=max_attempts,
+        updated_at=updated_at,
+    )
+    session.add(job)
+    await session.flush()
+    return job
+
+
 @runtime_checkable
 class JobQueuePort(Protocol):
     """Job claim/lock + enqueue port (SQLite today; Redis/NATS later without worker rewrite).
@@ -138,17 +193,15 @@ class SqliteJobQueue:
 
         async def _op() -> int:
             async with Session() as session:
-                job = JobRow(
-                    type=str(type),
-                    status="pending",
-                    priority=int(priority),
-                    payload_json=str(payload_json),
+                job = await enqueue_pending_in_session(
+                    session,
+                    type=type,
+                    payload_json=payload_json,
+                    priority=priority,
                     ref_type=ref_type,
                     ref_id=ref_id,
-                    max_attempts=int(max_attempts),
+                    max_attempts=max_attempts,
                 )
-                session.add(job)
-                await session.flush()
                 await session.commit()
                 return int(job.id)
 
@@ -188,17 +241,15 @@ class SqliteJobQueue:
                 if existing.first() is not None:
                     return None
 
-                job = JobRow(
-                    type="hydrate_metadata",
-                    status="pending",
-                    priority=int(OPPORTUNISTIC_HYDRATE_PRIORITY),
-                    payload_json=payload_json,
-                    ref_type=OPPORTUNISTIC_HYDRATE_REF_TYPE,
-                    ref_id=ref_id,
-                )
-                session.add(job)
                 try:
-                    await session.flush()
+                    job = await enqueue_pending_in_session(
+                        session,
+                        type="hydrate_metadata",
+                        payload_json=payload_json,
+                        priority=int(OPPORTUNISTIC_HYDRATE_PRIORITY),
+                        ref_type=OPPORTUNISTIC_HYDRATE_REF_TYPE,
+                        ref_id=ref_id,
+                    )
                     await session.commit()
                 except IntegrityError:
                     # Concurrent enqueue of the same active opportunistic hydrate job.

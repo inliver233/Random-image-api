@@ -30,6 +30,7 @@ from app.jobs.claim import claim_pending_job_by_id
 from app.jobs.dispatch import JobDispatcher
 from app.jobs.executor import execute_claimed_job
 from app.jobs.handlers.import_images import build_import_images_handler
+from app.jobs.queue import enqueue_pending_in_session
 
 router = APIRouter()
 
@@ -334,9 +335,9 @@ async def create_import(
                 ensure_ascii=False,
             )
 
-            job = JobRow(
+            job = await enqueue_pending_in_session(
+                session,
                 type="import_images",
-                status="pending",
                 payload_json=json.dumps(
                     {
                         "import_id": int(imp.id),
@@ -350,8 +351,6 @@ async def create_import(
                 ref_type="import",
                 ref_id=str(imp.id),
             )
-            session.add(job)
-            await session.flush()
 
             await session.commit()
             return int(imp.id), int(job.id)

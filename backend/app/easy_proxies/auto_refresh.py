@@ -12,6 +12,7 @@ from app.core.logging import get_logger
 from app.core.proxy_routing import first_enabled_pool_id
 from app.db.models.jobs import JobRow
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.jobs.queue import build_job_queue
 
 log = get_logger(__name__)
 
@@ -39,7 +40,7 @@ async def _enqueue_if_needed(
 ) -> int | None:
     Session = create_sessionmaker(engine)
 
-    async def _op() -> int | None:
+    async def _has_active() -> bool:
         async with Session() as session:
             existing = await session.execute(
                 select(JobRow.id).where(
@@ -49,26 +50,22 @@ async def _enqueue_if_needed(
                     JobRow.status.in_(("pending", "running")),
                 )
             )
-            if existing.first() is not None:
-                return None
+            return existing.first() is not None
 
-            job = JobRow(
-                type="easy_proxies_import",
-                status="pending",
-                priority=0,
-                payload_json=json.dumps(
-                    {"base_url": base_url, "conflict_policy": conflict_policy, **payload},
-                    ensure_ascii=False,
-                ),
-                ref_type="easy_proxies",
-                ref_id=base_url,
-            )
-            session.add(job)
-            await session.flush()
-            await session.commit()
-            return int(job.id)
+    if await with_sqlite_busy_retry(_has_active):
+        return None
 
-    return await with_sqlite_busy_retry(_op)
+    queue = build_job_queue(engine)
+    return await queue.enqueue(
+        type="easy_proxies_import",
+        payload_json=json.dumps(
+            {"base_url": base_url, "conflict_policy": conflict_policy, **payload},
+            ensure_ascii=False,
+        ),
+        priority=0,
+        ref_type="easy_proxies",
+        ref_id=base_url,
+    )
 
 
 class EasyProxiesAutoRefresher:

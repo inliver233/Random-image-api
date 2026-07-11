@@ -30,12 +30,12 @@ from app.core.proxy_uri import mask_proxy_uri, parse_proxy_uri
 from app.core.source_ref import sanitize_source_ref
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
-from app.db.models.jobs import JobRow
 from app.db.models.proxy_endpoints import ProxyEndpoint
 from app.db.models.proxy_pool_endpoints import ProxyPoolEndpoint
 from app.db.models.proxy_pools import ProxyPool
 from app.db.models.token_proxy_bindings import TokenProxyBinding
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.jobs.queue import build_job_queue
 from app.easy_proxies.client import EasyProxiesError, easy_proxies_auth, easy_proxies_export
 from app.easy_proxies.normalize import normalize_exported_proxy_host, resolve_export_host
 
@@ -987,22 +987,12 @@ async def probe_proxies(
     opts = await _load_probe_json(request)
 
     engine = request.app.state.engine
-    Session = create_sessionmaker(engine)
-
-    async def _op() -> int:
-        async with Session() as session:
-            job = JobRow(
-                type="proxy_probe",
-                status="pending",
-                payload_json=json.dumps({"scope": "all", **opts}, ensure_ascii=False),
-                ref_type="proxy_probe",
-                ref_id="all",
-            )
-            session.add(job)
-            await session.flush()
-            await session.commit()
-            return int(job.id)
-
-    job_id = await with_sqlite_busy_retry(_op)
+    queue = build_job_queue(engine)
+    job_id = await queue.enqueue(
+        type="proxy_probe",
+        payload_json=json.dumps({"scope": "all", **opts}, ensure_ascii=False),
+        ref_type="proxy_probe",
+        ref_id="all",
+    )
 
     return admin_ok(request, payload={"job_id": str(job_id)}, request_id=rid)

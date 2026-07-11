@@ -24,6 +24,7 @@ from app.db.models.hydration_runs import HydrationRun
 from app.core.random_delivery import resolve_catalog_store
 from app.db.models.jobs import JobRow
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.jobs.queue import enqueue_pending_in_session
 
 router = APIRouter()
 
@@ -252,23 +253,16 @@ async def create_manual_hydration_job(
                     "job_id": str(int(existing.id)),
                     "illust_id": str(int(illust_id))}, request_id=rid)
 
-            job = JobRow(
+            job = await enqueue_pending_in_session(
+                session,
                 type="hydrate_metadata",
-                status="pending",
                 payload_json=json.dumps({"illust_id": int(illust_id)}, separators=(",", ":"), ensure_ascii=False),
-                last_error=None,
                 priority=0,
-                run_after=None,
-                attempt=0,
                 max_attempts=3,
-                locked_by=None,
-                locked_at=None,
                 ref_type="manual_hydrate",
                 ref_id=str(int(illust_id)),
                 updated_at=now,
             )
-            session.add(job)
-            await session.flush()
             await session.commit()
 
             return admin_ok(request, payload={"created": True,
@@ -313,27 +307,20 @@ async def create_hydration_run(
             session.add(run)
             await session.flush()
 
-            job = JobRow(
+            job = await enqueue_pending_in_session(
+                session,
                 type="hydrate_metadata",
-                status="pending",
                 payload_json=json.dumps(
                     {"hydration_run_id": int(run.id), "criteria": criteria},
                     separators=(",", ":"),
                     ensure_ascii=False,
                 ),
-                last_error=None,
                 priority=0,
-                run_after=None,
-                attempt=0,
                 max_attempts=3,
-                locked_by=None,
-                locked_at=None,
                 ref_type="hydration_run",
                 ref_id=str(int(run.id)),
                 updated_at=now,
             )
-            session.add(job)
-            await session.flush()
             await session.commit()
             return int(run.id), int(job.id)
 

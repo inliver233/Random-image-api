@@ -6,8 +6,14 @@ Implementation:
 
 - Protocol: `JobQueuePort` in `backend/app/jobs/queue.py`
 - Default: `SqliteJobQueue` → existing `claim_next_job` / `claim_pending_job_by_id` / `renew_job_lock` + enqueue helpers
+- Shared insert shape: `new_pending_job` / `enqueue_pending_in_session` (same-txn admin/worker paths)
 - Worker: `_JobScheduler` + `poll_and_execute_jobs` take optional `queue=`
 - Public opportunistic hydrate: `jobs/enqueue.py` → `queue.enqueue_opportunistic_hydrate`
+- Admin/control-plane enqueue callers:
+  - `admin/proxies` probe → `queue.enqueue`
+  - `easy_proxies/auto_refresh` → `queue.enqueue` after active-job check
+  - `admin/imports`, `admin/hydration_runs` → `enqueue_pending_in_session` (coupled txn)
+  - `handlers/import_images` bulk hydrate → `new_pending_job` batch add
 - Factory: `build_job_queue(engine, backend=...)` — unknown backends fall back to sqlite
 
 ## Methods
@@ -17,6 +23,7 @@ Implementation:
 | `claim_next` / `claim_pending_by_id` / `renew_lock` | Worker claim path |
 | `enqueue` | Insert pending job row; returns id |
 | `enqueue_opportunistic_hydrate` | Dedupe active hydrate_metadata by illust; returns id or None |
+| `new_pending_job` / `enqueue_pending_in_session` | Shared helpers for multi-entity SQLite txns |
 
 ## Env
 

@@ -25,6 +25,7 @@ from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 from app.db.tag_store import TagStore, build_tag_store
 from app.jobs.payload import parse_job_payload_object
 from app.jobs.errors import JobPermanentError
+from app.jobs.queue import new_pending_job
 
 _MAX_ERRORS = 200
 _CHUNK_SIZE = 200
@@ -124,7 +125,7 @@ def build_import_images_handler(
 ):
     Session = create_sessionmaker(engine)
     catalog_store = catalog if catalog is not None else build_catalog_store(database_url=str(engine.url))
-    tags = tag_store if tag_store is not None else build_tag_store(database_url=str(engine.url))
+    tag_store_port = tag_store if tag_store is not None else build_tag_store(database_url=str(engine.url))
 
     async def _handler(job: dict[str, Any]) -> None:
         payload_json = str(job.get("payload_json") or "")
@@ -204,7 +205,7 @@ def build_import_images_handler(
                                 names.append(name)
 
                         if names:
-                            tag_id_by_name = await tags.ensure_tags_by_names(session, names=names)
+                            tag_id_by_name = await tag_store_port.ensure_tags_by_names(session, names=names)
                             image_id_by_key = await catalog_store.map_image_ids_by_illust_page(session, keys=list(keys))
 
                             pairs: list[tuple[int, int]] = []
@@ -224,7 +225,7 @@ def build_import_images_handler(
                                     pairs.append((int(image_id), int(tag_id)))
 
                             if pairs:
-                                await tags.link_image_tags(session, pairs=pairs)
+                                await tag_store_port.link_image_tags(session, pairs=pairs)
 
                     await session.execute(
                         sa.update(Import)
@@ -336,18 +337,19 @@ def build_import_images_handler(
 
                 raw_tags = raw_item.get("tags")
                 if isinstance(raw_tags, list) and raw_tags:
-                    tags: list[str] = []
+                    # Must not bind name `tags` here — it would shadow TagStore closed over by _persist_chunk.
+                    tag_names: list[str] = []
                     seen_tags: set[str] = set()
                     for v in raw_tags[:128]:
                         name = str(v or "").strip()
                         if not name or name in seen_tags:
                             continue
                         seen_tags.add(name)
-                        tags.append(name)
-                        if len(tags) >= 64:
+                        tag_names.append(name)
+                        if len(tag_names) >= 64:
                             break
-                    if tags:
-                        chunk_tags[key] = tags
+                    if tag_names:
+                        chunk_tags[key] = tag_names
 
                 if len(chunk_rows) < _CHUNK_SIZE:
                     continue
@@ -486,9 +488,8 @@ def build_import_images_handler(
                         if ref_id in existing:
                             continue
                         session.add(
-                            JobRow(
+                            new_pending_job(
                                 type="hydrate_metadata",
-                                status="pending",
                                 payload_json=json.dumps(
                                     {"illust_id": int(illust_id), "reason": "import"},
                                     ensure_ascii=False,
