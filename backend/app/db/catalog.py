@@ -5,6 +5,7 @@ from typing import Protocol, runtime_checkable
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from app.db.images_delete import delete_images_by_ids
 from app.db.images_get import get_image_by_id, get_images_by_ids
 from app.db.images_get_by_illust import get_image_by_illust_page
 from app.db.images_mark import heal_broken_images_for_illust, mark_image_failure, mark_image_ok
@@ -104,6 +105,13 @@ class CatalogStore(Protocol):
         *,
         illust_id: int,
         now: str,
+    ) -> list[int]: ...
+
+    async def delete_images_by_ids(
+        self,
+        session: AsyncSession,
+        *,
+        image_ids: list[int],
     ) -> list[int]: ...
 
 
@@ -242,6 +250,14 @@ class SqliteCatalogStore:
         now: str,
     ) -> list[int]:
         return await heal_broken_images_for_illust(session, illust_id=illust_id, now=now)
+
+    async def delete_images_by_ids(
+        self,
+        session: AsyncSession,
+        *,
+        image_ids: list[int],
+    ) -> list[int]:
+        return await delete_images_by_ids(session, image_ids=image_ids)
 
 
 # Postgres dialect uses the same SQLAlchemy helpers for now (dialect-neutral where possible).

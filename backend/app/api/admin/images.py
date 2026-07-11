@@ -10,6 +10,7 @@ from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
 from app.core.admin_request import load_json_object, parse_bool, parse_choice, parse_positive_int_list, require_positive_id
 from app.core.errors import ApiError, ErrorCode
+from app.core.random_delivery import resolve_catalog_store
 from app.core.random_engine_sync import maybe_publish_engine_deletes, maybe_publish_engine_empty_snapshot
 from app.core.request_id import get_or_create_request_id
 from app.db.models.image_tags import ImageTag
@@ -200,14 +201,15 @@ async def delete_admin_image(
     rid = get_or_create_request_id(request)
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
-            row = await session.get(Image, int(image_id))
-            if row is None:
-                raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
+            # Tags stay outside CatalogStore; clear links before image rows.
             await session.execute(sa.delete(ImageTag).where(ImageTag.image_id == int(image_id)))
-            await session.delete(row)
+            deleted_ids = await catalog.delete_images_by_ids(session, image_ids=[int(image_id)])
+            if not deleted_ids:
+                raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
             await session.commit()
 
         return admin_ok(request, payload={"image_id": str(int(image_id))}, request_id=rid)
@@ -229,32 +231,28 @@ async def bulk_delete_admin_images(
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
     async def _op() -> dict[str, Any]:
-        deleted = 0
-        found = 0
-        found_ids: list[int] = []
         async with Session() as session:
-            for chunk in _chunks(ids, chunk_size=900):
-                rows = list((await session.execute(sa.select(Image.id).where(Image.id.in_(chunk)))).scalars().all())
-                found += len(rows)
-                found_ids.extend(int(x) for x in rows)
-
+            # Tags stay outside CatalogStore; clear links before image rows.
             for chunk in _chunks(ids, chunk_size=900):
                 await session.execute(sa.delete(ImageTag).where(ImageTag.image_id.in_(chunk)))
-                result = await session.execute(sa.delete(Image).where(Image.id.in_(chunk)))
-                deleted += _safe_rowcount(result)
-
+            found_ids = await catalog.delete_images_by_ids(session, image_ids=list(ids))
             await session.commit()
 
-        missing = max(0, int(len(ids)) - int(found))
+        missing = max(0, int(len(ids)) - int(len(found_ids)))
         return {
             "response": admin_ok(
                 request,
-                payload={"requested": int(len(ids)), "deleted": int(deleted), "missing": int(missing)},
+                payload={
+                    "requested": int(len(ids)),
+                    "deleted": int(len(found_ids)),
+                    "missing": int(missing),
+                },
                 request_id=rid,
             ),
-            "deleted_ids": found_ids,
+            "deleted_ids": list(found_ids),
         }
 
     out = await with_sqlite_busy_retry(_op)

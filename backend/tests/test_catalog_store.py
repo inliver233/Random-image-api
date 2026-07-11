@@ -392,6 +392,57 @@ def test_sqlite_catalog_store_bulk_upsert_import(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_sqlite_catalog_store_delete_images_by_ids(tmp_path: Path) -> None:
+    engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_delete.db").as_posix())
+
+    async def _run() -> None:
+        import sqlalchemy as sa
+
+        from app.db.models.images import Image
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        store = build_catalog_store(database_url=str(engine.url))
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            a = Image(
+                illust_id=1,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/1.jpg",
+                proxy_path="/i/1.jpg",
+                random_key=0.1,
+            )
+            b = Image(
+                illust_id=2,
+                page_index=0,
+                ext="png",
+                original_url="https://example.test/2.png",
+                proxy_path="/i/2.png",
+                random_key=0.2,
+            )
+            session.add_all([a, b])
+            await session.commit()
+            await session.refresh(a)
+            await session.refresh(b)
+
+            found = await store.delete_images_by_ids(
+                session,
+                image_ids=[int(a.id), 999999, int(a.id)],
+            )
+            await session.commit()
+            assert found == [int(a.id)]
+
+            remaining = list((await session.execute(sa.select(Image.id).order_by(Image.id))).scalars().all())
+            assert remaining == [int(b.id)]
+
+            empty = await store.delete_images_by_ids(session, image_ids=[])
+            assert empty == []
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_resolve_catalog_store_fallback() -> None:
     from app.core.random_delivery import resolve_catalog_store
 
