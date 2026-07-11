@@ -6,7 +6,7 @@ from typing import Any, Protocol, runtime_checkable
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.images import Image
-from app.db.random_pick import pick_random_image, pick_random_images
+from app.db.random_pick import count_pick_candidates, pick_random_image, pick_random_images
 
 
 @runtime_checkable
@@ -37,6 +37,12 @@ class RandomPickPort(Protocol):
         exclude_image_ids: Sequence[int] | None = None,
         **pick_kwargs: Any,
     ) -> list[Image]: ...
+
+    async def count_candidates(
+        self,
+        session: AsyncSession,
+        **pick_kwargs: Any,
+    ) -> int: ...
 
 
 class SqliteRandomPick:
@@ -75,6 +81,13 @@ class SqliteRandomPick:
             exclude_image_ids=exclude_image_ids,
             **pick_kwargs,
         )
+
+    async def count_candidates(
+        self,
+        session: AsyncSession,
+        **pick_kwargs: Any,
+    ) -> int:
+        return int(await count_pick_candidates(session, **pick_kwargs))
 
 
 def build_random_pick(*, database_url: str = "") -> RandomPickPort:

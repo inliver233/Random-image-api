@@ -17,6 +17,7 @@ Implementation:
 | --- | --- |
 | `pick_one` | Single ring sample by `random_key` + filters |
 | `pick_many` | Batch sample for quality scoring |
+| `count_candidates` | Same filter clauses as pick_* (dual-run compare-filters) |
 | Go engine | **Not** this port — dual-run sits in `RandomService` above |
 
 Filter semantics stay in `db/random_pick.py` (single source). Port does not reimplement SQL.

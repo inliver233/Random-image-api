@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -418,7 +419,9 @@ async def try_pick_via_engine(
     Returns (image_or_none, debug_meta). Never raises for transport failures.
     """
     meta: dict[str, Any] = {"engine": True, "engine_url": base_url}
+    t0 = time.perf_counter()
     data = await engine_pick(client, base_url, payload=payload, timeout_s=timeout_s)
+    meta["engine_rtt_s"] = max(0.0, time.perf_counter() - t0)
     if data is None:
         meta["engine_status"] = "unavailable"
         return None, meta
@@ -465,7 +468,9 @@ async def try_pick_many_via_engine(
 ) -> tuple[list[Any], dict[str, Any]]:
     """Batch variant of try_pick_via_engine for /feed (limit>1)."""
     meta: dict[str, Any] = {"engine": True, "engine_url": base_url, "batch": True}
+    t0 = time.perf_counter()
     data = await engine_pick(client, base_url, payload=payload, timeout_s=timeout_s)
+    meta["engine_rtt_s"] = max(0.0, time.perf_counter() - t0)
     if data is None:
         meta["engine_status"] = "unavailable"
         return [], meta
@@ -540,16 +545,20 @@ async def pick_with_strategy(
             timeout_s=timeout_s,
             catalog=store,
         )
+        rtt = (eng_meta or {}).get("engine_rtt_s")
         if image is not None:
             try:
-                observe_random_engine_pick(status="ok")
+                observe_random_engine_pick(status="ok", duration_s=rtt if isinstance(rtt, (int, float)) else None)
             except Exception:
                 pass
             return image, {**debug_base, "attempts_used": 1, **eng_meta}
         # Keep engine miss meta so dual-run ops can see why Python took over.
         engine_status = str((eng_meta or {}).get("engine_status") or "fallback")
         try:
-            observe_random_engine_pick(status=engine_status)
+            observe_random_engine_pick(
+                status=engine_status,
+                duration_s=rtt if isinstance(rtt, (int, float)) else None,
+            )
         except Exception:
             pass
         engine_fallback_meta = {

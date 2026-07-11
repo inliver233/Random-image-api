@@ -69,7 +69,9 @@ After starting the engine, push a snapshot before enabling the flag, or picks wi
 | `NO_MATCH` | filters excluded all candidates | `no_match` |
 | `OK` + items | successful pick | `ok` (PickItem DTO delivery; catalog rehydrate only if item incomplete) |
 
-Prometheus: `new_pixiv_random_engine_pick_total{status=…}` — watch `empty_index` / `unavailable` before raising `RANDOM_ENGINE_TRAFFIC_PERCENT`.
+Prometheus:
+- `new_pixiv_random_engine_pick_total{status=…}` — watch `empty_index` / `unavailable` before raising `RANDOM_ENGINE_TRAFFIC_PERCENT`
+- `new_pixiv_random_engine_pick_latency_seconds{status=…}` — BFF-observed `/v1/pick` RTT (not whole `/random`)
 
 BFF debug meta on engine hit also includes `engine_dto_count` / `engine_rehydrate_count` / `engine_rehydrate` so dual-run can confirm SQLite skip rate.
 

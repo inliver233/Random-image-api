@@ -69,6 +69,9 @@ def test_metrics_exposes_random_jobs_and_proxy_metrics(tmp_path: Path, monkeypat
         assert "new_pixiv_random_requests_total" in text
         assert "new_pixiv_random_no_match_total" in text
         assert "new_pixiv_random_opportunistic_hydrate_enqueued_total" in text
+        assert "new_pixiv_random_engine_pick_total" in text
+        assert "new_pixiv_random_engine_pick_latency_seconds" in text
+        assert 'status="empty_index"' in text or 'status="empty_index"' in text.replace("'", '"')
         assert "new_pixiv_image_delivery_total" in text
         assert "new_pixiv_upstream_stream_errors_total" in text
         assert "new_pixiv_jobs_claim_total" in text

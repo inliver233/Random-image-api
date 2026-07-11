@@ -20,7 +20,7 @@ from app.core.random_engine_sync import push_engine_snapshot
 from app.core.random_request import parse_random_filters
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_config_cache import resolve_runtime_for_request
-from app.db.random_pick import count_pick_candidates
+from app.db.random_pick_port import resolve_random_pick
 from app.db.request_logs_cleanup import (
     DEFAULT_REQUEST_LOGS_CHUNK_SIZE,
     DEFAULT_REQUEST_LOGS_KEEP_DAYS,
@@ -566,9 +566,10 @@ async def random_engine_compare_filters(
         fail_cooldown_before=fail_cooldown_before,
     )
 
+    pick_port = resolve_random_pick(getattr(request.app.state, "random_pick", None))
     Session = create_sessionmaker(request.app.state.engine)
     async with Session() as session:
-        python_count = await count_pick_candidates(
+        python_count = await pick_port.count_candidates(
             session,
             r18=int(filters.r18),
             r18_strict=bool(r18_strict),

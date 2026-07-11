@@ -52,6 +52,25 @@ RANDOM_ENGINE_PICK_TOTAL = Counter(
     ["status"],
 )
 
+RANDOM_ENGINE_PICK_LATENCY_SECONDS = Histogram(
+    "new_pixiv_random_engine_pick_latency_seconds",
+    "BFF-observed RTT for Go random-engine /v1/pick (seconds).",
+    ["status"],
+    buckets=(
+        0.001,
+        0.002,
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+    ),
+)
+
 RANDOM_LATENCY_SECONDS = Histogram(
     "new_pixiv_random_latency_seconds",
     "Latency for /random endpoint (seconds).",
@@ -163,6 +182,7 @@ def _init_labelsets() -> None:
         "unavailable",
         "not_ok",
         "no_match",
+        "empty_index",
         "bad_item",
         "bad_id",
         "db_miss",
@@ -170,6 +190,7 @@ def _init_labelsets() -> None:
         "skipped_traffic",
     ):
         RANDOM_ENGINE_PICK_TOTAL.labels(status=status).inc(0)
+        RANDOM_ENGINE_PICK_LATENCY_SECONDS.labels(status=status).observe(0.0)
     for path in IMAGE_DELIVERY_PATHS:
         IMAGE_DELIVERY_TOTAL.labels(path=path).inc(0)
     for result in ("allowed", "limited"):
@@ -211,12 +232,27 @@ def observe_image_delivery(*, path: str) -> None:
         pass
 
 
-def observe_random_engine_pick(*, status: str) -> None:
-    """Record dual-run engine attempt outcome (process-local Prometheus counter)."""
+def observe_random_engine_pick(*, status: str, duration_s: float | None = None) -> None:
+    """Record dual-run engine attempt outcome (+ optional /v1/pick RTT histogram)."""
     label = (status or "fallback").strip() or "fallback"
     if len(label) > 64:
         label = label[:64]
-    RANDOM_ENGINE_PICK_TOTAL.labels(status=label).inc()
+    try:
+        RANDOM_ENGINE_PICK_TOTAL.labels(status=label).inc()
+    except Exception:
+        pass
+    if duration_s is None:
+        return
+    try:
+        d = float(duration_s)
+    except Exception:
+        return
+    if d < 0:
+        return
+    try:
+        RANDOM_ENGINE_PICK_LATENCY_SECONDS.labels(status=label).observe(d)
+    except Exception:
+        pass
 
 
 def observe_api_key_rate_limit(*, result: str, backend: str) -> None:

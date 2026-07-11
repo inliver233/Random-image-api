@@ -219,8 +219,12 @@ class RandomPickContext:
             catalog=catalog,
         )
         engine_status = str((eng_meta or {}).get("engine_status") or "fallback")
+        rtt = (eng_meta or {}).get("engine_rtt_s")
         try:
-            observe_random_engine_pick(status=engine_status)
+            observe_random_engine_pick(
+                status=engine_status,
+                duration_s=rtt if isinstance(rtt, (int, float)) else None,
+            )
         except Exception:
             pass
         return list(images or []), eng_meta
