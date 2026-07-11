@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.logging import get_logger
+from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
 from app.core.runtime_settings import set_runtime_setting
 from app.db.session import with_sqlite_busy_retry
@@ -39,14 +39,8 @@ async def load_persisted_random_totals(engine: AsyncEngine) -> dict[str, int]:
     if raw is None:
         return {"total_requests": 0, "total_ok": 0, "total_error": 0}
 
-    try:
-        data = json.loads(str(raw))
-    except Exception:
-        return {"total_requests": 0, "total_ok": 0, "total_error": 0}
-
-    if not isinstance(data, dict):
-        return {"total_requests": 0, "total_ok": 0, "total_error": 0}
-
+    # soft_json_object: invalid/non-object → {}; missing keys → 0 via _as_nonneg_int.
+    data = soft_json_object(str(raw))
     return {
         "total_requests": _as_nonneg_int(data.get("total_requests")),
         "total_ok": _as_nonneg_int(data.get("total_ok")),

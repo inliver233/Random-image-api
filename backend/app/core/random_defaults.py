@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from app.core.coerce import clamp_int
 from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
 from app.core.recommendation import (
@@ -141,7 +142,7 @@ def resolve_fail_cooldown_ms(random_defaults: dict[str, Any]) -> tuple[int, str,
             max_v=24 * 60 * 60,
         )
         fail_cooldown_ms_i = int(cooldown_s) * 1000
-    fail_cooldown_ms_i = max(0, min(int(fail_cooldown_ms_i), 24 * 60 * 60 * 1000))
+    fail_cooldown_ms_i = clamp_int(int(fail_cooldown_ms_i), min_v=0, max_v=24 * 60 * 60 * 1000)
 
     request_now = datetime.now(timezone.utc)
     fail_cooldown_before = (
@@ -304,14 +305,14 @@ def resolve_dedup(random_defaults: dict[str, Any]) -> DedupConfig:
         max_images_raw = dedup_raw.get("max_images")
         if max_images_raw is not None:
             try:
-                max_images = int(max(1, min(int(max_images_raw), 200_000)))
+                max_images = clamp_int(int(max_images_raw), min_v=1, max_v=200_000)
             except Exception:
                 pass
 
         max_authors_raw = dedup_raw.get("max_authors")
         if max_authors_raw is not None:
             try:
-                max_authors = int(max(1, min(int(max_authors_raw), 200_000)))
+                max_authors = clamp_int(int(max_authors_raw), min_v=1, max_v=200_000)
             except Exception:
                 pass
 

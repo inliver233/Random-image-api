@@ -24,6 +24,7 @@ from app.core.metrics import TOKEN_REFRESH_FAIL_TOTAL
 from app.core.proxy_routing import select_proxy_uri_for_url
 from app.core.redact import redact_text
 from app.core.runtime_settings import RuntimeConfig, load_runtime_config
+from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
 from app.db.models.image_tags import ImageTag
 from app.db.models.images import Image
@@ -474,21 +475,9 @@ def build_hydrate_metadata_handler(
                 if run is None:
                     raise JobPermanentError("Hydration run not found")
 
-                criteria: dict[str, Any] = {}
-                try:
-                    criteria_raw = json.loads(run.criteria_json or "{}")
-                    if isinstance(criteria_raw, dict):
-                        criteria = dict(criteria_raw)
-                except Exception:
-                    criteria = {}
-
-                cursor_image_id = 0
-                try:
-                    cursor_raw = json.loads(run.cursor_json or "{}")
-                    if isinstance(cursor_raw, dict):
-                        cursor_image_id = as_int(cursor_raw.get("cursor_image_id"), default=0)
-                except Exception:
-                    cursor_image_id = 0
+                criteria = soft_json_object(run.criteria_json)
+                cursor_raw = soft_json_object(run.cursor_json)
+                cursor_image_id = as_int(cursor_raw.get("cursor_image_id"), default=0)
 
                 return {
                     "status": str(run.status),
