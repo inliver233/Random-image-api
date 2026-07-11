@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
+from app.core.runtime_config_cache import invalidate_runtime_config_cache
 from app.core.runtime_settings import (
     fetch_runtime_settings,
     runtime_config_from_values,
@@ -615,5 +616,14 @@ async def update_settings(
 
     for key, value in updates:
         await set_runtime_setting(engine, key=key, value=value, updated_by=updated_by)
+
+    try:
+        cache = getattr(request.app.state, "runtime_config_cache", None)
+        if cache is not None:
+            cache.invalidate()
+        else:
+            invalidate_runtime_config_cache()
+    except Exception:
+        invalidate_runtime_config_cache()
 
     return {"ok": True, "updated": len(updates), "request_id": rid}

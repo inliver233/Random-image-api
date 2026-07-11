@@ -22,11 +22,13 @@ from app.api.public.version import router as version_router
 from app.core.config import load_settings
 from app.core.api_keys import ApiKeyAuthConfig, ApiKeyAuthenticator, ApiKeyRateLimiter, require_public_api_key
 from app.core.errors import ApiError, ErrorCode, json_error_response
+from app.core.http_client import build_default_async_transport, build_shared_async_client
 from app.core.logging import configure_logging, get_logger
 from app.core.metrics import observe_random_result
 from app.core.random_request_persistence import load_persisted_random_totals, persist_random_totals
 from app.core.random_request_stats import RandomRequestStats
 from app.core.request_id import build_request_id_middleware, get_or_create_request_id, set_request_id_on_state
+from app.core.runtime_config_cache import RuntimeConfigCache
 from app.core.security import decode_jwt, parse_bearer_token
 from app.db.engine import create_engine
 from app.db.models.admin_audit import AdminAudit
@@ -74,6 +76,9 @@ def create_app() -> FastAPI:
 
     engine = create_engine(settings.database_url)
     app.state.engine = engine
+    app.state.httpx_transport = build_default_async_transport()
+    app.state.httpx_client = build_shared_async_client(transport=app.state.httpx_transport)
+    app.state.runtime_config_cache = RuntimeConfigCache(ttl_s=2.0)
 
     api_key_cfg = ApiKeyAuthConfig(
         required=bool(settings.public_api_key_required),
@@ -304,6 +309,13 @@ def create_app() -> FastAPI:
                 await asyncio.wait_for(task, timeout=2.0)
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                pass
+
+        httpx_client = getattr(app.state, "httpx_client", None)
+        if httpx_client is not None:
+            try:
+                await httpx_client.aclose()
             except Exception:
                 pass
 

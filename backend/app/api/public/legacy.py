@@ -12,7 +12,7 @@ from app.core.pximg_reverse_proxy import (
     rewrite_pximg_to_mirror,
 )
 from app.core.proxy_routing import select_proxy_uri_for_url
-from app.core.runtime_settings import load_runtime_config
+from app.core.runtime_config_cache import get_cached_runtime_config
 from app.db.images_get_by_illust import get_image_by_illust_page
 from app.db.session import create_sessionmaker
 
@@ -56,7 +56,11 @@ async def legacy_multi(
         if image is None or (image.ext or "").lower() != ext:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
 
-    runtime = await load_runtime_config(engine)
+    cache = getattr(request.app.state, "runtime_config_cache", None)
+    if cache is not None:
+        runtime = await cache.get(engine)
+    else:
+        runtime = await get_cached_runtime_config(engine)
 
     proxy_override: str | None = None
     if proxy is not None:
@@ -87,9 +91,11 @@ async def legacy_multi(
             proxy_uri = picked.uri
 
     transport = getattr(request.app.state, "httpx_transport", None)
+    shared_client = getattr(request.app.state, "httpx_client", None)
     return await stream_url(
         source_url,
         transport=transport,
+        client=shared_client if not proxy_uri else None,
         proxy=proxy_uri,
         cache_control="public, max-age=31536000, immutable",
         range_header=request.headers.get("Range"),
@@ -130,7 +136,11 @@ async def legacy_single(
         if image is None or (image.ext or "").lower() != ext:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
 
-    runtime = await load_runtime_config(engine)
+    cache = getattr(request.app.state, "runtime_config_cache", None)
+    if cache is not None:
+        runtime = await cache.get(engine)
+    else:
+        runtime = await get_cached_runtime_config(engine)
 
     proxy_override: str | None = None
     if proxy is not None:
@@ -161,9 +171,11 @@ async def legacy_single(
             proxy_uri = picked.uri
 
     transport = getattr(request.app.state, "httpx_transport", None)
+    shared_client = getattr(request.app.state, "httpx_client", None)
     return await stream_url(
         source_url,
         transport=transport,
+        client=shared_client if not proxy_uri else None,
         proxy=proxy_uri,
         cache_control="public, max-age=31536000, immutable",
         range_header=request.headers.get("Range"),

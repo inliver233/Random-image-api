@@ -14,32 +14,50 @@ PIXIV_REFERER = "https://www.pixiv.net/"
 async def stream_url(
     url: str,
     *,
-    transport: httpx.BaseTransport | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+    client: httpx.AsyncClient | None = None,
     proxy: str | None = None,
     cache_control: str,
     referer: str = PIXIV_REFERER,
     timeout_s: float = 30.0,
     range_header: str | None = None,
 ) -> StreamingResponse:
-    client = httpx.AsyncClient(
-        transport=transport,
-        proxy=proxy,
-        follow_redirects=True,
-        timeout=httpx.Timeout(timeout_s, connect=10.0),
-    )
+    """Stream an upstream URL as a Starlette StreamingResponse.
+
+    Connection reuse rules:
+    - If ``proxy`` is set: must use a dedicated client (httpx binds proxy at client level).
+    - Else if shared ``client`` is provided: reuse it (do NOT close on completion).
+    - Else if ``transport`` is provided: build a short-lived client on that transport.
+    - Else: cold client (legacy path).
+    """
+    owns_client = False
+    shared_client = client is not None and not proxy
+
+    if shared_client:
+        assert client is not None
+        active_client = client
+    else:
+        owns_client = True
+        active_client = httpx.AsyncClient(
+            transport=transport,
+            proxy=proxy,
+            follow_redirects=True,
+            timeout=httpx.Timeout(timeout_s, connect=10.0),
+        )
 
     request_headers: dict[str, str] = {}
     if referer:
         request_headers["Referer"] = referer
     if range_header:
         request_headers["Range"] = range_header
-    request = client.build_request("GET", url, headers=request_headers)
+    request = active_client.build_request("GET", url, headers=request_headers)
 
     try:
-        upstream = await client.send(request, stream=True)
+        upstream = await active_client.send(request, stream=True)
     except httpx.ProxyError as exc:
         UPSTREAM_STREAM_ERRORS_TOTAL.inc()
-        await client.aclose()
+        if owns_client:
+            await active_client.aclose()
         msg = str(exc).lower()
         if "407" in msg or "proxy authentication" in msg:
             raise ApiError(
@@ -54,14 +72,16 @@ async def stream_url(
         ) from exc
     except Exception as exc:
         UPSTREAM_STREAM_ERRORS_TOTAL.inc()
-        await client.aclose()
+        if owns_client:
+            await active_client.aclose()
         raise ApiError(code=ErrorCode.UPSTREAM_STREAM_ERROR, message="上游请求失败", status_code=502) from exc
 
     if upstream.status_code not in {200, 206}:
         status = upstream.status_code
         UPSTREAM_STREAM_ERRORS_TOTAL.inc()
         await upstream.aclose()
-        await client.aclose()
+        if owns_client:
+            await active_client.aclose()
         if status == 403:
             raise ApiError(code=ErrorCode.UPSTREAM_403, message="上游拒绝访问（403）", status_code=502)
         if status == 404:
@@ -82,7 +102,8 @@ async def stream_url(
             raise
         finally:
             await upstream.aclose()
-            await client.aclose()
+            if owns_client:
+                await active_client.aclose()
 
     accept_ranges = upstream.headers.get("accept-ranges")
     content_range = upstream.headers.get("content-range")
