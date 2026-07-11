@@ -7,7 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.images_get import get_image_by_id, get_images_by_ids
 from app.db.images_mark import mark_image_failure, mark_image_ok
-from app.db.images_upsert import upsert_hydrated_image_page, upsert_image_by_illust_page
+from app.db.images_upsert import (
+    bulk_upsert_import_rows,
+    upsert_hydrated_image_page,
+    upsert_image_by_illust_page,
+)
 from app.db.models.images import Image
 
 
@@ -59,6 +63,15 @@ class CatalogStore(Protocol):
         comment_count: int | None,
         created_import_id: int | None,
     ) -> int: ...
+
+    async def bulk_upsert_import_rows(
+        self,
+        session: AsyncSession,
+        *,
+        rows: list[dict],
+        keys: list[tuple[int, int]],
+        import_id: int,
+    ) -> list[int]: ...
 
     async def get_image_by_id(self, session: AsyncSession, *, image_id: int) -> Image | None: ...
 
@@ -152,6 +165,21 @@ class SqliteCatalogStore:
             view_count=view_count,
             comment_count=comment_count,
             created_import_id=created_import_id,
+        )
+
+    async def bulk_upsert_import_rows(
+        self,
+        session: AsyncSession,
+        *,
+        rows: list[dict],
+        keys: list[tuple[int, int]],
+        import_id: int,
+    ) -> list[int]:
+        return await bulk_upsert_import_rows(
+            session,
+            rows=rows,
+            keys=keys,
+            import_id=import_id,
         )
 
     async def get_image_by_id(self, session: AsyncSession, *, image_id: int) -> Image | None:

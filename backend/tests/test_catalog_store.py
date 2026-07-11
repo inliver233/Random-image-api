@@ -162,6 +162,115 @@ def test_sqlite_catalog_store_upsert_hydrated(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_sqlite_catalog_store_bulk_upsert_import(tmp_path: Path) -> None:
+    engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "c_import.db").as_posix())
+
+    async def _run() -> None:
+        import sqlalchemy as sa
+
+        from app.db.models.images import Image
+        from app.db.models.imports import Import
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        store = build_catalog_store(database_url=str(engine.url))
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            imp = Import(created_by="admin", source="manual")
+            session.add(imp)
+            await session.commit()
+            await session.refresh(imp)
+            import_id = int(imp.id)
+
+            keys = [(100, 0), (100, 1)]
+            rows = [
+                {
+                    "illust_id": 100,
+                    "page_index": 0,
+                    "ext": "jpg",
+                    "original_url": "https://example.test/100_p0.jpg",
+                    "proxy_path": "",
+                    "random_key": 0.1,
+                    "created_import_id": import_id,
+                    "width": 640,
+                    "height": 480,
+                    "title": "a",
+                },
+                {
+                    "illust_id": 100,
+                    "page_index": 1,
+                    "ext": "png",
+                    "original_url": "https://example.test/100_p1.png",
+                    "proxy_path": "",
+                    "random_key": 0.2,
+                    "created_import_id": import_id,
+                    "width": None,
+                    "height": None,
+                    "title": "b",
+                },
+            ]
+            ids = await store.bulk_upsert_import_rows(
+                session,
+                rows=rows,
+                keys=keys,
+                import_id=import_id,
+            )
+            await session.commit()
+            assert len(ids) == 2
+            got = (
+                await session.execute(
+                    sa.select(Image.id, Image.illust_id, Image.page_index, Image.proxy_path, Image.width, Image.title)
+                    .where(sa.tuple_(Image.illust_id, Image.page_index).in_(keys))
+                    .order_by(Image.page_index)
+                )
+            ).all()
+            assert len(got) == 2
+            assert str(got[0].proxy_path) == f"/i/{got[0].id}.jpg"
+            assert int(got[0].width or 0) == 640
+            assert str(got[0].title) == "a"
+            assert str(got[1].proxy_path) == f"/i/{got[1].id}.png"
+
+            # Re-upsert: nullable CASE merge keeps existing width when incoming is None;
+            # non-null title overwrites.
+            ids2 = await store.bulk_upsert_import_rows(
+                session,
+                rows=[
+                    {
+                        "illust_id": 100,
+                        "page_index": 0,
+                        "ext": "jpg",
+                        "original_url": "https://example.test/100_p0b.jpg",
+                        "proxy_path": "",
+                        "random_key": 0.9,
+                        "created_import_id": import_id,
+                        "width": None,
+                        "height": None,
+                        "title": "a2",
+                    }
+                ],
+                keys=[(100, 0)],
+                import_id=import_id,
+            )
+            await session.commit()
+            assert len(ids2) == 1
+            assert int(ids2[0]) == int(got[0].id)
+            row = (
+                await session.execute(
+                    sa.select(Image.width, Image.title, Image.original_url, Image.proxy_path).where(
+                        Image.id == int(got[0].id)
+                    )
+                )
+            ).one()
+            assert int(row.width or 0) == 640  # preserved via CASE
+            assert str(row.title) == "a2"
+            assert "100_p0b" in str(row.original_url)
+            # empty proxy_path on conflict keeps existing (CASE length > 0)
+            assert str(row.proxy_path) == f"/i/{got[0].id}.jpg"
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_resolve_catalog_store_fallback() -> None:
     from app.core.random_delivery import resolve_catalog_store
 

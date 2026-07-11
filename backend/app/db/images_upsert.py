@@ -125,3 +125,95 @@ async def upsert_hydrated_image_page(
     proxy_path = f"/i/{image_id}.{ext}"
     await session.execute(sa.update(Image).where(Image.id == image_id).values(proxy_path=proxy_path))
     return image_id
+
+
+async def bulk_upsert_import_rows(
+    session: AsyncSession,
+    *,
+    rows: list[dict],
+    keys: list[tuple[int, int]],
+    import_id: int,
+) -> list[int]:
+    """Bulk upsert import image rows with nullable CASE merges; fill empty proxy_path.
+
+    Does not touch tags or Import counters — callers own those.
+    Returns image ids for the given (illust_id, page_index) keys (for engine publish).
+    """
+    if not rows:
+        return []
+
+    now_expr = sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
+    stmt = sqlite_insert(Image).values(rows)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["illust_id", "page_index"],
+        set_={
+            "ext": stmt.excluded.ext,
+            "original_url": stmt.excluded.original_url,
+            "proxy_path": sa.case(
+                (sa.func.length(stmt.excluded.proxy_path) > 0, stmt.excluded.proxy_path),
+                else_=Image.proxy_path,
+            ),
+            "created_import_id": stmt.excluded.created_import_id,
+            "width": sa.case((stmt.excluded.width.is_not(None), stmt.excluded.width), else_=Image.width),
+            "height": sa.case((stmt.excluded.height.is_not(None), stmt.excluded.height), else_=Image.height),
+            "aspect_ratio": sa.case(
+                (stmt.excluded.aspect_ratio.is_not(None), stmt.excluded.aspect_ratio),
+                else_=Image.aspect_ratio,
+            ),
+            "orientation": sa.case(
+                (stmt.excluded.orientation.is_not(None), stmt.excluded.orientation),
+                else_=Image.orientation,
+            ),
+            "x_restrict": sa.case(
+                (stmt.excluded.x_restrict.is_not(None), stmt.excluded.x_restrict),
+                else_=Image.x_restrict,
+            ),
+            "ai_type": sa.case((stmt.excluded.ai_type.is_not(None), stmt.excluded.ai_type), else_=Image.ai_type),
+            "illust_type": sa.case(
+                (stmt.excluded.illust_type.is_not(None), stmt.excluded.illust_type),
+                else_=Image.illust_type,
+            ),
+            "user_id": sa.case((stmt.excluded.user_id.is_not(None), stmt.excluded.user_id), else_=Image.user_id),
+            "user_name": sa.case(
+                (stmt.excluded.user_name.is_not(None), stmt.excluded.user_name),
+                else_=Image.user_name,
+            ),
+            "title": sa.case((stmt.excluded.title.is_not(None), stmt.excluded.title), else_=Image.title),
+            "created_at_pixiv": sa.case(
+                (stmt.excluded.created_at_pixiv.is_not(None), stmt.excluded.created_at_pixiv),
+                else_=Image.created_at_pixiv,
+            ),
+            "bookmark_count": sa.case(
+                (stmt.excluded.bookmark_count.is_not(None), stmt.excluded.bookmark_count),
+                else_=Image.bookmark_count,
+            ),
+            "view_count": sa.case(
+                (stmt.excluded.view_count.is_not(None), stmt.excluded.view_count),
+                else_=Image.view_count,
+            ),
+            "comment_count": sa.case(
+                (stmt.excluded.comment_count.is_not(None), stmt.excluded.comment_count),
+                else_=Image.comment_count,
+            ),
+            "updated_at": now_expr,
+        },
+    )
+    await session.execute(stmt)
+
+    # Fill proxy_path for (newly inserted) rows that are still empty.
+    if keys:
+        await session.execute(
+            sa.update(Image)
+            .where(Image.created_import_id == int(import_id))
+            .where(Image.proxy_path == "")
+            .where(sa.tuple_(Image.illust_id, Image.page_index).in_(keys))
+            .values(proxy_path=sa.text("'/i/' || id || '.' || ext"))
+        )
+
+        id_rows = (
+            await session.execute(
+                sa.select(Image.id).where(sa.tuple_(Image.illust_id, Image.page_index).in_(keys))
+            )
+        ).scalars().all()
+        return [int(x) for x in id_rows]
+    return []
