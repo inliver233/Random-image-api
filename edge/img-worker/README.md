@@ -72,3 +72,14 @@ npx wrangler secret put IMAGE_EDGE_SECRET_PREVIOUS # 旧
 2. 成功响应带 `X-Edge-Via` 标明实际出站 host
 3. 软熔断：连续 origin 403 达阈值后短时跳过 origin，直连镜像链（`X-Edge-Circuit: origin-open`）
 4. 或切换 R2 预取模式（后续迭代）
+
+## 观测（运维）
+
+| 信号 | 来源 |
+| --- | --- |
+| Cache HIT / MISS | 响应头 `X-Edge-Cache`（按 path 缓存，与签名无关） |
+| 上游 403 / 熔断 | `X-Edge-Via`、`X-Edge-Circuit`；Worker 内 soft circuit |
+| BFF 切流路径 | Prometheus `new_pixiv_image_delivery_total`（edge_redirect / local_*） |
+| 配置是否可签 URL | Admin `GET /admin/api/maintenance/image-edge` 或 `/healthz` → `modules.image_edge` |
+
+多地区 403 POC：部署后用固定已知 path 签 URL，在多 POP/地区 curl 记录 200 vs 403，再决定直连+Cache 或 R2 预热。

@@ -26,8 +26,19 @@ GET|HEAD https://{edge-host}/u/{exp}/{sig}/{b64url(path)}
 Health:
 
 ```
-GET /healthz  →  {"ok":true,"service":"random-image-edge"}
+GET /healthz|/  →  {"ok":true,"service":"random-image-edge","dual_secret":bool,"origin_circuit_open":bool}
 ```
+
+Response headers of interest for ops (HIT rate / upstream diagnostics):
+
+| Header | Meaning |
+| --- | --- |
+| `X-Edge-Cache` | `HIT` / `MISS` (path-keyed Cache API; ignores exp/sig) |
+| `X-Edge-Via` | origin host or emergency mirror host that served bytes |
+| `X-Edge-Circuit` | `origin-open` when soft 403 circuit skips origin |
+| `Cache-Control` | `public, max-age=…, immutable` on successful image responses |
+
+BFF counters: Prometheus `new_pixiv_image_delivery_total{path=edge_redirect|edge_unavailable|local_stream|local_i_redirect}`.
 
 ## Signing (Python / any language)
 
