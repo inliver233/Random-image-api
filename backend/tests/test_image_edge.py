@@ -56,6 +56,34 @@ def test_sign_image_edge_path_matches_worker_contract() -> None:
     assert url == f"https://img.example.com/u/{exp}/{expect_sig}/{expect_b64path}"
 
 
+def test_sign_image_edge_matches_frozen_worker_vectors() -> None:
+    """Parity with edge/img-worker/test/sign_vectors.json (cross-language contract)."""
+    import json
+
+    vectors_path = Path(__file__).resolve().parents[2] / "edge" / "img-worker" / "test" / "sign_vectors.json"
+    payload = json.loads(vectors_path.read_text(encoding="utf-8"))
+    secret = str(payload["secret"])
+    cfg = ImageEdgeConfig(
+        enabled=True,
+        base_urls=["https://img.example.com"],
+        secret=secret,
+        sign_ttl_seconds=3600,
+    )
+    for vec in payload["vectors"]:
+        path = str(vec["path"])
+        exp = int(vec["exp"])
+        expect_sig = str(vec["sig"])
+        expect_msg = str(vec["msg"])
+        assert expect_msg == f"{exp}\n{path}"
+        # sign_image_edge_path uses now + ttl; reverse to fixed exp via now=exp-ttl.
+        url = sign_image_edge_path(cfg, path, now=exp - int(cfg.sign_ttl_seconds))
+        assert f"/u/{exp}/{expect_sig}/" in url
+        assert verify_image_edge_signature(cfg, path=path, exp=exp, sig=expect_sig) is True
+        # Independent HMAC recompute must match frozen vector.
+        raw = hmac.new(secret.encode("utf-8"), expect_msg.encode("utf-8"), hashlib.sha256).digest()
+        assert _b64url(raw) == expect_sig
+
+
 def test_load_image_edge_config_requires_all_fields() -> None:
     assert load_image_edge_config({}) is None
     assert load_image_edge_config({"IMAGE_EDGE_ENABLED": "true", "IMAGE_EDGE_SECRET": "x"}) is None
