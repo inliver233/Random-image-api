@@ -143,6 +143,30 @@ describe("DashboardPage", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
+        if (url.endsWith("/admin/api/maintenance/modular-ports")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              catalog: { backend: "sqlite" },
+              tags: { backend: "sqlite" },
+              job_queue: {
+                backend: "sqlite",
+                requested: "redis",
+                implemented: false,
+                using_sqlite_fallback: true,
+              },
+              recent_dedup: {
+                configured_backend: "redis",
+                active_backend: "memory",
+                using_memory_fallback: true,
+              },
+              random_service: { backend: "default" },
+              random_pick: { backend: "sqlite" },
+              request_id: "req_modular",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
         return new Response(JSON.stringify({ ok: false, code: "NOT_FOUND", message: "not found", request_id: "req_x", details: {} }), {
           status: 404,
           headers: { "Content-Type": "application/json" },
@@ -183,6 +207,12 @@ describe("DashboardPage", () => {
     expect(await screen.findByText("数量: 3")).toBeInTheDocument();
     expect(await screen.findByText(/#101\s*·\s*hydrate_metadata/)).toBeInTheDocument();
     expect(await screen.findByText("upstream 403 on illust 1")).toBeInTheDocument();
+    expect(await screen.findByText("模块端口（Phase 4）")).toBeInTheDocument();
+    expect(await screen.findByText(/catalog=sqlite/)).toBeInTheDocument();
+    expect(await screen.findByText(/job_queue=sqlite/)).toBeInTheDocument();
+    expect(await screen.findByText("redis→sqlite fallback")).toBeInTheDocument();
+    expect(await screen.findByText("redis→memory fallback")).toBeInTheDocument();
+    expect(await screen.findByText(/请求ID:\s*req_modular/)).toBeInTheDocument();
   });
 
   it("navigates to import", async () => {

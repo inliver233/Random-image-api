@@ -1,5 +1,5 @@
 ﻿import { useMutation, useQuery } from "@tanstack/react-query";
-import { Alert, Button, Card, Col, Row, Space, Typography } from "antd";
+import { Alert, Button, Card, Col, Row, Space, Tag, Typography } from "antd";
 import React from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -74,6 +74,26 @@ type FailedJobItem = {
 type JobsResponse = { ok: true; items: FailedJobItem[]; next_cursor: string; request_id: string };
 type CreateHydrationRunResponse = { ok: true; hydration_run_id: string; job_id: string; request_id: string };
 
+type ModularPortsStatusResponse = {
+  ok: true;
+  catalog: { backend: string };
+  tags: { backend: string };
+  job_queue: {
+    backend: string;
+    requested: string;
+    implemented?: boolean;
+    using_sqlite_fallback?: boolean;
+  };
+  recent_dedup: {
+    configured_backend: string;
+    active_backend: string;
+    using_memory_fallback: boolean;
+  };
+  random_service?: { backend: string };
+  random_pick?: { backend: string };
+  request_id: string;
+};
+
 export function DashboardPage() {
   const navigate = useNavigate();
 
@@ -104,6 +124,12 @@ export function DashboardPage() {
     queryKey: ["admin", "stats", "random"],
     queryFn: () => apiJson<RandomStatsResponse>("/admin/api/stats/random"),
     refetchInterval: 5000,
+  });
+
+  const modularPorts = useQuery({
+    queryKey: ["admin", "maintenance", "modular-ports"],
+    queryFn: () => apiJson<ModularPortsStatusResponse>("/admin/api/maintenance/modular-ports"),
+    refetchInterval: 30_000,
   });
 
   const version = useQuery({
@@ -315,6 +341,68 @@ export function DashboardPage() {
                   打开任务页
                 </Button>
               </Space>
+            </QueryState>
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Col xs={24} md={24} xl={24}>
+          <Card title="模块端口（Phase 4）">
+            <QueryState query={modularPorts} errorMessage="加载模块端口失败">
+              {modularPorts.data ? (
+                <Space direction="vertical" style={{ width: "100%" }}>
+                  <Space wrap size={[8, 8]}>
+                    <Tag>catalog={modularPorts.data.catalog.backend}</Tag>
+                    <Tag>tags={modularPorts.data.tags.backend}</Tag>
+                    <Tag
+                      color={
+                        modularPorts.data.job_queue.using_sqlite_fallback
+                          ? "orange"
+                          : modularPorts.data.job_queue.backend === "memory"
+                            ? "blue"
+                            : undefined
+                      }
+                    >
+                      job_queue={modularPorts.data.job_queue.backend}
+                      {modularPorts.data.job_queue.requested !== modularPorts.data.job_queue.backend
+                        ? ` (req=${modularPorts.data.job_queue.requested})`
+                        : ""}
+                    </Tag>
+                    {modularPorts.data.job_queue.using_sqlite_fallback ? (
+                      <Tag color="orange">
+                        {modularPorts.data.job_queue.requested}→sqlite fallback
+                      </Tag>
+                    ) : null}
+                    <Tag
+                      color={
+                        modularPorts.data.recent_dedup.active_backend === "redis"
+                          ? "green"
+                          : modularPorts.data.recent_dedup.using_memory_fallback
+                            ? "orange"
+                            : undefined
+                      }
+                    >
+                      recent_dedup={modularPorts.data.recent_dedup.active_backend}
+                      {modularPorts.data.recent_dedup.configured_backend !==
+                      modularPorts.data.recent_dedup.active_backend
+                        ? ` (req=${modularPorts.data.recent_dedup.configured_backend})`
+                        : ""}
+                    </Tag>
+                    {modularPorts.data.recent_dedup.using_memory_fallback ? (
+                      <Tag color="orange">redis→memory fallback</Tag>
+                    ) : null}
+                    <Tag>random_service={modularPorts.data.random_service?.backend ?? "default"}</Tag>
+                    <Tag>random_pick={modularPorts.data.random_pick?.backend ?? "sqlite"}</Tag>
+                  </Space>
+                  <Typography.Text type="secondary">
+                    请求ID: {modularPorts.data.request_id}
+                  </Typography.Text>
+                  <Button size="small" onClick={() => navigate("/admin/maintenance")}>
+                    打开维护页（完整状态）
+                  </Button>
+                </Space>
+              ) : null}
             </QueryState>
           </Card>
         </Col>
