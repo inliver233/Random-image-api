@@ -69,6 +69,14 @@ RANDOM_LATENCY_SECONDS = Histogram(
     ),
 )
 
+# Public image bytes delivery path (edge 302 vs local stream vs local /i redirect).
+# Labels stay small: edge_redirect | local_stream | local_i_redirect.
+IMAGE_DELIVERY_TOTAL = Counter(
+    "new_pixiv_image_delivery_total",
+    "Public image delivery outcomes by path (edge vs local cascade).",
+    ["path"],
+)
+
 UPSTREAM_STREAM_ERRORS_TOTAL = Counter(
     "new_pixiv_upstream_stream_errors_total",
     "Total upstream stream failures (stream_url).",
@@ -128,6 +136,12 @@ METRICS_LAST_SCRAPE_SUCCESS = Gauge(
     "Last /metrics scrape success (1=ok, 0=error).",
 )
 
+IMAGE_DELIVERY_PATHS: tuple[str, ...] = (
+    "edge_redirect",
+    "local_stream",
+    "local_i_redirect",
+)
+
 
 def _init_labelsets() -> None:
     for result in RANDOM_RESULTS:
@@ -145,6 +159,8 @@ def _init_labelsets() -> None:
         "fallback",
     ):
         RANDOM_ENGINE_PICK_TOTAL.labels(status=status).inc(0)
+    for path in IMAGE_DELIVERY_PATHS:
+        IMAGE_DELIVERY_TOTAL.labels(path=path).inc(0)
     UPSTREAM_STREAM_ERRORS_TOTAL.inc(0)
     JOBS_CLAIM_TOTAL.inc(0)
     JOBS_FAILED_TOTAL.inc(0)
@@ -168,6 +184,17 @@ def observe_random_result(*, result: str, duration_s: float | None) -> None:
         RANDOM_NO_MATCH_TOTAL.inc()
     if duration_s is not None and duration_s >= 0:
         RANDOM_LATENCY_SECONDS.observe(duration_s)
+
+
+def observe_image_delivery(*, path: str) -> None:
+    """Count one public image delivery by cascade path (best-effort; never raises)."""
+    label = (path or "").strip()
+    if label not in IMAGE_DELIVERY_PATHS:
+        return
+    try:
+        IMAGE_DELIVERY_TOTAL.labels(path=label).inc()
+    except Exception:
+        pass
 
 
 def observe_random_engine_pick(*, status: str) -> None:

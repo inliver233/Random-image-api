@@ -11,6 +11,7 @@ from fastapi.responses import RedirectResponse
 from app.core.errors import ApiError, ErrorCode
 from app.core.http_stream import stream_url
 from app.core.image_edge import resolve_image_edge_redirect_url
+from app.core.metrics import observe_image_delivery
 from app.core.origin_stream import prepare_origin_stream
 from app.core.recent_dedup import record_recent
 from app.core.random_strategy import needs_opportunistic_hydrate
@@ -197,6 +198,7 @@ async def deliver_random_image_stream(
                     mark_ok_on_edge=False,
                     should_mark_ok=bool(should_mark_ok),
                 )
+                observe_image_delivery(path="edge_redirect")
                 return attach_background(
                     build_edge_redirect_response(edge_url=edge_url, cache_control="no-store"),
                     background_tasks,
@@ -235,6 +237,7 @@ async def deliver_random_image_stream(
                 mark_ok_on_edge=True,
                 should_mark_ok=bool(should_mark_ok),
             )
+            observe_image_delivery(path="local_stream")
             return attach_background(resp, background_tasks)
         except ApiError as exc:
             if exc.code in {

@@ -7,6 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Query, Request
 from app.core.errors import ApiError
 from app.core.image_edge import resolve_image_edge_redirect_url, resolve_public_proxy_url
 from app.core.imgproxy import build_signed_processing_url, load_imgproxy_config_from_settings
+from app.core.metrics import observe_image_delivery
 from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.random_delivery import (
     attach_background,
@@ -227,8 +228,10 @@ async def random_image(
                 )
             if edge_url:
                 # Edge 302 does not prove bytes; skip mark_image_ok (fail_cooldown stays honest).
+                observe_image_delivery(path="edge_redirect")
                 resp = build_edge_redirect_response(edge_url=edge_url, cache_control="no-store")
             else:
+                observe_image_delivery(path="local_i_redirect")
                 resp = build_local_i_redirect_response(
                     image_id=int(image.id),
                     ext=str(image.ext),

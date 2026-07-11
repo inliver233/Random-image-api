@@ -63,6 +63,16 @@ def test_schedule_edge_side_effects_skips_mark_ok_by_default(monkeypatch: pytest
     assert getattr(task_fn, "__name__", "") == "best_effort"
 
 
+def test_observe_image_delivery_counts_edge_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.core.metrics import IMAGE_DELIVERY_TOTAL, observe_image_delivery
+
+    before = IMAGE_DELIVERY_TOTAL.labels(path="edge_redirect")._value.get()
+    observe_image_delivery(path="edge_redirect")
+    observe_image_delivery(path="not_a_path")
+    after = IMAGE_DELIVERY_TOTAL.labels(path="edge_redirect")._value.get()
+    assert after == before + 1.0
+
+
 def test_deliver_random_image_stream_edge_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
     image = SimpleNamespace(
         id=1,
@@ -129,6 +139,9 @@ def test_deliver_random_image_stream_edge_redirect(monkeypatch: pytest.MonkeyPat
             no_match_error=no_match,
         )
 
+    from app.core.metrics import IMAGE_DELIVERY_TOTAL
+
+    before = IMAGE_DELIVERY_TOTAL.labels(path="edge_redirect")._value.get()
     resp = asyncio.run(_run())
     assert isinstance(resp, RedirectResponse)
     assert resp.status_code == 302
@@ -136,3 +149,5 @@ def test_deliver_random_image_stream_edge_redirect(monkeypatch: pytest.MonkeyPat
     assert (resp.headers.get("location") or "").startswith("https://img.example.com/")
     # No mark_ok background task when edge 302 (hydrate false, anti_repeat false)
     assert len(bg.tasks) == 0
+    after = IMAGE_DELIVERY_TOTAL.labels(path="edge_redirect")._value.get()
+    assert after == before + 1.0

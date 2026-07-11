@@ -7,6 +7,7 @@ from fastapi import BackgroundTasks
 from app.core.errors import ApiError, ErrorCode
 from app.core.http_stream import stream_url
 from app.core.image_edge import resolve_image_edge_redirect_url
+from app.core.metrics import observe_image_delivery
 from app.core.origin_stream import prepare_origin_stream
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
 from app.core.proxy_mirror import resolve_proxy_mirror
@@ -140,6 +141,7 @@ async def deliver_known_image(
                     needs_hydrate=bool(needs_hydrate),
                     hydrate_reason=str(hydrate_reason),
                 )
+            observe_image_delivery(path="edge_redirect")
             resp = build_edge_redirect_response(edge_url=edge_url, cache_control=cache_control_edge)
             if background_tasks is not None:
                 return attach_background(resp, background_tasks)
@@ -177,6 +179,7 @@ async def deliver_known_image(
             cache_control=cache_control_stream,
             range_header=request.headers.get("Range"),
         )
+        observe_image_delivery(path="local_stream")
         if background_tasks is not None:
             # Local stream proved bytes — mark ok when the row still needs it.
             schedule_mark_ok_if_needed(
