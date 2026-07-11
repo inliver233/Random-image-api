@@ -15,7 +15,7 @@ from app.core.admin_request import (
     parse_int_in_range,
     parse_positive_int,
 )
-from app.core.recommendation import DEFAULT_RECOMMENDATION, DEFAULT_SCORE_WEIGHTS, as_bool
+from app.core.recommendation import DEFAULT_RECOMMENDATION, DEFAULT_SCORE_WEIGHTS
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_config_cache import invalidate_runtime_config_cache
 from app.core.runtime_settings import (
@@ -70,10 +70,6 @@ def _as_str_list(value: Any) -> list[str]:
         seen.add(v)
         out.append(v)
     return out
-
-
-def _as_bool(value: Any) -> bool | None:
-    return as_bool(value)
 
 
 def _as_float(value: Any) -> float | None:
