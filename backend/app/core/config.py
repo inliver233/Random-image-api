@@ -8,7 +8,7 @@ from typing import Mapping
 from cryptography.fernet import Fernet
 
 from app.core.crypto import FieldEncryptor
-from app.core.env_parse import parse_int_env
+from app.core.env_parse import parse_bool_env, parse_int_env
 from app.core.logging import get_logger
 
 log = get_logger(__name__)
@@ -58,15 +58,6 @@ class Settings:
 def _get(env: Mapping[str, str], key: str, default: str) -> str:
     value = env.get(key, default)
     return value.strip()
-
-
-def _get_bool(env: Mapping[str, str], key: str, default: bool) -> bool:
-    raw = _get(env, key, "1" if default else "0").lower()
-    if raw in {"1", "true", "yes", "y", "on"}:
-        return True
-    if raw in {"0", "false", "no", "n", "off"}:
-        return False
-    return default
 
 
 def parse_csv_urls(raw: str) -> list[str]:
@@ -187,7 +178,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         env=env,
     )
 
-    image_edge_enabled = _get_bool(env, "IMAGE_EDGE_ENABLED", False)
+    image_edge_enabled = parse_bool_env("IMAGE_EDGE_ENABLED", default=False, env=env)
     image_edge_secret = _get(env, "IMAGE_EDGE_SECRET", "")
     image_edge_secret_previous = _get(env, "IMAGE_EDGE_SECRET_PREVIOUS", "")
     # Never keep a previous secret that equals the active one (no dual-check noise).
@@ -204,7 +195,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         env=env,
     )
 
-    public_api_key_required = _get_bool(env, "PUBLIC_API_KEY_REQUIRED", False)
+    public_api_key_required = parse_bool_env("PUBLIC_API_KEY_REQUIRED", default=False, env=env)
     public_api_key_rpm = parse_int_env(
         "PUBLIC_API_KEY_RPM",
         default=0,
@@ -229,7 +220,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     )
 
     random_engine_url = _get(env, "RANDOM_ENGINE_URL", "").rstrip("/")
-    random_engine_enabled = _get_bool(env, "RANDOM_ENGINE_ENABLED", False) and bool(random_engine_url)
+    random_engine_enabled = parse_bool_env("RANDOM_ENGINE_ENABLED", default=False, env=env) and bool(
+        random_engine_url
+    )
     random_engine_timeout_ms = parse_int_env(
         "RANDOM_ENGINE_TIMEOUT_MS",
         default=800,
