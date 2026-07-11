@@ -35,6 +35,7 @@ def test_healthz_ok_includes_request_id() -> None:
     assert modules["api_key_rate_limit"]["backend"] == "memory"
     assert modules["api_key_rate_limit"]["redis_url_configured"] is False
     assert modules["api_key_rate_limit"]["required"] is False
+    assert modules["job_queue"]["backend"] == "sqlite"
 
 
 def test_healthz_uses_request_id_header_if_provided() -> None:

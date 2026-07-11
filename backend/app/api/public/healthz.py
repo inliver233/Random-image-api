@@ -152,6 +152,10 @@ async def healthz(request: Request) -> Any:
                 "redis_url_configured": redis_url_configured,
                 "required": bool(getattr(settings, "public_api_key_required", False)) if settings is not None else False,
             },
+            # Job claim port (SQLite today; Redis/NATS reserved). Config-only.
+            "job_queue": {
+                "backend": "sqlite",
+            },
         }
 
         resp = JSONResponse(

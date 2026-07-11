@@ -22,10 +22,11 @@ from app.core.redact import redact_text
 from app.core.time import iso_utc_ms
 from app.core.runtime_settings import set_runtime_setting
 from app.db.engine import create_engine
-from app.jobs.claim import DEFAULT_LOCK_TTL_S, claim_next_job
+from app.jobs.claim import DEFAULT_LOCK_TTL_S
 from app.jobs.dispatch import JobDispatcher
 from app.jobs.errors import JobPermanentError
 from app.jobs.executor import execute_claimed_job
+from app.jobs.queue import JobQueuePort, build_job_queue
 from app.jobs.handlers.easy_proxies_import import build_easy_proxies_import_handler
 from app.jobs.handlers.heal_url import build_heal_url_handler
 from app.jobs.handlers.hydrate_metadata import build_hydrate_metadata_handler
@@ -101,11 +102,20 @@ async def _count_enabled_tokens(engine) -> int | None:
 
 
 class _JobScheduler:
-    def __init__(self, engine, dispatcher: JobDispatcher, *, worker_id: str, lock_ttl_s: int) -> None:
+    def __init__(
+        self,
+        engine,
+        dispatcher: JobDispatcher,
+        *,
+        worker_id: str,
+        lock_ttl_s: int,
+        queue: JobQueuePort | None = None,
+    ) -> None:
         self._engine = engine
         self._dispatcher = dispatcher
         self._worker_id = str(worker_id)
         self._lock_ttl_s = int(lock_ttl_s)
+        self._queue: JobQueuePort = queue if queue is not None else build_job_queue(engine)
         self._tasks: set[asyncio.Task] = set()
         self._stopping = False
 
@@ -131,8 +141,7 @@ class _JobScheduler:
         claimed = 0
         for _ in range(int(min(slots, max(1, int(max_claims))))):
             try:
-                job_row = await claim_next_job(
-                    self._engine,
+                job_row = await self._queue.claim_next(
                     worker_id=str(self._worker_id),
                     lock_ttl_s=int(self._lock_ttl_s),
                 )
@@ -181,15 +190,17 @@ async def poll_and_execute_jobs(
     worker_id: str,
     lock_ttl_s: int = DEFAULT_LOCK_TTL_S,
     max_jobs: int = 10,
+    queue: JobQueuePort | None = None,
 ) -> int:
     worker_id = (worker_id or "").strip()
     if not worker_id:
         raise ValueError("worker_id is required")
 
+    job_queue: JobQueuePort = queue if queue is not None else build_job_queue(engine)
     ran = 0
     for _ in range(int(max_jobs)):
         try:
-            job_row = await claim_next_job(engine, worker_id=worker_id, lock_ttl_s=int(lock_ttl_s))
+            job_row = await job_queue.claim_next(worker_id=worker_id, lock_ttl_s=int(lock_ttl_s))
         except Exception as exc:
             msg = redact_text(format_exc(exc))
             log.warning("jobs_claim_failed err=%s", msg)
@@ -373,7 +384,15 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
         cached_enabled_tokens: int | None = None
         cached_desired_concurrency = 1
 
-        scheduler = _JobScheduler(engine, dispatcher, worker_id=str(worker_id), lock_ttl_s=int(jobs_lock_ttl_s))
+        job_queue = build_job_queue(engine, backend=parse_str_env("JOB_QUEUE_BACKEND", default="sqlite"))
+        log.info("job_queue_backend=%s", getattr(job_queue, "backend", "sqlite"))
+        scheduler = _JobScheduler(
+            engine,
+            dispatcher,
+            worker_id=str(worker_id),
+            lock_ttl_s=int(jobs_lock_ttl_s),
+            queue=job_queue,
+        )
 
         async def _on_tick() -> None:
             nonlocal last_heartbeat_m
