@@ -6,7 +6,7 @@ import { ActionAlerts } from "../admin/ActionAlerts";
 import { messageFromError, requestIdFromError } from "../admin/errors";
 import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
-import { apiJson } from "../api/client";
+import { ApiError, apiJson } from "../api/client";
 
 /** Map known random-engine English ops messages for admin UI. */
 const RANDOM_ENGINE_MESSAGE_ZH: Record<string, string> = {
@@ -26,8 +26,17 @@ function localizeRandomEngineMessage(raw: string | null | undefined): string | n
   return RANDOM_ENGINE_MESSAGE_ZH[text] ?? text;
 }
 
+/** Prefer raw body.message so ZH map can match before generic code translation. */
+function rawMessageFromError(err: unknown): string {
+  if (err instanceof ApiError) {
+    const bodyMsg = err.body && typeof err.body.message === "string" ? err.body.message.trim() : "";
+    if (bodyMsg) return bodyMsg;
+  }
+  return messageFromError(err);
+}
+
 function applyRandomEngineError(alerts: ReturnType<typeof useActionAlerts>, err: unknown): void {
-  alerts.setErrorMessage(localizeRandomEngineMessage(messageFromError(err)) || "操作失败", requestIdFromError(err));
+  alerts.setErrorMessage(localizeRandomEngineMessage(rawMessageFromError(err)) || "操作失败", requestIdFromError(err));
 }
 
 type CleanupFormValues = {
@@ -110,6 +119,8 @@ type R2PrewarmStatusResponse = {
   enabled_flag: boolean;
   ready: boolean;
   url_configured: boolean;
+  secret_configured?: boolean;
+  payload_shape?: string;
   url_preview: string;
   missing: string[];
   request_id: string;
@@ -250,6 +261,7 @@ export function MaintenancePage() {
         ? `过滤基数一致 python=${data.python_filtered} engine=${data.engine_filtered}`
         : `过滤基数不一致 delta=${data.delta}（python=${data.python_filtered} engine=${data.engine_filtered}）`;
       engineAlerts.setSuccess(msg, data.request_id);
+      void queryClient.invalidateQueries({ queryKey: ["admin", "maintenance", "random-engine"] });
     },
     onError: (err) => {
       applyRandomEngineError(engineAlerts, err);
@@ -271,6 +283,11 @@ export function MaintenancePage() {
         ? null
         : indexSize <= 0;
   const readyForTraffic = Boolean(engine?.ready_for_traffic);
+  const engineUrlConfigured = Boolean(engine?.url && String(engine.url).trim());
+  const engineTraffic =
+    typeof engine?.traffic_percent === "number" ? Number(engine.traffic_percent) : null;
+  const engineIdle =
+    Boolean(engine) && (!engine?.enabled || engineTraffic === 0 || !engineUrlConfigured);
   const cutoverWarning = localizeRandomEngineMessage(
     typeof engine?.cutover_warning === "string" ? engine.cutover_warning : null,
   );
@@ -361,11 +378,12 @@ export function MaintenancePage() {
 
       <Card title="R2 Prewarm（Mode B2 钩子）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          只读配置状态。hydrate/import/heal 写库后 best-effort POST{" "}
-          <Typography.Text code>{"{image_ids}"}</Typography.Text> 到{" "}
+          只读配置状态。hydrate/import/heal 写库后 BFF 将 catalog image_ids 映射为 pximg paths，best-effort POST{" "}
+          <Typography.Text code>{'{ "paths": [...] }'}</Typography.Text> +{" "}
+          <Typography.Text code>X-Prewarm-Secret</Typography.Text> 到{" "}
           <Typography.Text code>R2_PREWARM_URL/v1/prewarm</Typography.Text>
           。Worker 侧 R2 binding / <Typography.Text code>R2_MODE</Typography.Text> 见{" "}
-          <Typography.Text code>edge/img-worker</Typography.Text>。默认关；不展示完整 URL。
+          <Typography.Text code>edge/img-worker</Typography.Text>。默认关；不展示完整 URL/密钥。
         </Typography.Paragraph>
 
         <QueryState query={r2PrewarmStatus}>
@@ -379,6 +397,12 @@ export function MaintenancePage() {
               </Descriptions.Item>
               <Descriptions.Item label="URL">
                 {r2.url_configured ? r2.url_preview || "已配置" : "（未配置）"}
+              </Descriptions.Item>
+              <Descriptions.Item label="密钥">
+                {r2.secret_configured ? "已配置" : "缺失（R2_PREWARM_SECRET / IMAGE_EDGE_SECRET）"}
+              </Descriptions.Item>
+              <Descriptions.Item label="载荷">
+                {r2.payload_shape === "paths" ? "paths（Worker 契约）" : r2.payload_shape || "paths"}
               </Descriptions.Item>
               <Descriptions.Item label="缺失项">
                 {r2.missing?.length ? r2.missing.join(", ") : "—"}
@@ -437,25 +461,51 @@ export function MaintenancePage() {
 
       <Card title="模块端口（Phase 4）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          Catalog / TagStore / JobQueue / RecentDedup / RandomService / RandomPick 端口只读状态。Catalog/TagStore/JobQueue/RandomPick
-          默认 sqlite；RecentDedup 支持 RECENT_DEDUP_BACKEND=redis + REDIS_URL（失败回落 memory）。RandomService
-          为默认 pick 计划工厂；RandomPick 为 Python SQL ring 回落。不展示密钥或连接串。
+          Catalog / TagStore / JobQueue / RecentDedup / RandomService / RandomPick 端口只读状态。每行展示
+          active（实际）与 requested/configured（配置意图）。JOB_QUEUE_BACKEND=memory 为 SQLite jobs
+          表的别名标签（仍持久化）。redis/nats 队列未实现时回落 sqlite。RecentDedup 支持
+          RECENT_DEDUP_BACKEND=redis + REDIS_URL（失败回落 memory）。Catalog/TagStore/RandomPick 由
+          DATABASE_URL 方言派生。不展示密钥或连接串。
         </Typography.Paragraph>
 
         <QueryState query={modularPortsStatus}>
           {modularPortsStatus.data ? (
-            <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
+            <Descriptions size="small" column={1} bordered style={{ maxWidth: 720, marginBottom: 16 }}>
               <Descriptions.Item label="Catalog">
-                <Tag>{modularPortsStatus.data.catalog.backend}</Tag>
+                <Tag>active={modularPortsStatus.data.catalog.backend}</Tag>
+                <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                  source=DATABASE_URL
+                </Typography.Text>
               </Descriptions.Item>
               <Descriptions.Item label="Tag Store">
-                <Tag>{modularPortsStatus.data.tags.backend}</Tag>
+                <Tag>active={modularPortsStatus.data.tags.backend}</Tag>
+                <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                  source=DATABASE_URL
+                </Typography.Text>
               </Descriptions.Item>
               <Descriptions.Item label="Job Queue">
-                <Tag>{modularPortsStatus.data.job_queue.backend}</Tag>
-                {modularPortsStatus.data.job_queue.requested !== modularPortsStatus.data.job_queue.backend ? (
+                <Tag
+                  color={
+                    modularPortsStatus.data.job_queue.using_sqlite_fallback
+                      ? "orange"
+                      : modularPortsStatus.data.job_queue.backend === "memory"
+                        ? "blue"
+                        : undefined
+                  }
+                >
+                  active={modularPortsStatus.data.job_queue.backend}
+                  {modularPortsStatus.data.job_queue.backend === "memory" ? " (SQLite storage)" : ""}
+                </Tag>
+                <Tag style={{ marginLeft: 8 }}>
+                  requested={modularPortsStatus.data.job_queue.requested}
+                </Tag>
+                {modularPortsStatus.data.job_queue.implemented === false ? (
                   <Tag color="orange" style={{ marginLeft: 8 }}>
-                    requested={modularPortsStatus.data.job_queue.requested}
+                    not implemented
+                  </Tag>
+                ) : modularPortsStatus.data.job_queue.implemented === true ? (
+                  <Tag color="green" style={{ marginLeft: 8 }}>
+                    implemented
                   </Tag>
                 ) : null}
                 {modularPortsStatus.data.job_queue.using_sqlite_fallback ? (
@@ -465,17 +515,20 @@ export function MaintenancePage() {
                 ) : null}
               </Descriptions.Item>
               <Descriptions.Item label="Recent Dedup">
-                {modularPortsStatus.data.recent_dedup.active_backend === "redis" ? (
-                  <Tag color="green">redis</Tag>
-                ) : (
-                  <Tag>memory</Tag>
-                )}
-                {modularPortsStatus.data.recent_dedup.configured_backend !==
-                modularPortsStatus.data.recent_dedup.active_backend ? (
-                  <Tag color="orange" style={{ marginLeft: 8 }}>
-                    requested={modularPortsStatus.data.recent_dedup.configured_backend}
-                  </Tag>
-                ) : null}
+                <Tag
+                  color={
+                    modularPortsStatus.data.recent_dedup.active_backend === "redis"
+                      ? "green"
+                      : modularPortsStatus.data.recent_dedup.using_memory_fallback
+                        ? "orange"
+                        : undefined
+                  }
+                >
+                  active={modularPortsStatus.data.recent_dedup.active_backend}
+                </Tag>
+                <Tag style={{ marginLeft: 8 }}>
+                  requested={modularPortsStatus.data.recent_dedup.configured_backend}
+                </Tag>
                 {modularPortsStatus.data.recent_dedup.using_memory_fallback ? (
                   <Tag color="orange" style={{ marginLeft: 8 }}>
                     redis→memory fallback
@@ -483,10 +536,16 @@ export function MaintenancePage() {
                 ) : null}
               </Descriptions.Item>
               <Descriptions.Item label="Random Service">
-                <Tag>{modularPortsStatus.data.random_service?.backend ?? "default"}</Tag>
+                <Tag>active={modularPortsStatus.data.random_service?.backend ?? "default"}</Tag>
+                <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                  factory=default
+                </Typography.Text>
               </Descriptions.Item>
               <Descriptions.Item label="Random Pick">
-                <Tag>{modularPortsStatus.data.random_pick?.backend ?? "sqlite"}</Tag>
+                <Tag>active={modularPortsStatus.data.random_pick?.backend ?? "sqlite"}</Tag>
+                <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                  source=DATABASE_URL
+                </Typography.Text>
               </Descriptions.Item>
             </Descriptions>
           ) : null}
@@ -499,14 +558,14 @@ export function MaintenancePage() {
 
       <Card title="Random Engine（Go 双跑）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          只读状态 + 全量快照推送。切流由环境变量控制（默认关）：RANDOM_ENGINE_ENABLED /
-          RANDOM_ENGINE_TRAFFIC_PERCENT。未配置 URL 时推送会失败。
+          只读状态 + 全量快照推送。RANDOM_ENGINE_ENABLED 默认关；一旦开启，RANDOM_ENGINE_TRAFFIC_PERCENT
+          默认 100（全量 dual-run，除非显式调低）。未配置 URL 时推送会失败。
         </Typography.Paragraph>
 
         <QueryState query={engineStatus}>
           {engine ? (
             <>
-              {cutoverWarning ? (
+              {cutoverWarning && !engineIdle ? (
                 <Alert
                   type="warning"
                   showIcon
@@ -527,7 +586,13 @@ export function MaintenancePage() {
                   {typeof engine.timeout_ms === "number" ? engine.timeout_ms : "—"}
                 </Descriptions.Item>
                 <Descriptions.Item label="健康">
-                  {engine.healthy ? <Tag color="green">healthy</Tag> : <Tag color="orange">unreachable</Tag>}
+                  {!engineUrlConfigured ? (
+                    <Tag>未配置</Tag>
+                  ) : engine.healthy ? (
+                    <Tag color="green">healthy</Tag>
+                  ) : (
+                    <Tag color="orange">unreachable</Tag>
+                  )}
                 </Descriptions.Item>
                 <Descriptions.Item label="索引规模">
                   {indexSize ?? "—"}
@@ -538,7 +603,25 @@ export function MaintenancePage() {
                   ) : null}
                 </Descriptions.Item>
                 <Descriptions.Item label="可切流">
-                  {readyForTraffic ? <Tag color="green">ready</Tag> : <Tag color="orange">not ready</Tag>}
+                  {readyForTraffic ? (
+                    <Tag color="green">ready</Tag>
+                  ) : engineIdle ? (
+                    <Tag>未启用 / 未切流</Tag>
+                  ) : (
+                    <Tag color="orange">not ready</Tag>
+                  )}
+                </Descriptions.Item>
+                <Descriptions.Item label="就绪检查">
+                  <Space size={[4, 4]} wrap>
+                    <Tag color={engine.enabled ? "green" : undefined}>enabled={String(Boolean(engine.enabled))}</Tag>
+                    <Tag color={engineTraffic != null && engineTraffic > 0 ? "green" : undefined}>
+                      traffic&gt;0={String(engineTraffic != null && engineTraffic > 0)}
+                    </Tag>
+                    <Tag color={engine.healthy ? "green" : undefined}>healthy={String(Boolean(engine.healthy))}</Tag>
+                    <Tag color={indexEmpty === false ? "green" : undefined}>
+                      index_nonempty={String(indexEmpty === false)}
+                    </Tag>
+                  </Space>
                 </Descriptions.Item>
                 <Descriptions.Item label="快照 revision">{revision || "—"}</Descriptions.Item>
               </Descriptions>
@@ -550,10 +633,19 @@ export function MaintenancePage() {
           <Button onClick={() => void engineStatus.refetch()} loading={engineStatus.isFetching}>
             刷新状态
           </Button>
-          <Button type="primary" onClick={() => pushSnapshot.mutate()} loading={pushSnapshot.isPending}>
+          <Button
+            type="primary"
+            onClick={() => pushSnapshot.mutate()}
+            loading={pushSnapshot.isPending}
+            disabled={!engineUrlConfigured}
+          >
             推送全量快照
           </Button>
-          <Button onClick={() => compareFilters.mutate()} loading={compareFilters.isPending}>
+          <Button
+            onClick={() => compareFilters.mutate()}
+            loading={compareFilters.isPending}
+            disabled={!engineUrlConfigured}
+          >
             对比过滤基数（默认 r18=0）
           </Button>
         </Space>
@@ -567,6 +659,7 @@ export function MaintenancePage() {
             <Descriptions.Item label="Engine filtered">{compareResult.engine_filtered}</Descriptions.Item>
             <Descriptions.Item label="delta">{compareResult.delta}</Descriptions.Item>
             <Descriptions.Item label="Engine index">{compareResult.engine_index_size}</Descriptions.Item>
+            <Descriptions.Item label="Engine revision">{compareResult.engine_revision || "—"}</Descriptions.Item>
             <Descriptions.Item label="r18_strict">{compareResult.r18_strict}</Descriptions.Item>
           </Descriptions>
         ) : null}

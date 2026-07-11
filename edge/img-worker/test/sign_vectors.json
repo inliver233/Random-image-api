@@ -7,7 +7,28 @@
       "exp": 1700003600,
       "msg": "1700003600\n/img-original/img/2020/01/01/00/00/00/12345_p0.jpg",
       "sig": "pbdtY4jetnsbgAnXloS2W4ef0IfEod2tjknFEcgemtg",
-      "note": "sig = base64url(HMAC-SHA256(secret, msg)) without padding; verify with Python test_image_edge"
+      "note": "img-original jpg; sig = base64url(HMAC-SHA256(secret, msg)) without padding"
+    },
+    {
+      "path": "/img-master/img/2020/01/01/00/00/00/12345_p0_master1200.jpg",
+      "exp": 1700003600,
+      "msg": "1700003600\n/img-master/img/2020/01/01/00/00/00/12345_p0_master1200.jpg",
+      "sig": "dJxguhgfoPFJF2zsqQFFFxDWFnzDKlrCpeWN_fpkafk",
+      "note": "img-master prefix"
+    },
+    {
+      "path": "/c/600x1200_90_webp/img-master/img/2020/01/01/00/00/00/99_p0_master1200.jpg",
+      "exp": 1700007200,
+      "msg": "1700007200\n/c/600x1200_90_webp/img-master/img/2020/01/01/00/00/00/99_p0_master1200.jpg",
+      "sig": "RilslN0wqI_wiJTXRGjmUjTiID9MxKa7A9g5mXSl9wU",
+      "note": "/c/ resize prefix"
+    },
+    {
+      "path": "/img-original/img/2021/06/15/12/30/00/999_p0.webp",
+      "exp": 1710000000,
+      "msg": "1710000000\n/img-original/img/2021/06/15/12/30/00/999_p0.webp",
+      "sig": "MDYpOdKRjhtBLaYjVrYJs1qqCsX-_OMn_XBZndbZcw8",
+      "note": "webp extension"
     }
   ]
 }
