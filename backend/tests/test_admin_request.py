@@ -6,6 +6,7 @@ from app.core.admin_request import (
     parse_bool,
     parse_bool_optional,
     parse_optional_str,
+    parse_positive_int,
     parse_positive_int_list,
 )
 from app.core.errors import ApiError
@@ -34,6 +35,23 @@ def test_parse_optional_str() -> None:
         parse_optional_str("too-long", max_len=3, field="label")
     assert ei.value.message == "Unsupported label"
     assert ei.value.status_code == 400
+    with pytest.raises(ApiError) as ei_custom:
+        parse_optional_str("too-long", max_len=3, field="reason", invalid_message="Invalid reason")
+    assert ei_custom.value.message == "Invalid reason"
+
+
+def test_parse_positive_int() -> None:
+    assert parse_positive_int(3, field="pool_id") == 3
+    assert parse_positive_int("7", field="pool_id") == 7
+    with pytest.raises(ApiError) as ei_zero:
+        parse_positive_int(0, field="pool_id")
+    assert ei_zero.value.message == "Invalid pool_id"
+    with pytest.raises(ApiError) as ei_bad:
+        parse_positive_int("x", field="illust_id")
+    assert ei_bad.value.message == "Invalid illust_id"
+    with pytest.raises(ApiError) as ei_custom:
+        parse_positive_int(-1, field="id", invalid_message="bad id")
+    assert ei_custom.value.message == "bad id"
 
 
 def test_parse_positive_int_list() -> None:

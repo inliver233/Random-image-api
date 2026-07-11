@@ -52,7 +52,13 @@ def parse_bool_optional(value: Any) -> bool | None:
     return None
 
 
-def parse_optional_str(value: Any, *, max_len: int | None = None, field: str = "value") -> str | None:
+def parse_optional_str(
+    value: Any,
+    *,
+    max_len: int | None = None,
+    field: str = "value",
+    invalid_message: str | None = None,
+) -> str | None:
     """Strip optional string; empty → None. Rejects over-length when max_len set."""
     if value is None:
         return None
@@ -60,8 +66,29 @@ def parse_optional_str(value: Any, *, max_len: int | None = None, field: str = "
     if not text:
         return None
     if max_len is not None and len(text) > max_len:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message=f"Unsupported {field}", status_code=400)
+        raise ApiError(
+            code=ErrorCode.BAD_REQUEST,
+            message=invalid_message or f"Unsupported {field}",
+            status_code=400,
+        )
     return text
+
+
+def parse_positive_int(
+    value: Any,
+    *,
+    field: str,
+    invalid_message: str | None = None,
+) -> int:
+    """Parse a single positive int; raises BAD_REQUEST on missing/invalid/non-positive."""
+    invalid = invalid_message or f"Invalid {field}"
+    try:
+        i = int(value)
+    except Exception as exc:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400) from exc
+    if i <= 0:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+    return i
 
 
 def parse_positive_int_list(

@@ -19,8 +19,9 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { apiJson } from "../api/client";
 import { requestIdDescription, requestIdWithMessageDescription } from "../admin/errors";
+import { jobStatusColor, jobStatusLabel } from "../admin/jobStatus";
+import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
 type SummaryResponse = {
@@ -130,44 +131,6 @@ const MISSING_LABELS: Record<string, string> = {
   created_at: "发布时间",
   popularity: "热度（收藏/浏览/评论）",
 };
-
-function statusColor(status: string): string {
-  switch (status) {
-    case "running":
-      return "processing";
-    case "pending":
-      return "blue";
-    case "completed":
-      return "success";
-    case "failed":
-      return "error";
-    case "paused":
-      return "warning";
-    case "canceled":
-      return "default";
-    default:
-      return "default";
-  }
-}
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "pending":
-      return "等待中";
-    case "running":
-      return "运行中";
-    case "paused":
-      return "已暂停";
-    case "completed":
-      return "已完成";
-    case "failed":
-      return "失败";
-    case "canceled":
-      return "已取消";
-    default:
-      return status || "未知";
-  }
-}
 
 function typeLabel(type: string): string {
   if (type === "backfill") return "全量补全";
@@ -313,7 +276,7 @@ export function HydrationPage() {
         title: "状态",
         key: "status",
         width: 120,
-        render: (_, row) => <Tag color={statusColor(String(row.status || ""))}>{statusLabel(row.status)}</Tag>,
+        render: (_, row) => <Tag color={jobStatusColor(String(row.status || ""))}>{jobStatusLabel(row.status)}</Tag>,
       },
       {
         title: "进度",
@@ -338,7 +301,7 @@ export function HydrationPage() {
         width: 220,
         render: (_, row) => {
           if (!row.latest_job) return "-";
-          return `#${row.latest_job.id} ${statusLabel(row.latest_job.status)} ${row.latest_job.attempt}/${row.latest_job.max_attempts}`;
+          return `#${row.latest_job.id} ${jobStatusLabel(row.latest_job.status)} ${row.latest_job.attempt}/${row.latest_job.max_attempts}`;
         },
       },
       {

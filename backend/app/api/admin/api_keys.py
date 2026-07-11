@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object, parse_bool_optional
+from app.core.admin_request import load_json_object, parse_bool_optional, parse_optional_str
 from app.core.api_keys import api_key_hint, hmac_sha256_hex
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
@@ -75,7 +75,12 @@ async def create_api_key(
     body = await load_json_object(request)
     name = str(body.get("name") or "").strip()
     api_key = str(body.get("api_key") or "").strip()
-    description = str(body.get("description") or "").strip() or None
+    description = parse_optional_str(
+        body.get("description"),
+        max_len=1000,
+        field="description",
+        invalid_message="Invalid description",
+    )
     enabled_v = parse_bool_optional(body.get("enabled"))
     enabled = bool(enabled_v) if enabled_v is not None else True
 
@@ -83,8 +88,6 @@ async def create_api_key(
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid name", status_code=400)
     if not api_key or len(api_key) < 20 or len(api_key) > 500:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid api_key", status_code=400)
-    if description is not None and len(description) > 1000:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid description", status_code=400)
 
     settings = request.app.state.settings
     try:
@@ -139,12 +142,19 @@ async def update_api_key(
     body = await load_json_object(request)
 
     enabled_v = parse_bool_optional(body.get("enabled")) if "enabled" in body else None
-    description_raw = body.get("description") if "description" in body else None
-    description = str(description_raw).strip() if isinstance(description_raw, str) else None
-    if description is not None and not description:
-        description = None
-    if description is not None and len(description) > 1000:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid description", status_code=400)
+    description: str | None = None
+    if "description" in body:
+        description_raw = body.get("description")
+        # Preserve previous behavior: non-string description is treated as clear/None.
+        if isinstance(description_raw, str) or description_raw is None:
+            description = parse_optional_str(
+                description_raw,
+                max_len=1000,
+                field="description",
+                invalid_message="Invalid description",
+            )
+        else:
+            description = None
 
     if enabled_v is None and "description" not in body:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Missing fields", status_code=400)

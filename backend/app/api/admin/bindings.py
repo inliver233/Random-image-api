@@ -11,7 +11,7 @@ from sqlalchemy.orm import aliased
 from app.api.admin.deps import get_admin_claims
 from app.core.bindings_recompute import recompute_token_proxy_bindings
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object, parse_bool
+from app.core.admin_request import load_json_object, parse_bool, parse_optional_str, parse_positive_int
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
@@ -89,24 +89,12 @@ def _compute_primary_assignments_soft(
 async def _load_recompute_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
-    try:
-        pool_id = int(data.get("pool_id"))
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid pool_id", status_code=400) from exc
-    if pool_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid pool_id", status_code=400)
-
-    raw_max = data.get("max_tokens_per_proxy", 2)
-    try:
-        max_tokens_per_proxy = int(raw_max)
-    except Exception as exc:
-        raise ApiError(
-            code=ErrorCode.BAD_REQUEST,
-            message="Invalid max_tokens_per_proxy",
-            status_code=400,
-        ) from exc
-
-    if max_tokens_per_proxy <= 0 or max_tokens_per_proxy > 1000:
+    pool_id = parse_positive_int(data.get("pool_id"), field="pool_id")
+    max_tokens_per_proxy = parse_positive_int(
+        data.get("max_tokens_per_proxy", 2),
+        field="max_tokens_per_proxy",
+    )
+    if max_tokens_per_proxy > 1000:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid max_tokens_per_proxy", status_code=400)
 
     strict = parse_bool(data.get("strict"), default=True)
@@ -117,23 +105,12 @@ async def _load_recompute_json(request: Request) -> dict[str, Any]:
 async def _load_override_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
-    try:
-        override_proxy_id = int(data.get("override_proxy_id"))
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid override_proxy_id", status_code=400) from exc
-    if override_proxy_id <= 0:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid override_proxy_id", status_code=400)
-
-    try:
-        ttl_ms = int(data.get("ttl_ms"))
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid ttl_ms", status_code=400) from exc
-    if ttl_ms <= 0 or ttl_ms > 30 * 24 * 60 * 60 * 1000:
+    override_proxy_id = parse_positive_int(data.get("override_proxy_id"), field="override_proxy_id")
+    ttl_ms = parse_positive_int(data.get("ttl_ms"), field="ttl_ms")
+    if ttl_ms > 30 * 24 * 60 * 60 * 1000:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid ttl_ms", status_code=400)
 
-    reason = str(data.get("reason") or "").strip()
-    if reason and len(reason) > 200:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid reason", status_code=400)
+    reason = parse_optional_str(data.get("reason"), max_len=200, field="reason", invalid_message="Invalid reason") or ""
 
     return {"override_proxy_id": override_proxy_id, "ttl_ms": ttl_ms, "reason": reason}
 

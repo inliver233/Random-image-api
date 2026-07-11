@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor
 from app.core.admin_json import admin_cursor_list, admin_ok
-from app.core.admin_request import load_json_object
+from app.core.admin_request import load_json_object, parse_positive_int
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
@@ -132,20 +132,9 @@ async def _load_manual_job_json(request: Request) -> dict[str, int | None]:
     illust_id: int | None = None
     image_id: int | None = None
     if illust_id_raw is not None:
-        try:
-            illust_id = int(illust_id_raw)
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid illust_id", status_code=400) from exc
-        if illust_id <= 0:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid illust_id", status_code=400)
-
+        illust_id = parse_positive_int(illust_id_raw, field="illust_id")
     if image_id_raw is not None:
-        try:
-            image_id = int(image_id_raw)
-        except Exception as exc:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image_id", status_code=400) from exc
-        if image_id <= 0:
-            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid image_id", status_code=400)
+        image_id = parse_positive_int(image_id_raw, field="image_id")
 
     return {"illust_id": illust_id, "image_id": image_id}
 

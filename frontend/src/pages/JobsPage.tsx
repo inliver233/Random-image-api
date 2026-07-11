@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Descriptions, Drawer, Select, Skeleton, Space, Tag, Typography } from "antd";
+import { Alert, Button, Card, Descriptions, Drawer, Select, Skeleton, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React, { useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
 import { CursorTableCard } from "../admin/CursorTableCard";
 import { requestIdDescription } from "../admin/errors";
+import { jobStatusLabel, jobStatusTag, jobTypeLabel } from "../admin/jobStatus";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
@@ -41,63 +42,6 @@ type JobDetailResponse = {
 };
 
 type JobActionResponse = { ok: true; job_id: string; status: string; request_id: string };
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "pending":
-      return "等待中";
-    case "running":
-      return "运行中";
-    case "paused":
-      return "已暂停";
-    case "canceled":
-      return "已取消";
-    case "completed":
-      return "已完成";
-    case "failed":
-      return "失败";
-    case "dlq":
-      return "死信";
-    default:
-      return status || "未知";
-  }
-}
-
-function typeLabel(type: string): string {
-  switch (type) {
-    case "import_images":
-      return "导入图片";
-    case "hydrate_metadata":
-      return "补全元数据";
-    case "proxy_probe":
-      return "代理探测";
-    case "easy_proxies_import":
-      return "导入 easy-proxies";
-    case "heal_url":
-      return "修复 URL";
-    default:
-      return type || "未知";
-  }
-}
-
-function statusTag(status: string) {
-  const label = statusLabel(status);
-  const color =
-    status === "running"
-      ? "processing"
-      : status === "pending"
-        ? "blue"
-        : status === "completed"
-          ? "success"
-          : status === "failed"
-            ? "error"
-            : status === "paused"
-              ? "warning"
-              : status === "dlq"
-                ? "magenta"
-                : "default";
-  return <Tag color={color}>{label}</Tag>;
-}
 
 export function JobsPage() {
   const qc = useQueryClient();
@@ -144,7 +88,7 @@ export function JobsPage() {
       alerts.clear();
     },
     onSuccess: (data) => {
-      alerts.setSuccess(`操作成功：任务 #${data.job_id} 状态已更新为 ${statusLabel(data.status)}`, data.request_id);
+      alerts.setSuccess(`操作成功：任务 #${data.job_id} 状态已更新为 ${jobStatusLabel(data.status)}`, data.request_id);
       qc.invalidateQueries({ queryKey: ["admin", "jobs"] });
       qc.invalidateQueries({ queryKey: ["admin", "jobs", "detail", String(data.job_id)] });
     },
@@ -165,8 +109,8 @@ export function JobsPage() {
         </Button>
       ),
     },
-    { title: "类型", dataIndex: "type", key: "type", width: 140, render: (value) => typeLabel(String(value)) },
-    { title: "状态", dataIndex: "status", key: "status", width: 110, render: (value) => statusTag(String(value)) },
+    { title: "类型", dataIndex: "type", key: "type", width: 140, render: (value) => jobTypeLabel(String(value)) },
+    { title: "状态", dataIndex: "status", key: "status", width: 110, render: (value) => jobStatusTag(String(value)) },
     {
       title: "重试次数",
       key: "attempt",
@@ -307,8 +251,8 @@ export function JobsPage() {
             <Typography.Text type="secondary">请求ID: {jobDetail.data.request_id}</Typography.Text>
             <Descriptions size="small" column={2} bordered>
               <Descriptions.Item label="任务ID">#{jobDetail.data.item.id}</Descriptions.Item>
-              <Descriptions.Item label="类型">{typeLabel(jobDetail.data.item.type)}</Descriptions.Item>
-              <Descriptions.Item label="状态">{statusLabel(jobDetail.data.item.status)}</Descriptions.Item>
+              <Descriptions.Item label="类型">{jobTypeLabel(jobDetail.data.item.type)}</Descriptions.Item>
+              <Descriptions.Item label="状态">{jobStatusLabel(jobDetail.data.item.status)}</Descriptions.Item>
               <Descriptions.Item label="优先级">{jobDetail.data.item.priority}</Descriptions.Item>
               <Descriptions.Item label="重试次数">{`${jobDetail.data.item.attempt} / ${jobDetail.data.item.max_attempts}`}</Descriptions.Item>
               <Descriptions.Item label="下次执行">{jobDetail.data.item.run_after || "-"}</Descriptions.Item>

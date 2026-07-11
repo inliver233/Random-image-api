@@ -4,8 +4,10 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { ActionAlerts } from "../admin/ActionAlerts";
 import { CursorTableCard } from "../admin/CursorTableCard";
-import { messageFromError, requestIdFromError } from "../admin/errors";
+import { jobStatusTag } from "../admin/jobStatus";
+import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
@@ -53,44 +55,6 @@ type ImportsListResponse = {
   request_id: string;
 };
 
-function jobStatusLabel(status: string): string {
-  switch (status) {
-    case "pending":
-      return "等待中";
-    case "running":
-      return "运行中";
-    case "paused":
-      return "已暂停";
-    case "canceled":
-      return "已取消";
-    case "completed":
-      return "已完成";
-    case "failed":
-      return "失败";
-    case "dlq":
-      return "死信";
-    default:
-      return status || "未知";
-  }
-}
-
-function jobStatusTag(status: string) {
-  const label = jobStatusLabel(status);
-  const color =
-    status === "running"
-      ? "processing"
-      : status === "pending"
-        ? "blue"
-        : status === "completed"
-          ? "success"
-          : status === "failed" || status === "dlq"
-            ? "error"
-            : status === "paused"
-              ? "warning"
-              : "default";
-  return <Tag color={color}>{label}</Tag>;
-}
-
 const previewColumns: ColumnsType<ImportCreateResponse["preview"][number]> = [
   { title: "作品ID", dataIndex: "illust_id", key: "illust_id" },
   { title: "页码", dataIndex: "page_index", key: "page_index" },
@@ -128,9 +92,8 @@ export function ImportPage() {
   const queryClient = useQueryClient();
   const [form] = Form.useForm<ImportFormValues>();
   const [file, setFile] = useState<File | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [requestId, setRequestId] = useState<string | null>(null);
   const [result, setResult] = useState<ImportCreateResponse | null>(null);
+  const alerts = useActionAlerts();
   const fileIsJson = Boolean(file && String(file.name || "").toLowerCase().endsWith(".json"));
 
   const {
@@ -214,20 +177,21 @@ export function ImportPage() {
       });
     },
     onMutate: () => {
-      setErrorMessage(null);
-      setRequestId(null);
+      alerts.clear();
       setResult(null);
     },
     onSuccess: (data) => {
       setResult(data);
-      setRequestId(data.request_id);
+      alerts.setSuccess(
+        data.executed_inline ? "导入已完成（内联执行）" : "导入已提交",
+        data.request_id,
+      );
       if (data.import_id) {
         queryClient.invalidateQueries({ queryKey: ["admin", "imports"] });
       }
     },
     onError: (err) => {
-      setErrorMessage(messageFromError(err));
-      setRequestId(requestIdFromError(err));
+      alerts.setError(err, "导入失败");
     },
   });
 
@@ -237,8 +201,13 @@ export function ImportPage() {
         导入图片链接
       </Typography.Title>
 
-      {errorMessage ? <Alert type="error" message={errorMessage} showIcon /> : null}
-      {requestId ? <Typography.Text type="secondary">请求ID: {requestId}</Typography.Text> : null}
+      <ActionAlerts
+        message={alerts.message}
+        requestId={alerts.requestId}
+        errorMessage={alerts.errorMessage}
+        errorRequestId={alerts.errorRequestId}
+        requestIdPlacement="secondary"
+      />
 
       <Card title="支持的链接格式（重要）">
         <Space direction="vertical" size={4}>

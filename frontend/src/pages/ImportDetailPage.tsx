@@ -5,6 +5,7 @@ import { useParams } from "react-router-dom";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
 import { requestIdDescription } from "../admin/errors";
+import { jobStatusLabel } from "../admin/jobStatus";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 
@@ -42,23 +43,6 @@ type ImportRollbackResponse = {
   updated: number;
   request_id: string;
 };
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "pending":
-      return "等待中";
-    case "running":
-      return "运行中";
-    case "completed":
-      return "已完成";
-    case "failed":
-      return "失败";
-    case "dlq":
-      return "死信";
-    default:
-      return status || "未知";
-  }
-}
 
 export function ImportDetailPage() {
   const params = useParams();
@@ -239,7 +223,7 @@ export function ImportDetailPage() {
               <Descriptions size="small" column={2}>
                 <Descriptions.Item label="任务ID">{query.data.item.job.id}</Descriptions.Item>
                 <Descriptions.Item label="任务类型">{query.data.item.job.type}</Descriptions.Item>
-                <Descriptions.Item label="状态">{statusLabel(query.data.item.job.status)}</Descriptions.Item>
+                <Descriptions.Item label="状态">{jobStatusLabel(query.data.item.job.status)}</Descriptions.Item>
                 <Descriptions.Item label="重试次数">{query.data.item.job.attempt}</Descriptions.Item>
                 <Descriptions.Item label="最大重试">{query.data.item.job.max_attempts}</Descriptions.Item>
                 <Descriptions.Item label="最后错误">{query.data.item.job.last_error || ""}</Descriptions.Item>
