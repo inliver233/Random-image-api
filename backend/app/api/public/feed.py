@@ -9,10 +9,10 @@ from app.core.imgproxy import load_imgproxy_config_from_settings
 from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.random_delivery import (
     resolve_catalog_store,
+    resolve_random_service_factory,
     resolve_recent_dedup,
     schedule_pick_side_effects,
 )
-from app.core.random_pick_context import build_random_pick_context
 from app.core.random_query import no_match_error_from_filters
 from app.core.random_request import PublicRandomQuery
 from app.core.random_response import (
@@ -66,6 +66,7 @@ async def feed_images(
     engine = request.app.state.engine
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     recent_dedup = resolve_recent_dedup(getattr(request.app.state, "recent_dedup", None))
+    random_service = resolve_random_service_factory(getattr(request.app.state, "random_service", None))
     Session = create_sessionmaker(engine)
     runtime = await resolve_runtime_for_request(request, engine)
 
@@ -79,7 +80,7 @@ async def feed_images(
     )
 
     random_defaults = runtime.random_defaults if isinstance(runtime.random_defaults, dict) else {}
-    pick_ctx = build_random_pick_context(
+    pick_ctx = random_service.build_context(
         filters=filters,
         random_defaults=random_defaults,
         attempts=1,

@@ -13,10 +13,10 @@ from app.core.random_delivery import (
     build_edge_redirect_response,
     deliver_random_image_stream,
     resolve_catalog_store,
+    resolve_random_service_factory,
     resolve_recent_dedup,
     schedule_pick_side_effects,
 )
-from app.core.random_pick_context import build_random_pick_context
 from app.core.random_query import no_match_error_from_filters
 from app.core.random_request import (
     PublicRandomQuery,
@@ -56,6 +56,7 @@ async def random_image(
     engine = request.app.state.engine
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
     recent_dedup = resolve_recent_dedup(getattr(request.app.state, "recent_dedup", None))
+    random_service = resolve_random_service_factory(getattr(request.app.state, "random_service", None))
     Session = create_sessionmaker(engine)
     runtime = await resolve_runtime_for_request(request, engine)
 
@@ -77,7 +78,7 @@ async def random_image(
     force_local = force_local_from_query(request.query_params)
 
     random_defaults = runtime.random_defaults if isinstance(runtime.random_defaults, dict) else {}
-    pick_ctx = build_random_pick_context(
+    pick_ctx = random_service.build_context(
         filters=filters,
         random_defaults=random_defaults,
         attempts=attempts,

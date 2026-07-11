@@ -250,6 +250,8 @@ async def modular_ports_status(
     job_requested = str(os.environ.get("JOB_QUEUE_BACKEND", "sqlite") or "sqlite").strip().lower()
     if job_requested not in {"sqlite", "memory", "redis", "nats"}:
         job_requested = "sqlite"
+    random_service = getattr(request.app.state, "random_service", None)
+    random_backend = str(getattr(random_service, "backend", "default") or "default")
     return admin_ok(
         request,
         payload={
@@ -266,6 +268,9 @@ async def modular_ports_status(
                 "active_backend": recent_active,
                 # True when redis requested but factory fell back (missing REDIS_URL).
                 "using_memory_fallback": recent_cfg == "redis" and recent_active == "memory",
+            },
+            "random_service": {
+                "backend": random_backend,
             },
         },
         request_id=rid,

@@ -37,6 +37,19 @@ def resolve_recent_dedup(dedup: RecentDedupPort | None = None) -> RecentDedupPor
     return dedup if dedup is not None else MemoryRecentDedup()
 
 
+def resolve_random_service_factory(factory: Any = None) -> Any:
+    """Prefer injected RandomServiceFactory; fall back to default plan builder.
+
+    Lazy-import DefaultRandomServiceFactory to avoid circular import with
+    random_pick_context → random_engine_pick → random_delivery.
+    """
+    if factory is not None:
+        return factory
+    from app.core.random_pick_context import DefaultRandomServiceFactory
+
+    return DefaultRandomServiceFactory()
+
+
 async def best_effort(fn, *args, timeout_s: float = 1.5, **kwargs) -> None:  # type: ignore[no-untyped-def]
     try:
         await asyncio.wait_for(fn(*args, **kwargs), timeout=float(timeout_s))

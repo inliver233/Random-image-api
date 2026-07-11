@@ -99,6 +99,7 @@ type ModularPortsStatusResponse = {
     active_backend: string;
     using_memory_fallback: boolean;
   };
+  random_service?: { backend: string };
   request_id: string;
 };
 
@@ -340,8 +341,8 @@ export function MaintenancePage() {
 
       <Card title="模块端口（Phase 4）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          Catalog / JobQueue / RecentDedup 端口只读状态。Catalog/JobQueue 默认本地；RecentDedup
-          支持 RECENT_DEDUP_BACKEND=redis + REDIS_URL（失败回落 memory）。不展示密钥或连接串。
+          Catalog / JobQueue / RecentDedup / RandomService 端口只读状态。Catalog/JobQueue 默认本地；RecentDedup
+          支持 RECENT_DEDUP_BACKEND=redis + REDIS_URL（失败回落 memory）。RandomService 为默认 pick 计划工厂。不展示密钥或连接串。
         </Typography.Paragraph>
 
         <QueryState query={modularPortsStatus}>
@@ -369,6 +370,9 @@ export function MaintenancePage() {
                     redis→memory fallback
                   </Tag>
                 ) : null}
+              </Descriptions.Item>
+              <Descriptions.Item label="Random Service">
+                <Tag>{modularPortsStatus.data.random_service?.backend ?? "default"}</Tag>
               </Descriptions.Item>
             </Descriptions>
           ) : null}

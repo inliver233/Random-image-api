@@ -181,6 +181,12 @@ async def healthz(request: Request) -> Any:
                     str(getattr(getattr(request.app.state, "recent_dedup", None), "backend", "memory") or "memory")
                 ),
             },
+            # RandomService factory (default plan builder; swappable later).
+            "random_service": {
+                "backend": (
+                    str(getattr(getattr(request.app.state, "random_service", None), "backend", "default") or "default")
+                ),
+            },
         }
 
         resp = JSONResponse(

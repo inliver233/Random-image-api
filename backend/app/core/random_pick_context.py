@@ -27,7 +27,7 @@ RECENT_EXCLUDE_SQL_CAP = 512
 
 @runtime_checkable
 class RandomService(Protocol):
-    """Thin RandomService port used by public /random and /feed adapters.
+    """Per-request pick plan used by public /random and /feed adapters.
 
     Implementations plan once (runtime defaults + dedup + quality), then pick via
     Go engine dual-run and/or Python SQLite fallback without routes owning that logic.
@@ -55,6 +55,26 @@ class RandomService(Protocol):
         exclude_image_ids: list[int] | set[int] | None = None,
         catalog: CatalogStore | None = None,
     ) -> tuple[list[Any], dict[str, Any] | None]: ...
+
+
+@runtime_checkable
+class RandomServiceFactory(Protocol):
+    """App-level factory that builds a per-request RandomService (pick plan)."""
+
+    backend: str
+
+    def build_context(
+        self,
+        *,
+        filters: ParsedRandomFilters,
+        random_defaults: dict[str, Any],
+        attempts: int | None,
+        r18_strict: int | None,
+        strategy: str | None,
+        quality_samples: int | None,
+        query_params: Any = None,
+        recent_dedup: RecentDedupPort | None = None,
+    ) -> RandomService: ...
 
 
 @dataclass(slots=True)
@@ -393,3 +413,37 @@ def build_random_pick_context(
         rng=rng,
         seed_norm=seed_norm,
     )
+
+
+class DefaultRandomServiceFactory:
+    """Default RandomService factory: builds RandomPickContext per request."""
+
+    backend: str = "default"
+
+    def build_context(
+        self,
+        *,
+        filters: ParsedRandomFilters,
+        random_defaults: dict[str, Any],
+        attempts: int | None,
+        r18_strict: int | None,
+        strategy: str | None,
+        quality_samples: int | None,
+        query_params: Any = None,
+        recent_dedup: RecentDedupPort | None = None,
+    ) -> RandomPickContext:
+        return build_random_pick_context(
+            filters=filters,
+            random_defaults=random_defaults,
+            attempts=attempts,
+            r18_strict=r18_strict,
+            strategy=strategy,
+            quality_samples=quality_samples,
+            query_params=query_params,
+            recent_dedup=recent_dedup,
+        )
+
+
+def build_random_service_factory() -> RandomServiceFactory:
+    """App wiring helper for app.state.random_service."""
+    return DefaultRandomServiceFactory()

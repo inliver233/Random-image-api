@@ -34,6 +34,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.metrics import observe_random_result
 from app.core.random_request_persistence import load_persisted_random_totals, persist_random_totals
 from app.core.random_request_stats import RandomRequestStats
+from app.core.random_pick_context import build_random_service_factory
 from app.core.recent_dedup import build_recent_dedup
 from app.core.request_id import build_request_id_middleware, get_or_create_request_id, set_request_id_on_state
 from app.core.runtime_config_cache import RuntimeConfigCache
@@ -190,6 +191,7 @@ def create_app() -> FastAPI:
         backend=str(getattr(settings, "recent_dedup_backend", "memory") or "memory"),
         redis_url=str(getattr(settings, "redis_url", "") or ""),
     )
+    app.state.random_service = build_random_service_factory()
     app.state.httpx_transport = build_default_async_transport()
     app.state.httpx_client = build_shared_async_client(transport=app.state.httpx_transport)
     app.state.runtime_config_cache = RuntimeConfigCache(ttl_s=2.0)
