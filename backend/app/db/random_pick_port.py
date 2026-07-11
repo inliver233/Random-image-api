@@ -5,13 +5,14 @@ from typing import Any, Protocol, runtime_checkable
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.catalog import catalog_backend_from_database_url
 from app.db.models.images import Image
 from app.db.random_pick import count_pick_candidates, pick_random_image, pick_random_images
 
 
 @runtime_checkable
 class RandomPickPort(Protocol):
-    """SQL ring-pick port for Python fallback (SQLite today; dialect label later).
+    """SQL ring-pick port for Python fallback (SQLite default; Postgres dialect label).
 
     Preserves pick_random_image / pick_random_images filter semantics exactly.
     Go random-engine dual-run sits above this port (RandomService), not inside it.
@@ -90,9 +91,21 @@ class SqliteRandomPick:
         return int(await count_pick_candidates(session, **pick_kwargs))
 
 
+# Postgres dialect uses the same SQLAlchemy ring helpers for now (dialect-neutral).
+# A dedicated store can diverge later (e.g. RANDOM()/TABLESAMPLE). Backend label is ops-facing.
+class PostgresRandomPick(SqliteRandomPick):
+    backend: str = "postgres"
+
+
 def build_random_pick(*, database_url: str = "") -> RandomPickPort:
-    """Factory for pick backends. Only sqlite SQL path is implemented today."""
-    _ = database_url  # reserved for postgres dialect label later
+    """Build pick port for the configured DB dialect.
+
+    Today both sqlite and postgres use shared SQLAlchemy ring helpers.
+    Backend label is exposed for healthz / modular-ports; no schema migration.
+    """
+    backend = catalog_backend_from_database_url(database_url)
+    if backend == "postgres":
+        return PostgresRandomPick()
     return SqliteRandomPick()
 
 

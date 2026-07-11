@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.db.random_pick_port import (
+    PostgresRandomPick,
     RandomPickPort,
     SqliteRandomPick,
     build_random_pick,
@@ -15,6 +16,20 @@ def test_build_random_pick_defaults_to_sqlite() -> None:
     assert isinstance(pick, SqliteRandomPick)
     assert pick.backend == "sqlite"
     assert isinstance(pick, RandomPickPort)
+
+
+def test_build_random_pick_postgres_dialect_label() -> None:
+    pick = build_random_pick(database_url="postgresql+asyncpg://u:p@localhost/db")
+    assert isinstance(pick, PostgresRandomPick)
+    assert pick.backend == "postgres"
+    assert isinstance(pick, RandomPickPort)
+
+    # Same helpers as sqlite today — only the ops label differs.
+    assert isinstance(build_random_pick(database_url="postgres://u:p@h/db"), PostgresRandomPick)
+    assert isinstance(
+        build_random_pick(database_url="sqlite+aiosqlite:///:memory:"),
+        SqliteRandomPick,
+    )
 
 
 def test_resolve_random_pick_prefers_injected() -> None:
