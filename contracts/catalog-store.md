@@ -50,7 +50,9 @@ Public delivery/get paths adopt the port progressively:
 - Admin `POST /admin/api/images/clear` → `catalog.clear_all_images` (image_tags / Tag wipe remain in handler)
 - Admin `GET /admin/api/images` → `catalog.list_admin_images` (missing-field response shaping remains in handler; tag_count join stays in helper)
 - Public `GET /authors` → `catalog.list_authors` (author projection from Image rows)
-- Worker `build_default_dispatcher` builds one `CatalogStore` and injects into import/hydrate/heal
+- Worker `build_default_dispatcher` builds one `CatalogStore` (+ `TagStore`) and injects into import/hydrate/heal
+- Admin inline import execute (`POST /admin/api/imports` small batches) injects `app.state.catalog_store` / `tag_store` / `settings` into `build_import_images_handler`
+- Engine snapshot/upsert publish: `push_engine_snapshot` / `maybe_warm_engine_snapshot_on_startup` / `maybe_publish_engine_upserts` accept optional `catalog=` + `tag_store=` (admin snapshot + API warm + job handlers pass process ports)
 - Tag domain is **not** on CatalogStore — see `contracts/tag-store.md`
 
 Helpers remain available for non-public paths; injected store is preferred via `app.state.catalog_store`.

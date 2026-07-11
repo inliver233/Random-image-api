@@ -39,15 +39,26 @@ def test_warm_engine_snapshot_calls_push_when_url_set(tmp_path: Path, monkeypatc
         async def aclose(self) -> None:
             return None
 
+    class _Catalog:
+        backend = "test-catalog"
+
+    class _Tags:
+        backend = "test-tags"
+
     async def _run() -> None:
         out = await maybe_warm_engine_snapshot_on_startup(
             engine,
             settings=settings,
             client=_Client(),
             timeout_s=1.0,
+            catalog=_Catalog(),  # type: ignore[arg-type]
+            tag_store=_Tags(),  # type: ignore[arg-type]
         )
         assert out == {"ok": True, "index_size": 0}
-        assert called.get("kwargs", {}).get("base_url") == "http://127.0.0.1:9"
+        kw = called.get("kwargs") or {}
+        assert kw.get("base_url") == "http://127.0.0.1:9"
+        assert getattr(kw.get("catalog"), "backend", None) == "test-catalog"
+        assert getattr(kw.get("tag_store"), "backend", None) == "test-tags"
         await engine.dispose()
 
     asyncio.run(_run())

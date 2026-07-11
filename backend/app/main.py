@@ -109,6 +109,8 @@ def create_app() -> FastAPI:
                         settings=settings,
                         client=getattr(app.state, "httpx_client", None),
                         timeout_s=120.0,
+                        catalog=getattr(app.state, "catalog_store", None),
+                        tag_store=getattr(app.state, "tag_store", None),
                     )
                 except Exception:
                     pass

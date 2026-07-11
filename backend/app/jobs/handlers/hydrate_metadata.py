@@ -1274,6 +1274,8 @@ LIMIT 1;
                     engine,
                     image_ids=list(persisted_ids),
                     settings=settings,
+                    catalog=catalog_store,
+                    tag_store=tags_store,
                 )
                 await maybe_enqueue_r2_prewarm(image_ids=list(persisted_ids), settings=settings)
             await _mark_token_ok(token_id, now_dt=now_dt)

@@ -138,10 +138,14 @@ async def push_engine_snapshot(
     revision: str,
     limit: int | None = None,
     timeout_s: float = 60.0,
+    catalog: CatalogStore | None = None,
+    tag_store: TagStore | None = None,
 ) -> dict[str, Any] | None:
     Session = create_sessionmaker(engine)
     async with Session() as session:
-        built = await build_engine_snapshot_payload(session, limit=limit)
+        built = await build_engine_snapshot_payload(
+            session, limit=limit, catalog=catalog, tag_store=tag_store
+        )
     result = await engine_apply_snapshot(
         client,
         base_url,
@@ -161,6 +165,8 @@ async def maybe_warm_engine_snapshot_on_startup(
     client: Any | None = None,
     timeout_s: float = 120.0,
     limit: int | None = None,
+    catalog: CatalogStore | None = None,
+    tag_store: TagStore | None = None,
 ) -> dict[str, Any] | None:
     """Best-effort full snapshot when RANDOM_ENGINE_URL is set.
 
@@ -182,6 +188,8 @@ async def maybe_warm_engine_snapshot_on_startup(
             revision=revision,
             limit=limit,
             timeout_s=float(timeout_s),
+            catalog=catalog,
+            tag_store=tag_store,
         )
         if result is not None:
             logger.info(
@@ -242,6 +250,8 @@ async def maybe_publish_engine_upserts(
     illust_id: int | None = None,
     settings: Settings | None = None,
     client: Any | None = None,
+    catalog: CatalogStore | None = None,
+    tag_store: TagStore | None = None,
 ) -> dict[str, Any] | None:
     """
     Best-effort catalog upsert → Go engine /v1/admin/events.
@@ -257,9 +267,19 @@ async def maybe_publish_engine_upserts(
         Session = create_sessionmaker(db_engine)
         async with Session() as session:
             if image_ids:
-                images = await load_engine_images_by_ids(session, image_ids=list(image_ids))
+                images = await load_engine_images_by_ids(
+                    session,
+                    image_ids=list(image_ids),
+                    catalog=catalog,
+                    tag_store=tag_store,
+                )
             elif illust_id is not None and int(illust_id) > 0:
-                images = await load_engine_images_by_illust(session, illust_id=int(illust_id))
+                images = await load_engine_images_by_illust(
+                    session,
+                    illust_id=int(illust_id),
+                    catalog=catalog,
+                    tag_store=tag_store,
+                )
             else:
                 return None
 

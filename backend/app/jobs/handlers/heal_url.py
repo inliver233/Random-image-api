@@ -12,6 +12,7 @@ from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.core.time import iso_utc_ms
 from app.db.catalog import CatalogStore, build_catalog_store
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
+from app.db.tag_store import TagStore, build_tag_store
 from app.jobs.payload import parse_job_payload_object
 from app.jobs.errors import JobPermanentError
 from app.jobs.handlers.hydrate_metadata import build_hydrate_metadata_handler
@@ -22,12 +23,18 @@ def build_heal_url_handler(
     *,
     transport: httpx.BaseTransport | None = None,
     catalog: CatalogStore | None = None,
+    tag_store: TagStore | None = None,
     settings: Settings | None = None,
 ) -> Any:
     s = settings if settings is not None else load_settings()
     catalog_store = catalog if catalog is not None else build_catalog_store(database_url=str(engine.url))
+    tag_store_port = tag_store if tag_store is not None else build_tag_store(database_url=str(engine.url))
     hydrate = build_hydrate_metadata_handler(
-        engine, transport=transport, catalog=catalog_store, settings=s
+        engine,
+        transport=transport,
+        catalog=catalog_store,
+        tag_store=tag_store_port,
+        settings=s,
     )
     Session = create_sessionmaker(engine)
 
@@ -64,6 +71,8 @@ def build_heal_url_handler(
                 engine,
                 image_ids=list(healed_ids),
                 settings=s,
+                catalog=catalog_store,
+                tag_store=tag_store_port,
             )
             await maybe_enqueue_r2_prewarm(image_ids=list(healed_ids), settings=s)
 

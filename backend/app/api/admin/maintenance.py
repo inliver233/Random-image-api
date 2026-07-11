@@ -446,6 +446,8 @@ async def random_engine_push_snapshot(
         revision=revision,
         limit=limit,
         timeout_s=120.0,
+        catalog=getattr(request.app.state, "catalog_store", None),
+        tag_store=getattr(request.app.state, "tag_store", None),
     )
     if result is None:
         raise ApiError(

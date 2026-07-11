@@ -249,7 +249,13 @@ def build_import_images_handler(
             image_ids = await with_sqlite_busy_retry(_op)
             if image_ids:
                 # Best-effort: warm random-engine index (+ optional R2 prewarm) after each import chunk.
-                await maybe_publish_engine_upserts(engine, image_ids=list(image_ids), settings=s)
+                await maybe_publish_engine_upserts(
+                    engine,
+                    image_ids=list(image_ids),
+                    settings=s,
+                    catalog=catalog_store,
+                    tag_store=tag_store_port,
+                )
                 await maybe_enqueue_r2_prewarm(image_ids=list(image_ids), settings=s)
             return list(image_ids or [])
 

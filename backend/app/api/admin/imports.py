@@ -374,8 +374,20 @@ async def create_import(
             job_id=int(job_id), worker_id=worker_id, now=now
         )
         if claimed is not None:
+            # Prefer process-bound ports/settings (same as worker dispatcher inject).
+            settings = getattr(request.app.state, "settings", None)
+            catalog = getattr(request.app.state, "catalog_store", None)
+            tag_store = getattr(request.app.state, "tag_store", None)
             dispatcher = JobDispatcher()
-            dispatcher.register("import_images", build_import_images_handler(engine))
+            dispatcher.register(
+                "import_images",
+                build_import_images_handler(
+                    engine,
+                    catalog=catalog,
+                    tag_store=tag_store,
+                    settings=settings,
+                ),
+            )
             await execute_claimed_job(
                 engine, dispatcher, job_row=claimed, worker_id=worker_id, queue=queue
             )

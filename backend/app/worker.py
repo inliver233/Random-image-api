@@ -84,7 +84,10 @@ def build_default_dispatcher(engine, *, settings: Settings | None = None) -> Job
         "hydrate_metadata",
         lambda: build_hydrate_metadata_handler(engine, catalog=catalog, tag_store=tags, settings=s),
     )
-    _safe_register("heal_url", lambda: build_heal_url_handler(engine, catalog=catalog, settings=s))
+    _safe_register(
+        "heal_url",
+        lambda: build_heal_url_handler(engine, catalog=catalog, tag_store=tags, settings=s),
+    )
     _safe_register("proxy_probe", lambda: build_proxy_probe_handler(engine, settings=s))
     _safe_register("easy_proxies_import", lambda: build_easy_proxies_import_handler(engine, settings=s))
     return dispatcher

@@ -33,7 +33,9 @@ Adoption:
 - Admin image delete / bulk-delete / clear → link/tag clears via TagStore
 - Import tag attach → `ensure_tags_by_names` + `link_image_tags`
 - Hydrate tag replace → `upsert_tags_with_translations` + `replace_image_tags`
-- Engine snapshot/events tag names → `map_tag_names_by_image_ids`
+- Engine snapshot/events tag names → `map_tag_names_by_image_ids` (callers may inject process `TagStore` via `tag_store=` on load/snapshot/upsert publish helpers)
+- Worker heal_url → forwards shared `TagStore` into hydrate_metadata (same port as import/hydrate)
+- Admin inline import → `app.state.tag_store` into import_images
 - `/i` hydrate check → `image_has_any_tag`
 
 **Not included:** Catalog image rows (CatalogStore), random_pick filter subqueries, authors list.
