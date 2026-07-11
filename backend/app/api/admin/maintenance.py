@@ -140,6 +140,52 @@ async def image_edge_status(
     )
 
 
+@router.get("/maintenance/api-key-rate-limit")
+async def api_key_rate_limit_status(
+    request: Request,
+    _claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    """Read-only public API key rate-limit backend status (never returns Redis URL).
+
+    Default backend is process-local memory. Redis is optional via
+    PUBLIC_API_KEY_RATE_LIMIT_BACKEND=redis + REDIS_URL (fail-open to memory).
+    """
+    _ = _claims
+    rid = get_or_create_request_id(request)
+    settings = getattr(request.app.state, "settings", None)
+    required = bool(getattr(settings, "public_api_key_required", False)) if settings is not None else False
+    rpm = int(getattr(settings, "public_api_key_rpm", 0) or 0) if settings is not None else 0
+    burst = int(getattr(settings, "public_api_key_burst", 0) or 0) if settings is not None else 0
+    cfg_backend = (
+        str(getattr(settings, "public_api_key_rate_limit_backend", "memory") or "memory").lower()
+        if settings is not None
+        else "memory"
+    )
+    if cfg_backend not in {"memory", "redis"}:
+        cfg_backend = "memory"
+    redis_url_configured = (
+        bool(str(getattr(settings, "redis_url", "") or "").strip()) if settings is not None else False
+    )
+    limiter = getattr(request.app.state, "api_key_limiter", None)
+    active_backend = str(getattr(limiter, "backend", "memory") or "memory").lower() if limiter is not None else "memory"
+    if active_backend not in {"memory", "redis"}:
+        active_backend = "memory"
+    return admin_ok(
+        request,
+        payload={
+            "required": required,
+            "rpm": rpm,
+            "burst": burst,
+            "configured_backend": cfg_backend,
+            "active_backend": active_backend,
+            "redis_url_configured": redis_url_configured,
+            # True when redis was requested but process is on memory (missing URL / import / connect).
+            "using_memory_fallback": cfg_backend == "redis" and active_backend == "memory",
+        },
+        request_id=rid,
+    )
+
+
 @router.get("/maintenance/random-engine")
 async def random_engine_status(
     request: Request,

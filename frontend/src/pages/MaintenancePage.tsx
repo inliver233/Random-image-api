@@ -67,6 +67,18 @@ type ImageEdgeStatusResponse = {
   request_id: string;
 };
 
+type ApiKeyRateLimitStatusResponse = {
+  ok: true;
+  required: boolean;
+  rpm: number;
+  burst: number;
+  configured_backend: string;
+  active_backend: string;
+  redis_url_configured: boolean;
+  using_memory_fallback: boolean;
+  request_id: string;
+};
+
 export function MaintenancePage() {
   const [form] = Form.useForm<CleanupFormValues>();
   const alerts = useActionAlerts();
@@ -77,6 +89,12 @@ export function MaintenancePage() {
   const imageEdgeStatus = useQuery({
     queryKey: ["admin", "maintenance", "image-edge"],
     queryFn: () => apiJson<ImageEdgeStatusResponse>("/admin/api/maintenance/image-edge"),
+    refetchInterval: 30_000,
+  });
+
+  const apiKeyRlStatus = useQuery({
+    queryKey: ["admin", "maintenance", "api-key-rate-limit"],
+    queryFn: () => apiJson<ApiKeyRateLimitStatusResponse>("/admin/api/maintenance/api-key-rate-limit"),
     refetchInterval: 30_000,
   });
 
@@ -202,6 +220,49 @@ export function MaintenancePage() {
         </QueryState>
 
         <Button onClick={() => void imageEdgeStatus.refetch()} loading={imageEdgeStatus.isFetching}>
+          刷新状态
+        </Button>
+      </Card>
+
+      <Card title="API Key 限流">
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          公开接口 X-API-Key 限流后端：默认 process-local memory；可选 Redis
+          （PUBLIC_API_KEY_RATE_LIMIT_BACKEND=redis + REDIS_URL）。Redis 不可用时 fail-open 到
+          memory，不挡主路径。不展示 Redis URL。
+        </Typography.Paragraph>
+
+        <QueryState query={apiKeyRlStatus}>
+          {apiKeyRlStatus.data ? (
+            <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
+              <Descriptions.Item label="强制 API Key">
+                {apiKeyRlStatus.data.required ? <Tag color="blue">REQUIRED</Tag> : <Tag>OFF</Tag>}
+              </Descriptions.Item>
+              <Descriptions.Item label="RPM / Burst">
+                {apiKeyRlStatus.data.rpm} / {apiKeyRlStatus.data.burst}
+              </Descriptions.Item>
+              <Descriptions.Item label="配置后端">
+                {apiKeyRlStatus.data.configured_backend}
+              </Descriptions.Item>
+              <Descriptions.Item label="实际后端">
+                {apiKeyRlStatus.data.active_backend === "redis" ? (
+                  <Tag color="green">redis</Tag>
+                ) : (
+                  <Tag>memory</Tag>
+                )}
+                {apiKeyRlStatus.data.using_memory_fallback ? (
+                  <Tag color="orange" style={{ marginLeft: 8 }}>
+                    redis→memory fallback
+                  </Tag>
+                ) : null}
+              </Descriptions.Item>
+              <Descriptions.Item label="REDIS_URL">
+                {apiKeyRlStatus.data.redis_url_configured ? "已配置" : "未配置"}
+              </Descriptions.Item>
+            </Descriptions>
+          ) : null}
+        </QueryState>
+
+        <Button onClick={() => void apiKeyRlStatus.refetch()} loading={apiKeyRlStatus.isFetching}>
           刷新状态
         </Button>
       </Card>
