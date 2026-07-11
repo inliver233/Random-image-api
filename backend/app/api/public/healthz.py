@@ -142,6 +142,18 @@ async def healthz(request: Request) -> Any:
         )
         if job_queue_requested not in {"sqlite", "memory", "redis", "nats"}:
             job_queue_requested = "sqlite"
+        recent_dedup_requested = (
+            str(getattr(settings, "recent_dedup_backend", "memory") or "memory").strip().lower()
+            if settings is not None
+            else "memory"
+        )
+        if recent_dedup_requested not in {"memory", "redis"}:
+            recent_dedup_requested = "memory"
+        recent_dedup_active = str(
+            getattr(getattr(request.app.state, "recent_dedup", None), "backend", "memory") or "memory"
+        ).strip().lower()
+        if recent_dedup_active not in {"memory", "redis"}:
+            recent_dedup_active = "memory"
         modules = {
             "image_edge": {
                 "enabled_flag": bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False,
@@ -204,10 +216,13 @@ async def healthz(request: Request) -> Any:
                     str(getattr(getattr(request.app.state, "tag_store", None), "backend", "sqlite") or "sqlite")
                 ),
             },
-            # Anti-repeat short window (memory default; redis when ready). Active store label.
+            # Anti-repeat short window (memory default; redis when ready).
+            # backend = active store; requested = Settings.recent_dedup_backend (honesty).
             "recent_dedup": {
-                "backend": (
-                    str(getattr(getattr(request.app.state, "recent_dedup", None), "backend", "memory") or "memory")
+                "backend": recent_dedup_active,
+                "requested": recent_dedup_requested,
+                "using_memory_fallback": (
+                    recent_dedup_requested == "redis" and recent_dedup_active == "memory"
                 ),
             },
             # RandomService factory (default plan builder; swappable later).
