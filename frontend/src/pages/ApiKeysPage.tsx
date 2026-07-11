@@ -1,10 +1,11 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Form, Input, Modal, Space, Switch, Typography } from "antd";
+import { Button, Form, Input, Modal, Space, Switch, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 
+import { ActionAlerts } from "../admin/ActionAlerts";
 import { CursorTableCard } from "../admin/CursorTableCard";
-import { messageFromError, requestIdFromError } from "../admin/errors";
+import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
@@ -50,10 +51,7 @@ export function ApiKeysPage() {
   const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createForm] = Form.useForm<CreateApiKeyFormValues>();
-  const [actionMessage, setActionMessage] = React.useState<string | null>(null);
-  const [actionRequestId, setActionRequestId] = React.useState<string | null>(null);
-  const [actionErrorMessage, setActionErrorMessage] = React.useState<string | null>(null);
-  const [actionErrorRequestId, setActionErrorRequestId] = React.useState<string | null>(null);
+  const alerts = useActionAlerts();
 
   const {
     query: listQuery,
@@ -74,10 +72,9 @@ export function ApiKeysPage() {
 
   React.useEffect(() => {
     if (loadMore.isError) {
-      const err = loadMore.error;
-      setActionErrorMessage(messageFromError(err));
-      setActionErrorRequestId(requestIdFromError(err));
+      alerts.setError(loadMore.error);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-run on loadMore error state
   }, [loadMore.isError, loadMore.error]);
 
   const createKey = useMutation({
@@ -92,21 +89,16 @@ export function ApiKeysPage() {
         }),
       }),
     onMutate: () => {
-      setActionMessage(null);
-      setActionRequestId(null);
-      setActionErrorMessage(null);
-      setActionErrorRequestId(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
       setCreateOpen(false);
       createForm.resetFields();
-      setActionMessage(`API Key 已创建：#${data.api_key_id}（hint=${data.hint}）`);
-      setActionRequestId(data.request_id);
+      alerts.setSuccess(`API Key 已创建：#${data.api_key_id}（hint=${data.hint}）`, data.request_id);
       queryClient.invalidateQueries({ queryKey: ["admin", "api-keys"] });
     },
     onError: (err) => {
-      setActionErrorMessage(messageFromError(err));
-      setActionErrorRequestId(requestIdFromError(err));
+      alerts.setError(err);
     },
   });
 
@@ -117,20 +109,15 @@ export function ApiKeysPage() {
         body: JSON.stringify({ enabled: payload.enabled }),
       }),
     onMutate: () => {
-      setActionMessage(null);
-      setActionRequestId(null);
-      setActionErrorMessage(null);
-      setActionErrorRequestId(null);
+      alerts.clear();
     },
     onSuccess: (data, vars) => {
-      setActionMessage(`API Key #${data.api_key_id} 已${vars.enabled ? "启用" : "禁用"}`);
-      setActionRequestId(data.request_id);
+      alerts.setSuccess(`API Key #${data.api_key_id} 已${vars.enabled ? "启用" : "禁用"}`, data.request_id);
       setItems((prev) => prev.map((it) => (it.id === vars.id ? { ...it, enabled: vars.enabled } : it)));
       queryClient.invalidateQueries({ queryKey: ["admin", "api-keys"] });
     },
     onError: (err) => {
-      setActionErrorMessage(messageFromError(err));
-      setActionErrorRequestId(requestIdFromError(err));
+      alerts.setError(err);
     },
   });
 
@@ -179,12 +166,13 @@ export function ApiKeysPage() {
         </Button>
       </Space>
 
-      {actionMessage ? (
-        <Alert type="success" showIcon message={actionMessage} description={actionRequestId ? `请求ID: ${actionRequestId}` : ""} />
-      ) : null}
-      {actionErrorMessage ? (
-        <Alert type="error" showIcon message={actionErrorMessage} description={actionErrorRequestId ? `请求ID: ${actionErrorRequestId}` : ""} />
-      ) : null}
+      <ActionAlerts
+        message={alerts.message}
+        requestId={alerts.requestId}
+        errorMessage={alerts.errorMessage}
+        errorRequestId={alerts.errorRequestId}
+        requestIdPlacement="description"
+      />
 
       <CursorTableCard<ApiKeyItem>
         columns={columns}

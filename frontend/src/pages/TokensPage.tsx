@@ -3,8 +3,10 @@ import { Alert, Button, Card, Form, Input, InputNumber, Modal, Popconfirm, Skele
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 
+import { ActionAlerts } from "../admin/ActionAlerts";
+import { requestIdDescription } from "../admin/errors";
+import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
-import { messageFromError, requestIdDescription, requestIdFromError } from "../admin/errors";
 
 type TokenItem = {
   id: string;
@@ -129,10 +131,7 @@ export function TokensPage() {
   const [editForm] = Form.useForm<EditTokenFormValues>();
   const [editingToken, setEditingToken] = React.useState<TokenItem | null>(null);
 
-  const [actionMessage, setActionMessage] = React.useState<string | null>(null);
-  const [actionRequestId, setActionRequestId] = React.useState<string | null>(null);
-  const [actionErrorMessage, setActionErrorMessage] = React.useState<string | null>(null);
-  const [actionErrorRequestId, setActionErrorRequestId] = React.useState<string | null>(null);
+  const alerts = useActionAlerts();
 
   const query = useQuery({
     queryKey: ["admin", "tokens"],
@@ -151,21 +150,16 @@ export function TokensPage() {
         }),
       }),
     onMutate: () => {
-      setActionMessage(null);
-      setActionRequestId(null);
-      setActionErrorMessage(null);
-      setActionErrorRequestId(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
       setCreateOpen(false);
-      setActionMessage(`令牌创建成功：${data.token_id}`);
-      setActionRequestId(data.request_id);
+      alerts.setSuccess(`令牌创建成功：${data.token_id}`, data.request_id);
       createForm.resetFields();
       queryClient.invalidateQueries({ queryKey: ["admin", "tokens"] });
     },
     onError: (err) => {
-      setActionErrorMessage(messageFromError(err));
-      setActionErrorRequestId(requestIdFromError(err));
+      alerts.setError(err);
     },
   });
 
@@ -176,23 +170,18 @@ export function TokensPage() {
         body: JSON.stringify(payload.body),
       }),
     onMutate: () => {
-      setActionMessage(null);
-      setActionRequestId(null);
-      setActionErrorMessage(null);
-      setActionErrorRequestId(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
       setEditOpen(false);
       setEditingToken(null);
       editForm.resetFields();
 
-      setActionMessage(`令牌已更新：${data.token_id}`);
-      setActionRequestId(data.request_id);
+      alerts.setSuccess(`令牌已更新：${data.token_id}`, data.request_id);
       queryClient.invalidateQueries({ queryKey: ["admin", "tokens"] });
     },
     onError: (err) => {
-      setActionErrorMessage(messageFromError(err));
-      setActionErrorRequestId(requestIdFromError(err));
+      alerts.setError(err);
       queryClient.invalidateQueries({ queryKey: ["admin", "tokens"] });
     },
   });
@@ -201,20 +190,15 @@ export function TokensPage() {
     mutationFn: (tokenId: string) =>
       apiJson<TestRefreshResponse>(`/admin/api/tokens/${encodeURIComponent(tokenId)}/test-refresh`, { method: "POST" }),
     onMutate: () => {
-      setActionMessage(null);
-      setActionRequestId(null);
-      setActionErrorMessage(null);
-      setActionErrorRequestId(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
       const routeInfo = data.proxy ? `（经代理 #${data.proxy.endpoint_id}，代理池 #${data.proxy.pool_id}）` : "（直连）";
-      setActionMessage(`令牌刷新成功，expires_in=${data.expires_in}${routeInfo}`);
-      setActionRequestId(data.request_id);
+      alerts.setSuccess(`令牌刷新成功，expires_in=${data.expires_in}${routeInfo}`, data.request_id);
       queryClient.invalidateQueries({ queryKey: ["admin", "tokens"] });
     },
     onError: (err) => {
-      setActionErrorMessage(messageFromError(err));
-      setActionErrorRequestId(requestIdFromError(err));
+      alerts.setError(err);
       queryClient.invalidateQueries({ queryKey: ["admin", "tokens"] });
     },
   });
@@ -223,19 +207,14 @@ export function TokensPage() {
     mutationFn: (tokenId: string) =>
       apiJson<ResetFailuresResponse>(`/admin/api/tokens/${encodeURIComponent(tokenId)}/reset-failures`, { method: "POST" }),
     onMutate: () => {
-      setActionMessage(null);
-      setActionRequestId(null);
-      setActionErrorMessage(null);
-      setActionErrorRequestId(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
-      setActionMessage(`已重置失败计数：${data.token_id}`);
-      setActionRequestId(data.request_id);
+      alerts.setSuccess(`已重置失败计数：${data.token_id}`, data.request_id);
       queryClient.invalidateQueries({ queryKey: ["admin", "tokens"] });
     },
     onError: (err) => {
-      setActionErrorMessage(messageFromError(err));
-      setActionErrorRequestId(requestIdFromError(err));
+      alerts.setError(err);
     },
   });
 
@@ -243,20 +222,15 @@ export function TokensPage() {
     mutationFn: (tokenId: string) =>
       apiJson<DeleteTokenResponse>(`/admin/api/tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" }),
     onMutate: () => {
-      setActionMessage(null);
-      setActionRequestId(null);
-      setActionErrorMessage(null);
-      setActionErrorRequestId(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
-      setActionMessage(`令牌已删除：${data.token_id}`);
-      setActionRequestId(data.request_id);
+      alerts.setSuccess(`令牌已删除：${data.token_id}`, data.request_id);
       queryClient.invalidateQueries({ queryKey: ["admin", "tokens"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "bindings"] });
     },
     onError: (err) => {
-      setActionErrorMessage(messageFromError(err));
-      setActionErrorRequestId(requestIdFromError(err));
+      alerts.setError(err);
       queryClient.invalidateQueries({ queryKey: ["admin", "tokens"] });
     },
   });
@@ -283,10 +257,12 @@ export function TokensPage() {
         Pixiv 令牌管理
       </Typography.Title>
 
-      {actionMessage ? <Alert type="success" showIcon message={actionMessage} /> : null}
-      {actionRequestId ? <Typography.Text type="secondary">请求ID: {actionRequestId}</Typography.Text> : null}
-      {actionErrorMessage ? <Alert type="error" showIcon message={actionErrorMessage} /> : null}
-      {actionErrorRequestId ? <Typography.Text type="secondary">请求ID: {actionErrorRequestId}</Typography.Text> : null}
+      <ActionAlerts
+        message={alerts.message}
+        requestId={alerts.requestId}
+        errorMessage={alerts.errorMessage}
+        errorRequestId={alerts.errorRequestId}
+      />
 
       <Space wrap>
         <Button type="primary" onClick={() => setCreateOpen(true)}>

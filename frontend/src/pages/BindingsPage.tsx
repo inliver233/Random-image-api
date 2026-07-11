@@ -4,8 +4,10 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { ApiError, apiJson } from "../api/client";
+import { ActionAlerts } from "../admin/ActionAlerts";
 import { messageFromError, requestIdDescription, requestIdFromError } from "../admin/errors";
+import { useActionAlerts } from "../admin/useActionAlerts";
+import { ApiError, apiJson } from "../api/client";
 
 type ProxyRef = {
   id: string;
@@ -180,10 +182,7 @@ export function BindingsPage() {
   const [poolId, setPoolId] = useState<number | null>(() => poolIdFromUrl);
   const [maxTokensPerProxy, setMaxTokensPerProxy] = useState<number>(2);
 
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [actionRequestId, setActionRequestId] = useState<string | null>(null);
-  const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
-  const [actionErrorRequestId, setActionErrorRequestId] = useState<string | null>(null);
+  const alerts = useActionAlerts();
 
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideBinding, setOverrideBinding] = useState<BindingItem | null>(null);
@@ -283,22 +282,17 @@ export function BindingsPage() {
         }),
       }),
     onMutate: () => {
-      setActionMessage(null);
-      setActionRequestId(null);
-      setActionErrorMessage(null);
-      setActionErrorRequestId(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
-      setActionMessage(`已设置覆盖代理：绑定 #${data.binding_id} → 节点 #${data.override_proxy_id}`);
-      setActionRequestId(data.request_id);
+      alerts.setSuccess(`已设置覆盖代理：绑定 #${data.binding_id} → 节点 #${data.override_proxy_id}`, data.request_id);
       setOverrideOpen(false);
       setOverrideBinding(null);
       overrideForm.resetFields();
       queryClient.invalidateQueries({ queryKey: ["admin", "bindings", { poolId }] });
     },
     onError: (err) => {
-      setActionErrorMessage(messageFromError(err));
-      setActionErrorRequestId(requestIdFromError(err));
+      alerts.setError(err);
     },
   });
 
@@ -306,19 +300,14 @@ export function BindingsPage() {
     mutationFn: (bindingId: string) =>
       apiJson<ClearOverrideResponse>(`/admin/api/bindings/${encodeURIComponent(bindingId)}/clear-override`, { method: "POST" }),
     onMutate: () => {
-      setActionMessage(null);
-      setActionRequestId(null);
-      setActionErrorMessage(null);
-      setActionErrorRequestId(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
-      setActionMessage(`已清除覆盖代理：绑定 #${data.binding_id}`);
-      setActionRequestId(data.request_id);
+      alerts.setSuccess(`已清除覆盖代理：绑定 #${data.binding_id}`, data.request_id);
       queryClient.invalidateQueries({ queryKey: ["admin", "bindings", { poolId }] });
     },
     onError: (err) => {
-      setActionErrorMessage(messageFromError(err));
-      setActionErrorRequestId(requestIdFromError(err));
+      alerts.setError(err);
     },
   });
 
@@ -364,10 +353,12 @@ export function BindingsPage() {
         }
       />
 
-      {actionMessage ? <Alert type="success" showIcon message={actionMessage} /> : null}
-      {actionRequestId ? <Typography.Text type="secondary">请求ID: {actionRequestId}</Typography.Text> : null}
-      {actionErrorMessage ? <Alert type="error" showIcon message={actionErrorMessage} /> : null}
-      {actionErrorRequestId ? <Typography.Text type="secondary">请求ID: {actionErrorRequestId}</Typography.Text> : null}
+      <ActionAlerts
+        message={alerts.message}
+        requestId={alerts.requestId}
+        errorMessage={alerts.errorMessage}
+        errorRequestId={alerts.errorRequestId}
+      />
 
       <Card>
         <Space wrap>

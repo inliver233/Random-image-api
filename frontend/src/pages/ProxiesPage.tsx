@@ -3,8 +3,10 @@ import { Alert, Button, Card, Form, Input, InputNumber, Select, Skeleton, Space,
 import type { ColumnsType } from "antd/es/table";
 import React, { useEffect, useState } from "react";
 
-import { ApiError, apiJson } from "../api/client";
+import { ActionAlerts } from "../admin/ActionAlerts";
 import { requestIdDescription, requestIdFromError } from "../admin/errors";
+import { useActionAlerts } from "../admin/useActionAlerts";
+import { ApiError, apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ProxyEndpointItem = {
@@ -278,11 +280,7 @@ export function ProxiesPage() {
     easyForm.setFieldValue("attach_pool_id", firstId);
   }, [poolsQuery.data, easyForm]);
 
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [actionRequestId, setActionRequestId] = useState<string | null>(null);
-  const [actionWarningMessage, setActionWarningMessage] = useState<string | null>(null);
-  const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
-  const [actionErrorRequestId, setActionErrorRequestId] = useState<string | null>(null);
+  const alerts = useActionAlerts();
 
   const [cleanupRecomputeBindings, setCleanupRecomputeBindings] = useState<boolean>(true);
   const [cleanupDeleteOrphans, setCleanupDeleteOrphans] = useState<boolean>(true);
@@ -296,28 +294,14 @@ export function ProxiesPage() {
         body: JSON.stringify({ enabled: payload.enabled }),
       }),
     onMutate: () => {
-      setActionMessage(null);
-      setActionRequestId(null);
-      setActionWarningMessage(null);
-      setActionErrorMessage(null);
-      setActionErrorRequestId(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
-      setActionMessage(`代理节点已${data.enabled ? "启用" : "禁用"}：${data.endpoint_id}`);
-      setActionRequestId(data.request_id);
+      alerts.setSuccess(`代理节点已${data.enabled ? "启用" : "禁用"}：${data.endpoint_id}`, data.request_id);
       queryClient.invalidateQueries({ queryKey: ["admin", "proxies", "endpoints"] });
     },
     onError: (err) => {
-      if (err instanceof ApiError) {
-        setActionErrorMessage(err.message);
-        setActionErrorRequestId(requestIdFromError(err));
-        return;
-      }
-      if (err instanceof Error) {
-        setActionErrorMessage(err.message);
-        return;
-      }
-      setActionErrorMessage("代理节点更新失败");
+      alerts.setError(err, "代理节点更新失败");
     },
   });
 
@@ -331,28 +315,14 @@ export function ProxiesPage() {
         },
       ),
     onMutate: () => {
-      setActionMessage(null);
-      setActionRequestId(null);
-      setActionWarningMessage(null);
-      setActionErrorMessage(null);
-      setActionErrorRequestId(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
-      setActionMessage(`代理节点已重置失败并解除拉黑：${data.endpoint_id}`);
-      setActionRequestId(data.request_id);
+      alerts.setSuccess(`代理节点已重置失败并解除拉黑：${data.endpoint_id}`, data.request_id);
       queryClient.invalidateQueries({ queryKey: ["admin", "proxies", "endpoints"] });
     },
     onError: (err) => {
-      if (err instanceof ApiError) {
-        setActionErrorMessage(err.message);
-        setActionErrorRequestId(requestIdFromError(err));
-        return;
-      }
-      if (err instanceof Error) {
-        setActionErrorMessage(err.message);
-        return;
-      }
-      setActionErrorMessage("重置失败/解除拉黑失败");
+      alerts.setError(err, "重置失败/解除拉黑失败");
     },
   });
 
@@ -368,11 +338,7 @@ export function ProxiesPage() {
         }),
       }),
     onMutate: () => {
-      setActionMessage(null);
-      setActionRequestId(null);
-      setActionWarningMessage(null);
-      setActionErrorMessage(null);
-      setActionErrorRequestId(null);
+      alerts.clear();
     },
     onSuccess: (data) => {
       const parts = [
@@ -382,25 +348,15 @@ export function ProxiesPage() {
         typeof data.overrides_cleared === "number" ? `清理覆盖绑定: ${data.overrides_cleared}` : null,
         typeof data.deleted === "number" ? `删除: ${data.deleted}` : null,
       ].filter(Boolean);
-      setActionMessage(`清理完成（${parts.join("，")}）`);
-      setActionRequestId(data.request_id);
+      alerts.setSuccess(`清理完成（${parts.join("，")}）`, data.request_id);
       if (Array.isArray(data.warnings) && data.warnings.length) {
-        setActionWarningMessage(data.warnings.slice(0, 10).join("；"));
+        alerts.setWarning(data.warnings.slice(0, 10).join("；"));
       }
       queryClient.invalidateQueries({ queryKey: ["admin", "proxies", "endpoints"] });
       queryClient.invalidateQueries({ queryKey: ["admin", "bindings"] });
     },
     onError: (err) => {
-      if (err instanceof ApiError) {
-        setActionErrorMessage(err.message);
-        setActionErrorRequestId(requestIdFromError(err));
-        return;
-      }
-      if (err instanceof Error) {
-        setActionErrorMessage(err.message);
-        return;
-      }
-      setActionErrorMessage("清理失败");
+      alerts.setError(err, "清理失败");
     },
   });
 
@@ -522,11 +478,13 @@ export function ProxiesPage() {
         代理管理
       </Typography.Title>
 
-      {actionMessage ? <Alert type="success" showIcon message={actionMessage} /> : null}
-      {actionRequestId ? <Typography.Text type="secondary">请求ID: {actionRequestId}</Typography.Text> : null}
-      {actionWarningMessage ? <Alert type="warning" showIcon message={actionWarningMessage} /> : null}
-      {actionErrorMessage ? <Alert type="error" showIcon message={actionErrorMessage} /> : null}
-      {actionErrorRequestId ? <Typography.Text type="secondary">请求ID: {actionErrorRequestId}</Typography.Text> : null}
+      <ActionAlerts
+        message={alerts.message}
+        requestId={alerts.requestId}
+        warningMessage={alerts.warningMessage}
+        errorMessage={alerts.errorMessage}
+        errorRequestId={alerts.errorRequestId}
+      />
 
       <Card title="维护操作">
         <Space wrap>
