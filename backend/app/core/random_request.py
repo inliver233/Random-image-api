@@ -211,6 +211,15 @@ def force_local_from_query(query_params: Any) -> bool:
     return str(query_params.get("local") or "").strip().lower() in {"1", "true", "yes"}
 
 
+def parse_public_debug_flag(query_params: Any) -> bool:
+    """True when client requests debug payload on public JSON (?debug=1). Default off."""
+    raw = query_params.get("debug") if query_params is not None else None
+    try:
+        return int(raw or 0) == 1
+    except Exception:
+        return str(raw or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def prefer_image_edge(
     *,
     proxy_override: str | None,

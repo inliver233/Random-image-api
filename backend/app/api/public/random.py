@@ -5,8 +5,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Query, Request
 
 from app.core.errors import ApiError
-from app.core.image_edge import resolve_image_edge_redirect_url, resolve_public_proxy_url
-from app.core.imgproxy import build_signed_processing_url, load_imgproxy_config_from_settings
+from app.core.image_edge import resolve_image_edge_redirect_url
 from app.core.metrics import observe_image_delivery
 from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.random_delivery import (
@@ -16,14 +15,15 @@ from app.core.random_delivery import (
     schedule_edge_side_effects,
 )
 from app.core.random_pick_context import build_random_pick_context
-from app.core.random_query import build_no_match_error
+from app.core.random_query import no_match_error_from_filters
 from app.core.random_request import (
     build_local_i_redirect_response,
     force_local_from_query,
+    parse_public_debug_flag,
     parse_random_filters,
     prefer_image_edge,
 )
-from app.core.random_response import build_json_body, build_simple_json_body
+from app.core.random_response import build_json_body, build_simple_json_body, resolve_public_item_urls
 from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.db.tags_get import get_tag_names_for_image
@@ -94,51 +94,8 @@ async def random_image(
     )
     format = filters.format
     redirect = filters.redirect
-    ai_type_raw = filters.ai_type_raw
-    ai_type_i = filters.ai_type_i
-    illust_type_raw = filters.illust_type_raw
-    illust_type_i = filters.illust_type_i
-    r18 = filters.r18
-    adaptive = filters.adaptive
     pixiv_cat = filters.pixiv_cat
     pximg_mirror_host_override = filters.pximg_mirror_host_override
-    layout_norm = filters.layout_norm
-    min_width_i = filters.min_width_i
-    min_height_i = filters.min_height_i
-    min_pixels_i = filters.min_pixels_i
-    min_bookmarks_i = filters.min_bookmarks_i
-    min_views_i = filters.min_views_i
-    min_comments_i = filters.min_comments_i
-    included = filters.included
-    excluded = filters.excluded
-    user_id = filters.user_id
-    illust_id = filters.illust_id
-    created_from_norm = filters.created_from_norm
-    created_to_norm = filters.created_to_norm
-
-    def _no_match_error() -> ApiError:
-        return build_no_match_error(
-            r18=r18,
-            r18_strict=int(r18_strict) if r18_strict is not None else 1,
-            ai_type_raw=ai_type_raw,
-            illust_type_raw=illust_type_raw,
-            adaptive=int(adaptive),
-            layout_norm=layout_norm,
-            min_width_i=int(min_width_i),
-            min_height_i=int(min_height_i),
-            min_pixels_i=int(min_pixels_i),
-            min_bookmarks_i=int(min_bookmarks_i),
-            min_views_i=int(min_views_i),
-            min_comments_i=int(min_comments_i),
-            included=included,
-            excluded=excluded,
-            user_id=user_id,
-            illust_id=illust_id,
-            created_from_norm=created_from_norm,
-            created_to_norm=created_to_norm,
-            ai_type_i=ai_type_i,
-            illust_type_i=illust_type_i,
-        )
 
     engine = request.app.state.engine
     Session = create_sessionmaker(engine)
@@ -173,6 +130,9 @@ async def random_image(
     )
     # Keep no-match filter summary in sync with resolved default when query omits r18_strict.
     r18_strict = int(pick_ctx.r18_strict)
+
+    def _no_match_error() -> ApiError:
+        return no_match_error_from_filters(filters, r18_strict=int(r18_strict))
 
     async def _pick_with_strategy(
         *,
@@ -249,63 +209,35 @@ async def random_image(
                 )
             return attach_background(resp, background_tasks)
 
-        origin_url = None if runtime.hide_origin_url_in_public_json else image.original_url
-
-        imgproxy_url = None
-        try:
-            cfg = load_imgproxy_config_from_settings(request.app.state.settings)
-        except Exception:
-            cfg = None
-        if cfg is not None:
-            try:
-                if runtime.hide_origin_url_in_public_json:
-                    base = str(getattr(request, "base_url", "") or "").rstrip("/")
-                    source_url = f"{base}/i/{image.id}.{image.ext}"
-                else:
-                    source_url = str(image.original_url)
-                imgproxy_url = build_signed_processing_url(cfg, source_url=source_url, extension=str(image.ext))
-            except Exception:
-                imgproxy_url = None
-
-        request_id = getattr(getattr(request, "state", None), "request_id", None) or "req_unknown"
-        local_proxy_path = f"/i/{image.id}.{image.ext}"
-        proxy_url = resolve_public_proxy_url(
+        urls = resolve_public_item_urls(
+            image=image,
             settings=request.app.state.settings,
-            original_url=str(image.original_url),
-            local_proxy_path=local_proxy_path,
+            hide_origin=bool(runtime.hide_origin_url_in_public_json),
+            request_base_url=str(getattr(request, "base_url", "") or ""),
         )
+        request_id = getattr(getattr(request, "state", None), "request_id", None) or "req_unknown"
         # Public JSON omits debug unless ?debug=1 (keeps payloads small for browsers).
-        include_debug = False
-        try:
-            include_debug = int(request.query_params.get("debug") or 0) == 1
-        except Exception:
-            include_debug = str(request.query_params.get("debug") or "").strip().lower() in {
-                "1",
-                "true",
-                "yes",
-                "on",
-            }
-        debug_out = debug if include_debug else None
+        debug_out = debug if parse_public_debug_flag(request.query_params) else None
         if format == "simple_json":
             return build_simple_json_body(
                 request_id=request_id,
                 image=image,
-                proxy_url=proxy_url,
-                origin_url=origin_url,
-                imgproxy_url=imgproxy_url,
+                proxy_url=urls.proxy_url,
+                origin_url=urls.origin_url,
+                imgproxy_url=urls.imgproxy_url,
                 debug=debug_out,
-                local_url=local_proxy_path,
+                local_url=urls.local_url,
             )
 
         return build_json_body(
             request_id=request_id,
             image=image,
             tags=tags,
-            proxy_url=proxy_url,
-            origin_url=origin_url,
-            imgproxy_url=imgproxy_url,
+            proxy_url=urls.proxy_url,
+            origin_url=urls.origin_url,
+            imgproxy_url=urls.imgproxy_url,
             debug=debug_out,
-            local_url=local_proxy_path,
+            local_url=urls.local_url,
         )
 
     # When edge is enabled and client did not force local mirror/proxy, hand bytes off to CF.

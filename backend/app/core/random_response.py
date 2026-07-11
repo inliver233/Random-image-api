@@ -1,8 +1,74 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
+from app.core.image_edge import resolve_public_proxy_url
+from app.core.imgproxy import build_signed_processing_url, load_imgproxy_config_from_settings
 from app.core.public_json import serialize_public_image_core
+
+
+@dataclass(frozen=True, slots=True)
+class PublicItemUrls:
+    """Resolved public delivery URLs for one image (JSON/simple_json/feed item)."""
+
+    proxy_url: str
+    origin_url: str | None
+    imgproxy_url: str | None
+    local_url: str
+
+
+def resolve_public_item_urls(
+    *,
+    image: Any,
+    settings: Any,
+    hide_origin: bool,
+    request_base_url: str = "",
+    imgproxy_cfg: Any | None = None,
+) -> PublicItemUrls:
+    """Shared proxy/origin/imgproxy/local assembly for /random JSON and /feed items.
+
+    - ``proxy`` prefers signed CF edge when configured, else local ``/i/{id}.{ext}``.
+    - ``origin`` is omitted when runtime hides origin URLs.
+    - ``imgproxy`` signs either origin or absolute local path depending on hide_origin.
+    """
+    local_url = f"/i/{image.id}.{image.ext}"
+    origin_url = None if hide_origin else image.original_url
+    proxy_url = resolve_public_proxy_url(
+        settings=settings,
+        original_url=str(image.original_url),
+        local_proxy_path=local_url,
+    )
+
+    cfg = imgproxy_cfg
+    if cfg is None:
+        try:
+            cfg = load_imgproxy_config_from_settings(settings)
+        except Exception:
+            cfg = None
+
+    imgproxy_url: str | None = None
+    if cfg is not None:
+        try:
+            if hide_origin:
+                base = str(request_base_url or "").rstrip("/")
+                source_url = f"{base}{local_url}" if base else local_url
+            else:
+                source_url = str(image.original_url)
+            imgproxy_url = build_signed_processing_url(
+                cfg,
+                source_url=source_url,
+                extension=str(image.ext),
+            )
+        except Exception:
+            imgproxy_url = None
+
+    return PublicItemUrls(
+        proxy_url=proxy_url,
+        origin_url=origin_url,
+        imgproxy_url=imgproxy_url,
+        local_url=local_url,
+    )
 
 
 def build_public_urls_block(

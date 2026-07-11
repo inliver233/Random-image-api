@@ -116,6 +116,32 @@ def require_optional_positive_ids(
     return (int(user_id) if user_id is not None else None, int(illust_id) if illust_id is not None else None)
 
 
+def no_match_error_from_filters(filters: Any, *, r18_strict: int) -> ApiError:
+    """Build NO_MATCH from ParsedRandomFilters (shared by /random and /feed)."""
+    return build_no_match_error(
+        r18=int(filters.r18),
+        r18_strict=int(r18_strict),
+        ai_type_raw=filters.ai_type_raw,
+        illust_type_raw=filters.illust_type_raw,
+        adaptive=int(filters.adaptive),
+        layout_norm=filters.layout_norm,
+        min_width_i=int(filters.min_width_i),
+        min_height_i=int(filters.min_height_i),
+        min_pixels_i=int(filters.min_pixels_i),
+        min_bookmarks_i=int(filters.min_bookmarks_i),
+        min_views_i=int(filters.min_views_i),
+        min_comments_i=int(filters.min_comments_i),
+        included=list(filters.included),
+        excluded=list(filters.excluded),
+        user_id=filters.user_id,
+        illust_id=filters.illust_id,
+        created_from_norm=filters.created_from_norm,
+        created_to_norm=filters.created_to_norm,
+        ai_type_i=filters.ai_type_i,
+        illust_type_i=filters.illust_type_i,
+    )
+
+
 def build_no_match_error(
     *,
     r18: int,
