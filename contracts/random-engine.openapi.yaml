@@ -90,6 +90,32 @@ paths:
       responses:
         "200":
           description: applied
+  /v1/admin/filter-count:
+    post:
+      operationId: filterCount
+      summary: Count images matching filters (dual-run cardinality; no sampling)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filters:
+                  $ref: "#/components/schemas/Filters"
+      responses:
+        "200":
+          description: filtered cardinality
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, filtered, index_size]
+                properties:
+                  ok: { type: boolean }
+                  filtered: { type: integer }
+                  index_size: { type: integer }
+                  revision: { type: string }
 components:
   schemas:
     PickRequest:
@@ -169,7 +195,8 @@ components:
         samples:
           type: integer
           minimum: 1
-          maximum: 1000
+          maximum: 64
+          description: "Hard cap 64 — aligns Python QUALITY_SAMPLES_MAX_QUERY/AUTO"
         pick_mode:
           type: string
         temperature:

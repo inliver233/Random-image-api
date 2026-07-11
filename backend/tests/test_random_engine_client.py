@@ -6,7 +6,7 @@ from app.core.random_engine_client import (
     random_engine_traffic_percent,
     should_route_pick_to_engine,
 )
-from app.core.random_engine_pick import build_engine_pick_payload
+from app.core.random_engine_pick import build_engine_filters, build_engine_pick_payload
 from app.core.r2_prewarm import r2_prewarm_enabled
 
 
@@ -106,3 +106,27 @@ def test_build_engine_pick_payload_batch_limit() -> None:
     assert body["limit"] == 12
     assert "quality" not in body
     assert "seed" not in body
+
+
+def test_build_engine_filters_safe_defaults() -> None:
+    f = build_engine_filters(
+        r18=0,
+        r18_strict=1,
+        ai_type_raw="any",
+        ai_type_i=None,
+        illust_type_i=None,
+        orientation_code=None,
+        min_width_i=0,
+        min_height_i=0,
+        min_pixels_i=0,
+        min_bookmarks_i=0,
+        min_views_i=0,
+        min_comments_i=0,
+        included=[],
+        excluded=[],
+    )
+    assert f["r18"] == 0
+    assert f["r18_strict"] == 1
+    assert f["ai_type"] == "any"
+    assert f["orientation"] == "any"
+    assert f["exclude_image_ids"] == []

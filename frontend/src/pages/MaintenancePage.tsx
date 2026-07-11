@@ -42,11 +42,24 @@ type RandomEngineSnapshotResponse = {
   request_id: string;
 };
 
+type RandomEngineCompareResponse = {
+  ok: true;
+  match: boolean;
+  python_filtered: number;
+  engine_filtered: number;
+  delta: number;
+  engine_index_size: number;
+  engine_revision: string;
+  r18_strict: number;
+  request_id: string;
+};
+
 export function MaintenancePage() {
   const [form] = Form.useForm<CleanupFormValues>();
   const alerts = useActionAlerts();
   const engineAlerts = useActionAlerts();
   const queryClient = useQueryClient();
+  const [compareResult, setCompareResult] = React.useState<RandomEngineCompareResponse | null>(null);
 
   const engineStatus = useQuery({
     queryKey: ["admin", "maintenance", "random-engine"],
@@ -92,6 +105,28 @@ export function MaintenancePage() {
     onSuccess: (data) => {
       engineAlerts.setSuccess(`快照已推送 revision=${data.revision}`, data.request_id);
       void queryClient.invalidateQueries({ queryKey: ["admin", "maintenance", "random-engine"] });
+    },
+    onError: (err) => {
+      engineAlerts.setError(err);
+    },
+  });
+
+  const compareFilters = useMutation({
+    mutationFn: () =>
+      apiJson<RandomEngineCompareResponse>("/admin/api/maintenance/random-engine/compare-filters", {
+        method: "POST",
+        body: JSON.stringify({ r18: 0 }),
+      }),
+    onMutate: () => {
+      engineAlerts.clear();
+      setCompareResult(null);
+    },
+    onSuccess: (data) => {
+      setCompareResult(data);
+      const msg = data.match
+        ? `过滤基数一致 python=${data.python_filtered} engine=${data.engine_filtered}`
+        : `过滤基数不一致 delta=${data.delta}（python=${data.python_filtered} engine=${data.engine_filtered}）`;
+      engineAlerts.setSuccess(msg, data.request_id);
     },
     onError: (err) => {
       engineAlerts.setError(err);
@@ -150,7 +185,23 @@ export function MaintenancePage() {
           <Button type="primary" onClick={() => pushSnapshot.mutate()} loading={pushSnapshot.isPending}>
             推送全量快照
           </Button>
+          <Button onClick={() => compareFilters.mutate()} loading={compareFilters.isPending}>
+            对比过滤基数（默认 r18=0）
+          </Button>
         </Space>
+
+        {compareResult ? (
+          <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginTop: 16 }}>
+            <Descriptions.Item label="match">
+              {compareResult.match ? <Tag color="green">一致</Tag> : <Tag color="red">不一致</Tag>}
+            </Descriptions.Item>
+            <Descriptions.Item label="Python filtered">{compareResult.python_filtered}</Descriptions.Item>
+            <Descriptions.Item label="Engine filtered">{compareResult.engine_filtered}</Descriptions.Item>
+            <Descriptions.Item label="delta">{compareResult.delta}</Descriptions.Item>
+            <Descriptions.Item label="Engine index">{compareResult.engine_index_size}</Descriptions.Item>
+            <Descriptions.Item label="r18_strict">{compareResult.r18_strict}</Descriptions.Item>
+          </Descriptions>
+        ) : null}
 
         <div style={{ marginTop: 16 }}>
           <ActionAlerts

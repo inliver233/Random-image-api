@@ -133,6 +133,9 @@ func main() {
 	mux.HandleFunc("/v1/admin/events", func(w http.ResponseWriter, r *http.Request) {
 		handleEvents(w, r, st)
 	})
+	mux.HandleFunc("/v1/admin/filter-count", func(w http.ResponseWriter, r *http.Request) {
+		handleFilterCount(w, r, st)
+	})
 
 	log.Printf("random-engine listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
@@ -345,6 +348,30 @@ func handleEvents(w http.ResponseWriter, r *http.Request, st *engineState) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applied": applied, "index_size": len(imgs), "revision": st.revision})
 }
 
+func handleFilterCount(w http.ResponseWriter, r *http.Request, st *engineState) {
+	// Dual-run ops: cardinality of filtered index without sampling noise.
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Filters map[string]any `json:"filters"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	st.mu.RLock()
+	defer st.mu.RUnlock()
+	filtered := filterImages(st, body.Filters)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"filtered":   len(filtered),
+		"index_size": len(st.byKey),
+		"revision":   st.revision,
+	})
+}
+
 func handlePick(w http.ResponseWriter, r *http.Request, st *engineState) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -399,8 +426,9 @@ func handlePick(w http.ResponseWriter, r *http.Request, st *engineState) {
 		if samples < 1 {
 			samples = 1
 		}
-		if samples > 1000 {
-			samples = 1000
+		// Align Python QUALITY_SAMPLES_MAX_QUERY/AUTO (=64).
+		if samples > 64 {
+			samples = 64
 		}
 		if samples > len(candidates) {
 			samples = len(candidates)

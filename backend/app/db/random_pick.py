@@ -259,6 +259,61 @@ def _build_pick_filter_clauses(
     return clauses
 
 
+async def count_pick_candidates(
+    session: AsyncSession,
+    *,
+    r18: int = 0,
+    r18_strict: bool = True,
+    orientation: int | None = None,
+    ai_type: int | None = None,
+    illust_type: int | None = None,
+    ai_type_allowed: set[int | None] | None = None,
+    illust_type_allowed: set[int | None] | None = None,
+    min_width: int = 0,
+    min_height: int = 0,
+    min_pixels: int = 0,
+    min_bookmarks: int = 0,
+    min_views: int = 0,
+    min_comments: int = 0,
+    included_tags: Sequence[str] | None = None,
+    excluded_tags: Sequence[str] | None = None,
+    user_id: int | None = None,
+    illust_id: int | None = None,
+    created_from: str | None = None,
+    created_to: str | None = None,
+    exclude_image_ids: Sequence[int] | None = None,
+    fail_cooldown_before: str | None = None,
+) -> int:
+    """Count rows matching the same filter clauses as pick_random_* (dual-run ops)."""
+    clauses = _build_pick_filter_clauses(
+        r18=r18,
+        r18_strict=r18_strict,
+        orientation=orientation,
+        ai_type=ai_type,
+        illust_type=illust_type,
+        ai_type_allowed=ai_type_allowed,
+        illust_type_allowed=illust_type_allowed,
+        min_width=min_width,
+        min_height=min_height,
+        min_pixels=min_pixels,
+        min_bookmarks=min_bookmarks,
+        min_views=min_views,
+        min_comments=min_comments,
+        included_tags=included_tags,
+        excluded_tags=excluded_tags,
+        user_id=user_id,
+        illust_id=illust_id,
+        created_from=created_from,
+        created_to=created_to,
+        exclude_image_ids=exclude_image_ids,
+        fail_cooldown_before=fail_cooldown_before,
+    )
+    if clauses is None:
+        return 0
+    stmt = select(func.count()).select_from(Image).where(*clauses)
+    return int((await session.execute(stmt)).scalar_one() or 0)
+
+
 async def pick_random_image(
     session: AsyncSession,
     *,

@@ -87,6 +87,34 @@ async def engine_pick(
         return None
 
 
+async def engine_filter_count(
+    client: httpx.AsyncClient,
+    base_url: str,
+    *,
+    filters: dict[str, Any],
+    timeout_s: float = 2.0,
+) -> dict[str, Any] | None:
+    """POST /v1/admin/filter-count — dual-run cardinality check (no sampling)."""
+    try:
+        resp = await client.post(
+            f"{base_url}/v1/admin/filter-count",
+            json={"filters": filters or {}},
+            timeout=timeout_s,
+        )
+        if resp.status_code != 200:
+            logger.debug(
+                "random-engine filter-count status=%s body=%s",
+                resp.status_code,
+                (resp.text or "")[:200],
+            )
+            return None
+        data = resp.json()
+        return data if isinstance(data, dict) else None
+    except Exception as exc:
+        logger.debug("random-engine filter-count failed: %s", exc)
+        return None
+
+
 async def engine_apply_snapshot(
     client: httpx.AsyncClient,
     base_url: str,

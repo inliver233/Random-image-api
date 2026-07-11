@@ -9,9 +9,14 @@ from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
 from app.core.admin_json import admin_ok
 from app.core.admin_request import load_json_object_optional, load_json_object, parse_bool, parse_int_in_range
-from app.core.random_engine_client import engine_health, random_engine_base_url
+from app.core.random_defaults import resolve_fail_cooldown_ms, resolve_r18_strict
+from app.core.random_engine_client import engine_filter_count, engine_health, random_engine_base_url
+from app.core.random_engine_pick import build_engine_filters
 from app.core.random_engine_sync import push_engine_snapshot
+from app.core.random_request import parse_random_filters
 from app.core.request_id import get_or_create_request_id
+from app.core.runtime_config_cache import resolve_runtime_for_request
+from app.db.random_pick import count_pick_candidates
 from app.db.request_logs_cleanup import (
     DEFAULT_REQUEST_LOGS_CHUNK_SIZE,
     DEFAULT_REQUEST_LOGS_KEEP_DAYS,
@@ -19,6 +24,7 @@ from app.db.request_logs_cleanup import (
     cleanup_request_logs,
     preview_request_logs_cleanup,
 )
+from app.db.session import create_sessionmaker
 
 router = APIRouter()
 
@@ -171,4 +177,183 @@ async def random_engine_push_snapshot(
         )
     return admin_ok(request, payload={"revision": revision,
         "engine": result}, request_id=rid)
+
+
+def _coerce_filter_int(raw: Any, *, default: int = 0) -> int:
+    try:
+        return int(raw)
+    except Exception:
+        return int(default)
+
+
+def _coerce_tag_list(raw: Any) -> list[str] | None:
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        s = raw.strip()
+        return [s] if s else None
+    if isinstance(raw, list):
+        out: list[str] = []
+        for item in raw:
+            s = str(item or "").strip()
+            if s:
+                out.append(s)
+        return out or None
+    return None
+
+
+@router.post("/maintenance/random-engine/compare-filters")
+async def random_engine_compare_filters(
+    request: Request,
+    _claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    """Statistical dual-run check: SQLite filter cardinality vs Go engine index.
+
+    Does not compare sampled pick ids (non-deterministic). Optional body fields
+    mirror public /random query params (r18, tags, mins, …). Defaults = safe r18=0.
+    """
+    _ = _claims
+    rid = get_or_create_request_id(request)
+    settings = getattr(request.app.state, "settings", None)
+    base = random_engine_base_url(settings) if settings is not None else None
+    if not base:
+        raise ApiError(
+            code=ErrorCode.BAD_REQUEST,
+            message="RANDOM_ENGINE_URL not configured",
+            status_code=400,
+        )
+    client = getattr(request.app.state, "httpx_client", None)
+    if client is None:
+        raise ApiError(code=ErrorCode.INTERNAL_ERROR, message="HTTP client unavailable", status_code=500)
+
+    body = await load_json_object_optional(request)
+    # Accept either nested filters or flat public-style fields.
+    flat = body.get("filters") if isinstance(body.get("filters"), dict) else body
+    if not isinstance(flat, dict):
+        flat = {}
+
+    def _opt_str(key: str) -> str | None:
+        v = flat.get(key)
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s or None
+
+    filters = parse_random_filters(
+        format="json",
+        redirect=0,
+        seed=None,
+        r18=_coerce_filter_int(flat.get("r18"), default=0),
+        ai_type=str(flat.get("ai_type") or "any"),
+        illust_type=str(flat.get("illust_type") or "any"),
+        orientation=str(flat.get("orientation") or "any"),
+        layout=flat.get("layout"),
+        adaptive=0,
+        pixiv_cat=0,
+        pximg_mirror_host=None,
+        min_width=_coerce_filter_int(flat.get("min_width"), default=0),
+        min_height=_coerce_filter_int(flat.get("min_height"), default=0),
+        min_pixels=_coerce_filter_int(flat.get("min_pixels"), default=0),
+        min_bookmarks=_coerce_filter_int(flat.get("min_bookmarks"), default=0),
+        min_views=_coerce_filter_int(flat.get("min_views"), default=0),
+        min_comments=_coerce_filter_int(flat.get("min_comments"), default=0),
+        included_tags=_coerce_tag_list(flat.get("included_tags")),
+        excluded_tags=_coerce_tag_list(flat.get("excluded_tags")),
+        user_id=flat.get("user_id"),
+        illust_id=flat.get("illust_id"),
+        created_from=_opt_str("created_from"),
+        created_to=_opt_str("created_to"),
+        query_params={},
+        headers={},
+    )
+
+    runtime = await resolve_runtime_for_request(request, request.app.state.engine)
+    random_defaults = runtime.random_defaults if isinstance(runtime.random_defaults, dict) else {}
+    r18_strict_resolved = resolve_r18_strict(None, random_defaults)
+    r18_strict = int(r18_strict_resolved.value)
+    _, _, fail_cooldown_before = resolve_fail_cooldown_ms(random_defaults)
+    orientation_code = filters.orientation_map[filters.layout_norm]
+
+    engine_filters = build_engine_filters(
+        r18=int(filters.r18),
+        r18_strict=int(r18_strict),
+        ai_type_raw=filters.ai_type_raw,
+        ai_type_i=filters.ai_type_i,
+        illust_type_i=filters.illust_type_i,
+        orientation_code=orientation_code,
+        min_width_i=int(filters.min_width_i),
+        min_height_i=int(filters.min_height_i),
+        min_pixels_i=int(filters.min_pixels_i),
+        min_bookmarks_i=int(filters.min_bookmarks_i),
+        min_views_i=int(filters.min_views_i),
+        min_comments_i=int(filters.min_comments_i),
+        included=filters.included,
+        excluded=filters.excluded,
+        exclude_image_ids=[],
+        user_id=filters.user_id,
+        illust_id=filters.illust_id,
+        created_from_norm=filters.created_from_norm,
+        created_to_norm=filters.created_to_norm,
+        fail_cooldown_before=fail_cooldown_before,
+    )
+
+    Session = create_sessionmaker(request.app.state.engine)
+    async with Session() as session:
+        python_count = await count_pick_candidates(
+            session,
+            r18=int(filters.r18),
+            r18_strict=bool(r18_strict),
+            orientation=orientation_code,
+            ai_type=filters.ai_type_i,
+            illust_type=filters.illust_type_i,
+            min_width=int(filters.min_width_i),
+            min_height=int(filters.min_height_i),
+            min_pixels=int(filters.min_pixels_i),
+            min_bookmarks=int(filters.min_bookmarks_i),
+            min_views=int(filters.min_views_i),
+            min_comments=int(filters.min_comments_i),
+            included_tags=filters.included,
+            excluded_tags=filters.excluded,
+            user_id=filters.user_id,
+            illust_id=filters.illust_id,
+            created_from=filters.created_from_norm,
+            created_to=filters.created_to_norm,
+            exclude_image_ids=None,
+            fail_cooldown_before=fail_cooldown_before,
+        )
+
+    engine_result = await engine_filter_count(client, base, filters=engine_filters, timeout_s=5.0)
+    if engine_result is None:
+        raise ApiError(
+            code=ErrorCode.UPSTREAM_STREAM_ERROR,
+            message="random-engine filter-count failed",
+            status_code=502,
+        )
+    try:
+        engine_count = int(engine_result.get("filtered") or 0)
+    except Exception:
+        engine_count = 0
+    try:
+        engine_index = int(engine_result.get("index_size") or 0)
+    except Exception:
+        engine_index = 0
+    revision = str(engine_result.get("revision") or "")
+
+    delta = int(python_count) - int(engine_count)
+    match = delta == 0
+    return admin_ok(
+        request,
+        payload={
+            "match": match,
+            "python_filtered": int(python_count),
+            "engine_filtered": int(engine_count),
+            "delta": int(delta),
+            "engine_index_size": engine_index,
+            "engine_revision": revision,
+            "filters": engine_filters,
+            "r18_strict": int(r18_strict),
+            "fail_cooldown_before": fail_cooldown_before,
+        },
+        request_id=rid,
+    )
 

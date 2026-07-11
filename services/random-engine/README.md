@@ -44,8 +44,13 @@ Optional cutover — default **off** (Python SQLite pick remains primary):
 
 Admin:
 
-- `GET /admin/api/maintenance/random-engine` — health
+- `GET /admin/api/maintenance/random-engine` — health + traffic_percent / timeout_ms
 - `POST /admin/api/maintenance/random-engine/snapshot` — push full enabled index from SQLite
+- `POST /admin/api/maintenance/random-engine/compare-filters` — SQLite vs engine filter cardinality (statistical dual-run; body optional public-style filters, default r18=0)
+
+Engine-internal (ops / BFF):
+
+- `POST /v1/admin/filter-count` — `{ "filters": {…} }` → `{ filtered, index_size, revision }`
 
 After starting the engine, push a snapshot before enabling the flag, or picks will fall through to Python.
 
@@ -67,11 +72,12 @@ Failures are logged and never fail the job/API. Python pick remains correct with
 
 1. In-memory index sorted by `random_key` (ring sample)
 2. Filters aligned with Python `random_pick` (r18, tags, geometry, popularity, fail cooldown, …)
-3. `strategy=random` and `strategy=quality` (weighted / best)
+3. `strategy=random` and `strategy=quality` (weighted / best; samples hard-capped at 64)
 4. `POST /v1/admin/snapshot` full replace
 5. `POST /v1/admin/events` incremental rebuild
-6. BFF feature flag + admin snapshot push
-7. Auto catalog event publish from hydrate/import/heal/admin delete
+6. `POST /v1/admin/filter-count` dual-run cardinality
+7. BFF feature flag + traffic % cutover + admin snapshot / compare-filters
+8. Auto catalog event publish from hydrate/import/heal/admin delete
 
 ## Non-goals (this service)
 
