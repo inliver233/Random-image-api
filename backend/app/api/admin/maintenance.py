@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from app.api.admin.deps import get_admin_claims
 from app.core.errors import ApiError, ErrorCode
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object, parse_bool
+from app.core.admin_request import load_json_object, parse_bool, parse_int_in_range
 from app.core.random_engine_client import engine_health, random_engine_base_url
 from app.core.random_engine_sync import push_engine_snapshot
 from app.core.request_id import get_or_create_request_id
@@ -27,30 +27,24 @@ router = APIRouter()
 async def _load_cleanup_request_logs_json(request: Request) -> dict[str, Any]:
     data = await load_json_object(request)
 
-    keep_days_raw = data.get("keep_days", DEFAULT_REQUEST_LOGS_KEEP_DAYS)
-    try:
-        keep_days = int(keep_days_raw)
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported keep_days", status_code=400) from exc
-    if keep_days < 0 or keep_days > 36500:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported keep_days", status_code=400)
-
-    max_delete_rows_raw = data.get("max_delete_rows", DEFAULT_REQUEST_LOGS_MAX_DELETE_ROWS)
-    try:
-        max_delete_rows = int(max_delete_rows_raw)
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported max_delete_rows", status_code=400) from exc
-    if max_delete_rows < 1 or max_delete_rows > 10_000_000:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported max_delete_rows", status_code=400)
-
-    chunk_size_raw = data.get("chunk_size", DEFAULT_REQUEST_LOGS_CHUNK_SIZE)
-    try:
-        chunk_size = int(chunk_size_raw)
-    except Exception as exc:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported chunk_size", status_code=400) from exc
-    if chunk_size < 1 or chunk_size > 100_000:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported chunk_size", status_code=400)
-
+    keep_days = parse_int_in_range(
+        data.get("keep_days", DEFAULT_REQUEST_LOGS_KEEP_DAYS),
+        field="keep_days",
+        min_value=0,
+        max_value=36500,
+    )
+    max_delete_rows = parse_int_in_range(
+        data.get("max_delete_rows", DEFAULT_REQUEST_LOGS_MAX_DELETE_ROWS),
+        field="max_delete_rows",
+        min_value=1,
+        max_value=10_000_000,
+    )
+    chunk_size = parse_int_in_range(
+        data.get("chunk_size", DEFAULT_REQUEST_LOGS_CHUNK_SIZE),
+        field="chunk_size",
+        min_value=1,
+        max_value=100_000,
+    )
     dry_run = parse_bool(data.get("dry_run"), default=False)
 
     return {

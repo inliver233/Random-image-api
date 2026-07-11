@@ -21,6 +21,7 @@ import { useNavigate } from "react-router-dom";
 
 import { requestIdDescription, requestIdWithMessageDescription } from "../admin/errors";
 import { jobStatusColor, jobStatusLabel } from "../admin/jobStatus";
+import { missingLabel } from "../admin/missingFields";
 import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
@@ -120,18 +121,6 @@ const MISSING_OPTIONS = [
   { label: "热度（收藏/浏览/评论）", value: "popularity" },
 ];
 
-const MISSING_LABELS: Record<string, string> = {
-  tags: "标签",
-  geometry: "尺寸与方向",
-  r18: "R18 信息",
-  ai: "AI 信息",
-  illust_type: "作品类型",
-  user: "作者信息",
-  title: "标题",
-  created_at: "发布时间",
-  popularity: "热度（收藏/浏览/评论）",
-};
-
 function typeLabel(type: string): string {
   if (type === "backfill") return "全量补全";
   if (type === "manual") return "手动补全";
@@ -143,7 +132,7 @@ function missingSummary(criteria: Record<string, unknown>): string {
   if (Array.isArray(missing)) {
     const values = missing.map((v) => String(v || "").trim()).filter((v) => v.length > 0);
     if (values.length > 0) {
-      return values.map((v) => MISSING_LABELS[v] || v).join("、");
+      return values.map((v) => missingLabel(String(v), "long")).join("、");
     }
   }
   return "默认（全部缺失字段）";

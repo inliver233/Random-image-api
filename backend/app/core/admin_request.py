@@ -91,6 +91,27 @@ def parse_positive_int(
     return i
 
 
+def parse_int_in_range(
+    value: Any,
+    *,
+    field: str,
+    min_value: int | None = None,
+    max_value: int | None = None,
+    invalid_message: str | None = None,
+) -> int:
+    """Parse an int and enforce optional inclusive bounds (message stable for field)."""
+    invalid = invalid_message or f"Unsupported {field}"
+    try:
+        i = int(value)
+    except Exception as exc:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400) from exc
+    if min_value is not None and i < min_value:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+    if max_value is not None and i > max_value:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=invalid, status_code=400)
+    return i
+
+
 def parse_positive_int_list(
     raw: Any,
     *,

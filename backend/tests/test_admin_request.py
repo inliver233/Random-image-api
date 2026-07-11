@@ -5,6 +5,7 @@ import pytest
 from app.core.admin_request import (
     parse_bool,
     parse_bool_optional,
+    parse_int_in_range,
     parse_optional_str,
     parse_positive_int,
     parse_positive_int_list,
@@ -52,6 +53,17 @@ def test_parse_positive_int() -> None:
     with pytest.raises(ApiError) as ei_custom:
         parse_positive_int(-1, field="id", invalid_message="bad id")
     assert ei_custom.value.message == "bad id"
+
+
+def test_parse_int_in_range() -> None:
+    assert parse_int_in_range(0, field="keep_days", min_value=0, max_value=36500) == 0
+    assert parse_int_in_range("12", field="chunk_size", min_value=1, max_value=100) == 12
+    with pytest.raises(ApiError) as ei_low:
+        parse_int_in_range(-1, field="keep_days", min_value=0, max_value=10)
+    assert ei_low.value.message == "Unsupported keep_days"
+    with pytest.raises(ApiError) as ei_high:
+        parse_int_in_range(101, field="chunk_size", min_value=1, max_value=100)
+    assert ei_high.value.message == "Unsupported chunk_size"
 
 
 def test_parse_positive_int_list() -> None:

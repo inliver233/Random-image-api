@@ -4,9 +4,9 @@ import type { ColumnsType } from "antd/es/table";
 import React, { useEffect, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
-import { requestIdDescription, requestIdFromError } from "../admin/errors";
+import { requestIdDescription } from "../admin/errors";
 import { useActionAlerts } from "../admin/useActionAlerts";
-import { ApiError, apiJson } from "../api/client";
+import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ProxyEndpointItem = {
@@ -253,22 +253,19 @@ export function ProxiesPage() {
     queryFn: () => apiJson<ProxyPoolsListResponse>("/admin/api/proxy-pools"),
   });
 
-  const [manualErrorMessage, setManualErrorMessage] = useState<string | null>(null);
-  const [manualRequestId, setManualRequestId] = useState<string | null>(null);
   const [manualResult, setManualResult] = useState<ManualImportResponse | null>(null);
   const [manualForm] = Form.useForm<ManualImportFormValues>();
+  const manualAlerts = useActionAlerts();
 
-  const [probeErrorMessage, setProbeErrorMessage] = useState<string | null>(null);
-  const [probeRequestId, setProbeRequestId] = useState<string | null>(null);
   const [probeJobId, setProbeJobId] = useState<string | null>(null);
   const [probeUrl, setProbeUrl] = useState<string>("https://www.pixiv.net/robots.txt");
   const [probeTimeoutMs, setProbeTimeoutMs] = useState<number>(8000);
   const [probeConcurrency, setProbeConcurrency] = useState<number>(10);
+  const probeAlerts = useActionAlerts();
 
-  const [easyErrorMessage, setEasyErrorMessage] = useState<string | null>(null);
-  const [easyRequestId, setEasyRequestId] = useState<string | null>(null);
   const [easyResult, setEasyResult] = useState<EasyProxiesImportResponse | null>(null);
   const [easyForm] = Form.useForm<EasyProxiesImportFormValues>();
+  const easyAlerts = useActionAlerts();
 
   useEffect(() => {
     const enabledPools = (poolsQuery.data?.items || []).filter((p) => Boolean(p.enabled));
@@ -367,27 +364,17 @@ export function ProxiesPage() {
         body: JSON.stringify(values),
       }),
     onMutate: () => {
-      setManualErrorMessage(null);
-      setManualRequestId(null);
+      manualAlerts.clear();
       setManualResult(null);
     },
     onSuccess: (data) => {
       setManualResult(data);
-      setManualRequestId(data.request_id);
+      manualAlerts.setSuccess("手动导入完成", data.request_id);
       manualForm.setFieldValue("text", "");
       queryClient.invalidateQueries({ queryKey: ["admin", "proxies", "endpoints"] });
     },
     onError: (err) => {
-      if (err instanceof ApiError) {
-        setManualErrorMessage(err.message);
-        setManualRequestId(requestIdFromError(err));
-        return;
-      }
-      if (err instanceof Error) {
-        setManualErrorMessage(err.message);
-        return;
-      }
-      setManualErrorMessage("手动导入失败");
+      manualAlerts.setError(err, "手动导入失败");
     },
   });
 
@@ -404,25 +391,15 @@ export function ProxiesPage() {
         }),
       }),
     onMutate: () => {
-      setProbeErrorMessage(null);
-      setProbeRequestId(null);
+      probeAlerts.clear();
       setProbeJobId(null);
     },
     onSuccess: (data) => {
-      setProbeRequestId(data.request_id);
+      probeAlerts.setSuccess("探测任务已入队", data.request_id);
       setProbeJobId(data.job_id);
     },
     onError: (err) => {
-      if (err instanceof ApiError) {
-        setProbeErrorMessage(err.message);
-        setProbeRequestId(requestIdFromError(err));
-        return;
-      }
-      if (err instanceof Error) {
-        setProbeErrorMessage(err.message);
-        return;
-      }
-      setProbeErrorMessage("探测任务入队失败");
+      probeAlerts.setError(err, "探测任务入队失败");
     },
   });
 
@@ -449,26 +426,16 @@ export function ProxiesPage() {
       });
     },
     onMutate: () => {
-      setEasyErrorMessage(null);
-      setEasyRequestId(null);
+      easyAlerts.clear();
       setEasyResult(null);
     },
     onSuccess: (data) => {
       setEasyResult(data);
-      setEasyRequestId(data.request_id);
+      easyAlerts.setSuccess("easy-proxies 导入完成", data.request_id);
       queryClient.invalidateQueries({ queryKey: ["admin", "proxies", "endpoints"] });
     },
     onError: (err) => {
-      if (err instanceof ApiError) {
-        setEasyErrorMessage(err.message);
-        setEasyRequestId(requestIdFromError(err));
-        return;
-      }
-      if (err instanceof Error) {
-        setEasyErrorMessage(err.message);
-        return;
-      }
-      setEasyErrorMessage("从 easy-proxies 导入失败");
+      easyAlerts.setError(err, "从 easy-proxies 导入失败");
     },
   });
 
@@ -519,8 +486,13 @@ export function ProxiesPage() {
       </Card>
 
       <Card title="手动导入代理节点">
-        {manualErrorMessage ? <Alert type="error" showIcon message={manualErrorMessage} /> : null}
-        {manualRequestId ? <Typography.Text type="secondary">请求ID: {manualRequestId}</Typography.Text> : null}
+        <ActionAlerts
+          message={manualAlerts.message}
+          requestId={manualAlerts.requestId}
+          errorMessage={manualAlerts.errorMessage}
+          errorRequestId={manualAlerts.errorRequestId}
+          requestIdPlacement="secondary"
+        />
 
         <Form<ManualImportFormValues>
           form={manualForm}
@@ -567,8 +539,13 @@ export function ProxiesPage() {
       </Card>
 
       <Card title="从 easy-proxies 导入（推荐）">
-        {easyErrorMessage ? <Alert type="error" showIcon message={easyErrorMessage} /> : null}
-        {easyRequestId ? <Typography.Text type="secondary">请求ID: {easyRequestId}</Typography.Text> : null}
+        <ActionAlerts
+          message={easyAlerts.message}
+          requestId={easyAlerts.requestId}
+          errorMessage={easyAlerts.errorMessage}
+          errorRequestId={easyAlerts.errorRequestId}
+          requestIdPlacement="secondary"
+        />
 
         <Alert
           type="info"
@@ -760,7 +737,15 @@ export function ProxiesPage() {
         </Space>
 
         {probe.isPending ? <Alert type="info" showIcon message="探测任务入队中..." style={{ marginBottom: 12 }} /> : null}
-        {probeErrorMessage ? <Alert type="error" showIcon message={probeErrorMessage} style={{ marginBottom: 12 }} /> : null}
+        <div style={{ marginBottom: 12 }}>
+          <ActionAlerts
+            message={probeAlerts.message}
+            requestId={probeAlerts.requestId}
+            errorMessage={probeAlerts.errorMessage}
+            errorRequestId={probeAlerts.errorRequestId}
+            requestIdPlacement="secondary"
+          />
+        </div>
         {probeJobId ? (
           <Alert
             type="success"
@@ -770,7 +755,6 @@ export function ProxiesPage() {
             style={{ marginBottom: 12 }}
           />
         ) : null}
-        {probeRequestId ? <Typography.Text type="secondary">请求ID: {probeRequestId}</Typography.Text> : null}
 
         {query.isLoading ? (
           <Skeleton active />

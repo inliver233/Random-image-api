@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
 import { requestIdDescription } from "../admin/errors";
+import { missingLabel } from "../admin/missingFields";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
@@ -69,18 +70,6 @@ type ClearImagesResponse = {
   deleted_images: number;
   deleted_tags: number;
   request_id: string;
-};
-
-const MISSING_LABELS: Record<string, string> = {
-  tags: "标签",
-  geometry: "尺寸",
-  r18: "R18",
-  ai: "AI",
-  illust_type: "类型",
-  user: "作者",
-  title: "标题",
-  created_at: "时间",
-  popularity: "热度",
 };
 
 export function ImagesPage() {
@@ -237,7 +226,7 @@ export function ImagesPage() {
           (values || []).length ? (
             <Space wrap>
               {values.map((v) => (
-                <Tag key={v}>{MISSING_LABELS[v] || v}</Tag>
+                <Tag key={v}>{missingLabel(v, "short")}</Tag>
               ))}
             </Space>
           ) : (
