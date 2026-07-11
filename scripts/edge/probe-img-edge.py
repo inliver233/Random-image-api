@@ -1,14 +1,24 @@
 #!/usr/bin/env python3
-"""Sign a known pximg path and probe image-edge Worker (status + cache headers).
+"""Sign a known pximg path and probe image-edge Worker(s).
 
-Usage:
+Single base:
   python scripts/edge/probe-img-edge.py \\
     --base-url https://random-image-edge.example.workers.dev \\
     --secret "$IMAGE_EDGE_SECRET" \\
-    --path /img-original/img/2020/01/01/00/00/00/12345_p0.jpg
+    --path /img-original/img/2020/01/01/00/00/00/12345_p0.jpg \\
+    --twice --healthz
 
-Records HTTP status, X-Edge-Cache, X-Edge-Via, X-Edge-Storage for multi-region POC.
+Multi-region matrix (Phase 0 POC):
+  python scripts/edge/probe-img-edge.py \\
+    --bases https://edge-a.example.com,https://edge-b.example.com \\
+    --secret "$IMAGE_EDGE_SECRET" \\
+    --path /img-original/img/.../x_p0.jpg \\
+    --twice --healthz \\
+    --out edge-matrix.json
+
+Records HTTP status, latency, X-Edge-Cache / Via / Storage / Circuit.
 Does not require the backend process — pure HMAC + HTTP.
+Never flips production flags; ops decision only.
 """
 
 from __future__ import annotations
@@ -72,6 +82,7 @@ def fetch(url: str, *, method: str = "GET", timeout: float = 30.0) -> dict[str, 
             "x_edge_cache": headers.get("x-edge-cache"),
             "x_edge_via": headers.get("x-edge-via"),
             "x_edge_storage": headers.get("x-edge-storage"),
+            "x_edge_circuit": headers.get("x-edge-circuit"),
             "error_body": err_body,
         }
     except Exception as e:
@@ -79,9 +90,106 @@ def fetch(url: str, *, method: str = "GET", timeout: float = 30.0) -> dict[str, 
         return {"ok": False, "status": 0, "elapsed_ms": round(elapsed_ms, 1), "error": str(e)}
 
 
+def probe_one(
+    *,
+    base: str,
+    secret: str,
+    path: str,
+    ttl: int,
+    method: str,
+    twice: bool,
+    healthz: bool,
+) -> dict[str, Any]:
+    base = base.rstrip("/")
+    report: dict[str, Any] = {"base_url": base, "path": path}
+
+    if healthz:
+        report["healthz"] = fetch(f"{base}/healthz", method="GET")
+
+    url = sign_url(base=base, secret=secret, path=path, ttl=ttl)
+    report["signed_url_preview"] = url[:80] + "…" if len(url) > 80 else url
+    report["probe_1"] = fetch(url, method=method)
+    if twice:
+        report["probe_2"] = fetch(url, method=method)
+
+    s1 = report["probe_1"].get("status")
+    report["pass"] = s1 == 200
+    return report
+
+
+def summarize_matrix(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Ops-facing summary for multi-region B / B+R2 / B2 decision."""
+    bases_ok = 0
+    cache_hit_on_second = 0
+    via_counts: dict[str, int] = {}
+    storage_counts: dict[str, int] = {}
+    circuit_open = 0
+    latencies: list[float] = []
+
+    for row in rows:
+        if row.get("pass"):
+            bases_ok += 1
+        p1 = row.get("probe_1") or {}
+        p2 = row.get("probe_2") or {}
+        if p2.get("x_edge_cache") == "HIT":
+            cache_hit_on_second += 1
+        via = p1.get("x_edge_via") or p2.get("x_edge_via")
+        if via:
+            via_counts[str(via)] = via_counts.get(str(via), 0) + 1
+        storage = p1.get("x_edge_storage") or p2.get("x_edge_storage")
+        if storage:
+            storage_counts[str(storage)] = storage_counts.get(str(storage), 0) + 1
+        if (p1.get("x_edge_circuit") or p2.get("x_edge_circuit")) == "origin-open":
+            circuit_open += 1
+        for probe in (p1, p2):
+            ms = probe.get("elapsed_ms")
+            if isinstance(ms, (int, float)) and ms > 0:
+                latencies.append(float(ms))
+
+    n = max(1, len(rows))
+    suggestion = "B"
+    if circuit_open >= max(1, n // 2):
+        suggestion = "B2 (r2_only + prewarm) or keep B with mirror chain"
+    elif storage_counts:
+        suggestion = "B+R2 (read_through) viable"
+    elif bases_ok == len(rows) and cache_hit_on_second > 0:
+        suggestion = "B (Cache API only) ready for sticky multi-base"
+
+    return {
+        "bases_total": len(rows),
+        "bases_ok": bases_ok,
+        "cache_hit_on_second": cache_hit_on_second,
+        "via_counts": via_counts,
+        "storage_counts": storage_counts,
+        "circuit_open_count": circuit_open,
+        "latency_ms_min": round(min(latencies), 1) if latencies else None,
+        "latency_ms_max": round(max(latencies), 1) if latencies else None,
+        "latency_ms_avg": round(sum(latencies) / len(latencies), 1) if latencies else None,
+        "mode_suggestion": suggestion,
+        "decision_checklist": [
+            "All bases return 200 on known good path?",
+            "Second request shows X-Edge-Cache: HIT on most bases?",
+            "X-Edge-Via mostly origin (not emergency mirrors)?",
+            "If origin 403 / circuit-open high → enable R2 read_through or r2_only + prewarm",
+            "Only then set IMAGE_EDGE_ENABLED=true on BFF (ops flip; not this script)",
+        ],
+    }
+
+
+def _split_bases(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [b.strip().rstrip("/") for b in str(raw).split(",") if b.strip()]
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Probe CF image edge with signed URL")
-    p.add_argument("--base-url", required=True, help="Worker base URL (no trailing path)")
+    p.add_argument("--base-url", default="", help="Single Worker base URL (no trailing path)")
+    p.add_argument(
+        "--bases",
+        default="",
+        help="CSV of Worker bases for multi-region matrix (overrides --base-url when set)",
+    )
     p.add_argument("--secret", required=True, help="IMAGE_EDGE_SECRET")
     p.add_argument(
         "--path",
@@ -92,23 +200,47 @@ def main() -> int:
     p.add_argument("--method", choices=("GET", "HEAD"), default="GET")
     p.add_argument("--twice", action="store_true", help="Request twice to observe Cache HIT")
     p.add_argument("--healthz", action="store_true", help="Also GET /healthz")
+    p.add_argument("--out", default="", help="Write full JSON report to this path")
     args = p.parse_args()
 
-    base = args.base_url.rstrip("/")
-    report: dict[str, Any] = {"base_url": base, "path": args.path}
+    bases = _split_bases(args.bases) or _split_bases(args.base_url)
+    if not bases:
+        p.error("provide --base-url or --bases")
 
-    if args.healthz:
-        report["healthz"] = fetch(f"{base}/healthz", method="GET")
+    rows = [
+        probe_one(
+            base=b,
+            secret=args.secret,
+            path=args.path,
+            ttl=args.ttl,
+            method=args.method,
+            twice=bool(args.twice),
+            healthz=bool(args.healthz),
+        )
+        for b in bases
+    ]
 
-    url = sign_url(base=base, secret=args.secret, path=args.path, ttl=args.ttl)
-    report["signed_url_preview"] = url[:80] + "…" if len(url) > 80 else url
-    report["probe_1"] = fetch(url, method=args.method)
-    if args.twice:
-        report["probe_2"] = fetch(url, method=args.method)
+    if len(rows) == 1:
+        report: dict[str, Any] = rows[0]
+    else:
+        report = {
+            "path": args.path,
+            "method": args.method,
+            "bases": [r["base_url"] for r in rows],
+            "results": rows,
+            "summary": summarize_matrix(rows),
+        }
 
-    print(json.dumps(report, indent=2, ensure_ascii=False))
-    s1 = report["probe_1"].get("status")
-    return 0 if s1 == 200 else 1
+    text = json.dumps(report, indent=2, ensure_ascii=False)
+    print(text)
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.write("\n")
+
+    if len(rows) == 1:
+        return 0 if rows[0].get("pass") else 1
+    return 0 if all(r.get("pass") for r in rows) else 1
 
 
 if __name__ == "__main__":

@@ -101,7 +101,10 @@ X-Prewarm-Secret: <PREWARM_SECRET 或 IMAGE_EDGE_SECRET>
 ```powershell
 # 仓库根
 .\scripts\edge\deploy-img-worker.ps1
+# 单点
 python scripts\edge\probe-img-edge.py --base-url https://… --secret … --path /img-original/… --twice --healthz
+# 多地区矩阵 → edge-matrix.json（含 mode_suggestion；不翻转 BFF 开关）
+python scripts\edge\probe-img-edge.py --bases https://a.example,https://b.example --secret … --path /img-original/… --twice --healthz --out edge-matrix.json
 ```
 
 ## 观测（运维）
@@ -114,4 +117,4 @@ python scripts\edge\probe-img-edge.py --base-url https://… --secret … --path
 | 配置是否可签 URL | Admin `GET /admin/api/maintenance/image-edge` 或 `/healthz` → `modules.image_edge` |
 | Worker R2 | `/healthz` → `r2` / `r2_mode` |
 
-多地区 403 POC：部署后用 `probe-img-edge.py` 固定 path 签 URL，记录 200 vs 403 与 `X-Edge-*`，再决定直连+Cache / read_through / r2_only。
+多地区 403 POC：`--bases` 矩阵 + `summary.mode_suggestion` → 选 B / B+R2 / B2；详见 `contracts/image-edge.md` Mode decision。

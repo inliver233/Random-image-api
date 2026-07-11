@@ -143,5 +143,25 @@ Escape hatches:
 POC checklist:
 
 1. `scripts/edge/deploy-img-worker.ps1` (or `npx wrangler deploy` in `edge/img-worker`)
-2. `python scripts/edge/probe-img-edge.py --base-url … --secret … --path … --twice --healthz`
-3. Multi-region status matrix → choose B / B+R2 / B2
+2. Single base probe:
+   ```
+   python scripts/edge/probe-img-edge.py --base-url … --secret … --path … --twice --healthz
+   ```
+3. Multi-region status matrix (sticky pool candidates):
+   ```
+   python scripts/edge/probe-img-edge.py \
+     --bases https://edge-a.example.com,https://edge-b.example.com \
+     --secret … --path … --twice --healthz \
+     --out edge-matrix.json
+   ```
+   Report includes per-base `probe_1`/`probe_2` headers + `summary.mode_suggestion` and a decision checklist.
+4. Choose mode from matrix (do **not** flip `IMAGE_EDGE_ENABLED` until ops sign-off):
+
+| Observation | Prefer |
+| --- | --- |
+| All bases 200; 2nd request `X-Edge-Cache: HIT`; `X-Edge-Via` ≈ origin | **B** (Cache only) |
+| 200 but cold POP / want durable bytes across POPs | **B + R2** `read_through` |
+| High origin 403 / `X-Edge-Circuit: origin-open` / mirrors dominate Via | **B2** `r2_only` + prewarm |
+| Any base non-200 on known-good path | Fix deploy/secret/path before BFF cutover |
+
+Matrix fields to record: `status`, `elapsed_ms`, `x_edge_cache`, `x_edge_via`, `x_edge_storage`, `x_edge_circuit`, healthz `r2`/`r2_mode`.
