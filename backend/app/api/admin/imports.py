@@ -465,6 +465,93 @@ async def rollback_import(
     }
 
 
+@router.get("/imports")
+async def list_imports(
+    request: Request,
+    limit: int = 50,
+    cursor: str | None = None,
+    _claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    _ = _claims
+    if limit < 1 or limit > 200:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported limit", status_code=400)
+
+    cursor_i: int | None = None
+    cursor_raw = (cursor or "").strip()
+    if cursor_raw:
+        if not cursor_raw.isdigit():
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
+        cursor_i = int(cursor_raw)
+        if cursor_i <= 0:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message="Unsupported cursor", status_code=400)
+
+    rid = get_or_create_request_id(request)
+    engine = request.app.state.engine
+    Session = create_sessionmaker(engine)
+
+    async with Session() as session:
+        stmt = sa.select(Import).order_by(Import.id.desc()).limit(int(limit) + 1)
+        if cursor_i is not None:
+            stmt = stmt.where(Import.id < int(cursor_i))
+        rows = (await session.execute(stmt)).scalars().all()
+        items_rows = list(rows[: int(limit)])
+        next_cursor_i = int(items_rows[-1].id) if len(rows) > int(limit) and items_rows else None
+
+        import_ids = [str(int(imp.id)) for imp in items_rows]
+        jobs_by_import: dict[str, JobRow] = {}
+        if import_ids:
+            job_rows = (
+                (
+                    await session.execute(
+                        sa.select(JobRow)
+                        .where(JobRow.ref_type == "import", JobRow.ref_id.in_(import_ids))
+                        .order_by(JobRow.id.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for job in job_rows:
+                ref = str(job.ref_id or "")
+                if ref and ref not in jobs_by_import:
+                    jobs_by_import[ref] = job
+
+    items = []
+    for imp in items_rows:
+        job = jobs_by_import.get(str(int(imp.id)))
+        items.append(
+            {
+                "id": str(imp.id),
+                "created_at": imp.created_at,
+                "created_by": imp.created_by,
+                "source": imp.source,
+                "total": int(imp.total or 0),
+                "accepted": int(imp.accepted or 0),
+                "success": int(imp.success or 0),
+                "failed": int(imp.failed or 0),
+                "job": (
+                    {
+                        "id": str(job.id),
+                        "type": job.type,
+                        "status": job.status,
+                        "attempt": job.attempt,
+                        "max_attempts": job.max_attempts,
+                        "last_error": job.last_error,
+                    }
+                    if job is not None
+                    else None
+                ),
+            }
+        )
+
+    return {
+        "ok": True,
+        "items": items,
+        "next_cursor": str(next_cursor_i) if next_cursor_i is not None else "",
+        "request_id": rid,
+    }
+
+
 @router.get("/imports/{import_id}")
 async def get_import(
     import_id: int,

@@ -1,10 +1,11 @@
-import { useMutation } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, Space, Switch, Table, Typography } from "antd";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Alert, Button, Card, Form, Input, Space, Switch, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ApiError, apiJson } from "../api/client";
+import { useCursorList } from "../hooks/useCursorList";
 
 type ImportFormValues = {
   text: string;
@@ -24,6 +25,32 @@ type ImportCreateResponse = {
   request_id: string;
 };
 
+type ImportListItem = {
+  id: string;
+  created_at: string;
+  created_by: string | null;
+  source: string | null;
+  total: number;
+  accepted: number;
+  success: number;
+  failed: number;
+  job: {
+    id: string;
+    type: string;
+    status: string;
+    attempt: number;
+    max_attempts: number;
+    last_error: string | null;
+  } | null;
+};
+
+type ImportsListResponse = {
+  ok: true;
+  items: ImportListItem[];
+  next_cursor: string;
+  request_id: string;
+};
+
 function requestIdFromError(err: unknown): string | null {
   if (!(err instanceof ApiError)) return null;
   return err.body?.request_id ? String(err.body.request_id) : null;
@@ -33,6 +60,44 @@ function messageFromError(err: unknown): string {
   if (err instanceof ApiError) return err.message;
   if (err instanceof Error) return err.message;
   return "未知错误";
+}
+
+function jobStatusLabel(status: string): string {
+  switch (status) {
+    case "pending":
+      return "等待中";
+    case "running":
+      return "运行中";
+    case "paused":
+      return "已暂停";
+    case "canceled":
+      return "已取消";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "dlq":
+      return "死信";
+    default:
+      return status || "未知";
+  }
+}
+
+function jobStatusTag(status: string) {
+  const label = jobStatusLabel(status);
+  const color =
+    status === "running"
+      ? "processing"
+      : status === "pending"
+        ? "blue"
+        : status === "completed"
+          ? "success"
+          : status === "failed" || status === "dlq"
+            ? "error"
+            : status === "paused"
+              ? "warning"
+              : "default";
+  return <Tag color={color}>{label}</Tag>;
 }
 
 const previewColumns: ColumnsType<ImportCreateResponse["preview"][number]> = [
@@ -69,12 +134,74 @@ const errorColumns: ColumnsType<ImportCreateResponse["errors"][number]> = [
 
 export function ImportPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [form] = Form.useForm<ImportFormValues>();
   const [file, setFile] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [requestId, setRequestId] = useState<string | null>(null);
   const [result, setResult] = useState<ImportCreateResponse | null>(null);
   const fileIsJson = Boolean(file && String(file.name || "").toLowerCase().endsWith(".json"));
+
+  const {
+    query: historyQuery,
+    items: historyItems,
+    nextCursor,
+    listRequestId,
+    loadMore,
+    hasMore,
+    isLoadingMore,
+  } = useCursorList<ImportListItem, ImportsListResponse>({
+    queryKey: ["admin", "imports", { limit: 50 }],
+    getItemId: (item) => item.id,
+    fetchPage: (cursor) => {
+      const sp = new URLSearchParams({ limit: "50" });
+      if (cursor) sp.set("cursor", cursor);
+      return apiJson<ImportsListResponse>(`/admin/api/imports?${sp.toString()}`);
+    },
+  });
+
+  const historyColumns: ColumnsType<ImportListItem> = [
+    {
+      title: "导入ID",
+      dataIndex: "id",
+      key: "id",
+      width: 110,
+      render: (value: string) => (
+        <Button type="link" size="small" onClick={() => navigate(`/admin/import/${value}`)}>
+          #{value}
+        </Button>
+      ),
+    },
+    { title: "来源", dataIndex: "source", key: "source", width: 100, render: (v) => v || "-" },
+    { title: "创建人", dataIndex: "created_by", key: "created_by", width: 120, render: (v) => v || "-" },
+    { title: "创建时间", dataIndex: "created_at", key: "created_at", width: 190, render: (v) => v || "-" },
+    { title: "总数", dataIndex: "total", key: "total", width: 80 },
+    { title: "接收", dataIndex: "accepted", key: "accepted", width: 80 },
+    { title: "成功", dataIndex: "success", key: "success", width: 80 },
+    { title: "失败", dataIndex: "failed", key: "failed", width: 80 },
+    {
+      title: "任务状态",
+      key: "job_status",
+      width: 120,
+      render: (_, row) => (row.job ? jobStatusTag(row.job.status) : <Tag>无任务</Tag>),
+    },
+    {
+      title: "任务错误",
+      key: "job_error",
+      width: 220,
+      render: (_, row) => (row.job?.last_error ? String(row.job.last_error) : "-"),
+    },
+    {
+      title: "操作",
+      key: "actions",
+      width: 100,
+      render: (_, row) => (
+        <Button size="small" onClick={() => navigate(`/admin/import/${row.id}`)}>
+          详情
+        </Button>
+      ),
+    },
+  ];
 
   const mutation = useMutation({
     mutationFn: (values: ImportFormValues) => {
@@ -105,6 +232,9 @@ export function ImportPage() {
     onSuccess: (data) => {
       setResult(data);
       setRequestId(data.request_id);
+      if (data.import_id) {
+        queryClient.invalidateQueries({ queryKey: ["admin", "imports"] });
+      }
     },
     onError: (err) => {
       setErrorMessage(messageFromError(err));
@@ -130,7 +260,10 @@ export function ImportPage() {
           </Typography.Text>
           <Typography.Text type="secondary">多P作品需要分别提供 p0/p1/... 的链接。</Typography.Text>
           <Typography.Text type="secondary">不支持作品页链接（例如 www.pixiv.net/artworks/12345678）。</Typography.Text>
-          <Typography.Text>- PixivBatchDownloader：支持直接上传其导出的 <Typography.Text code>.json</Typography.Text>（自动提取原图链接，并尽可能写入元数据/标签，通常不需要 refresh token）。</Typography.Text>
+          <Typography.Text>
+            - PixivBatchDownloader：支持直接上传其导出的 <Typography.Text code>.json</Typography.Text>
+            （自动提取原图链接，并尽可能写入元数据/标签，通常不需要 refresh token）。
+          </Typography.Text>
         </Space>
       </Card>
 
@@ -267,6 +400,55 @@ export function ImportPage() {
           ) : null}
         </Space>
       ) : null}
+
+      <Card title="导入历史">
+        {listRequestId ? <Typography.Text type="secondary">请求ID: {listRequestId}</Typography.Text> : null}
+        {historyQuery.isLoading ? (
+          <Alert type="info" showIcon message="正在加载导入历史..." style={{ marginTop: 12 }} />
+        ) : historyQuery.isError ? (
+          <Alert
+            type="error"
+            showIcon
+            message="加载导入历史失败"
+            description={requestIdFromError(historyQuery.error) ? `请求ID: ${requestIdFromError(historyQuery.error)}` : messageFromError(historyQuery.error)}
+            style={{ marginTop: 12 }}
+          />
+        ) : historyItems.length === 0 ? (
+          <Alert type="info" showIcon message="暂无导入记录" style={{ marginTop: 12 }} />
+        ) : (
+          <>
+            <Table<ImportListItem>
+              rowKey={(row) => row.id}
+              columns={historyColumns}
+              dataSource={historyItems}
+              pagination={false}
+              size="small"
+              style={{ marginTop: 12 }}
+              scroll={{ x: 1200 }}
+            />
+            {hasMore ? (
+              <Button
+                style={{ marginTop: 12 }}
+                loading={isLoadingMore}
+                onClick={() => {
+                  if (nextCursor) loadMore.mutate(nextCursor);
+                }}
+              >
+                加载更多
+              </Button>
+            ) : null}
+            {loadMore.isError ? (
+              <Alert
+                type="error"
+                showIcon
+                message="加载更多失败"
+                description={messageFromError(loadMore.error)}
+                style={{ marginTop: 12 }}
+              />
+            ) : null}
+          </>
+        )}
+      </Card>
     </Space>
   );
 }

@@ -21,7 +21,31 @@ describe("ImportPage", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
-        if (url.endsWith("/admin/api/imports")) {
+        const method = String(init?.method || "GET").toUpperCase();
+        if (url.includes("/admin/api/imports?") && method === "GET") {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              items: [
+                {
+                  id: "9",
+                  created_at: "2024-01-01T00:00:00.000Z",
+                  created_by: "admin",
+                  source: "manual",
+                  total: 2,
+                  accepted: 1,
+                  success: 1,
+                  failed: 0,
+                  job: { id: "3", type: "import_images", status: "completed", attempt: 1, max_attempts: 3, last_error: null },
+                },
+              ],
+              next_cursor: "",
+              request_id: "req_imports_list",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if ((url.endsWith("/admin/api/imports") || url.includes("/admin/api/imports")) && method === "POST") {
           const headers = new Headers(init?.headers || {});
           const body = init?.body;
           if (body instanceof FormData) {
@@ -69,6 +93,8 @@ describe("ImportPage", () => {
     expect(await screen.findByText("支持的链接格式（重要）")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /开始导入/ })).toBeInTheDocument();
     expect(screen.getByPlaceholderText("每行一个链接")).toBeInTheDocument();
+    expect(await screen.findByText("导入历史")).toBeInTheDocument();
+    expect(await screen.findByText("#9")).toBeInTheDocument();
 
     const switches = screen.getAllByRole("switch");
     expect(switches).toHaveLength(2);

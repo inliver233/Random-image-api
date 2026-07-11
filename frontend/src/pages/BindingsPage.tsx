@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, InputNumber, Modal, Skeleton, Space, Table, Typography } from "antd";
+import { Alert, Button, Card, Form, Input, InputNumber, Modal, Select, Skeleton, Space, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React, { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -31,6 +31,19 @@ type BindingsListResponse = {
   ok: true;
   items: BindingItem[];
   summary?: { pool_id: string; pool_endpoints_total: number; pool_endpoints_enabled: number };
+  request_id: string;
+};
+
+type ProxyPoolItem = {
+  id: string;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+};
+
+type ProxyPoolsListResponse = {
+  ok: true;
+  items: ProxyPoolItem[];
   request_id: string;
 };
 
@@ -154,14 +167,7 @@ export function BindingsPage() {
     return Number.isFinite(value) && value > 0 ? value : null;
   }, [searchParams]);
 
-  const [poolId, setPoolId] = useState<number>(() => poolIdFromUrl ?? 1);
-
-  // Keep local poolId in sync when navigating with ?pool_id= from other pages.
-  React.useEffect(() => {
-    if (poolIdFromUrl != null && poolIdFromUrl !== poolId) {
-      setPoolId(poolIdFromUrl);
-    }
-  }, [poolIdFromUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [poolId, setPoolId] = useState<number | null>(() => poolIdFromUrl);
   const [maxTokensPerProxy, setMaxTokensPerProxy] = useState<number>(2);
 
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -173,21 +179,47 @@ export function BindingsPage() {
   const [overrideBinding, setOverrideBinding] = useState<BindingItem | null>(null);
   const [overrideForm] = Form.useForm<OverrideFormValues>();
 
+  const poolsQuery = useQuery({
+    queryKey: ["admin", "proxy-pools"],
+    queryFn: () => apiJson<ProxyPoolsListResponse>("/admin/api/proxy-pools"),
+  });
+
+  // Keep local poolId in sync when navigating with ?pool_id= from other pages,
+  // and default to the first pool once the list loads.
+  React.useEffect(() => {
+    if (poolIdFromUrl != null) {
+      if (poolIdFromUrl !== poolId) setPoolId(poolIdFromUrl);
+      return;
+    }
+    if (poolId != null) return;
+    const first = poolsQuery.data?.items?.[0];
+    if (!first) return;
+    const next = Number.parseInt(String(first.id), 10);
+    if (Number.isFinite(next) && next > 0) {
+      setPoolIdAndSyncUrl(next);
+    }
+  }, [poolIdFromUrl, poolsQuery.data]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const query = useQuery({
     queryKey: ["admin", "bindings", { poolId }],
+    enabled: poolId != null && poolId > 0,
     queryFn: () => apiJson<BindingsListResponse>(`/admin/api/bindings?pool_id=${poolId}`),
   });
 
   const recompute = useMutation({
-    mutationFn: (vars: { strict?: boolean } | undefined) =>
-      apiJson<RecomputeResponse>("/admin/api/bindings/recompute", {
+    mutationFn: (vars: { strict?: boolean } | undefined) => {
+      if (poolId == null) {
+        return Promise.reject(new Error("请先选择代理池"));
+      }
+      return apiJson<RecomputeResponse>("/admin/api/bindings/recompute", {
         method: "POST",
         body: JSON.stringify({
           pool_id: poolId,
           max_tokens_per_proxy: maxTokensPerProxy,
           strict: vars?.strict !== undefined ? Boolean(vars.strict) : true,
         }),
-      }),
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin", "bindings", { poolId }] });
     },
@@ -244,12 +276,18 @@ export function BindingsPage() {
   });
 
   const setPoolIdAndSyncUrl = (next: number) => {
-    const value = Number.isFinite(next) && next > 0 ? next : 1;
+    const value = Number.isFinite(next) && next > 0 ? next : null;
     setPoolId(value);
     const params = new URLSearchParams(searchParams);
-    params.set("pool_id", String(value));
+    if (value != null) params.set("pool_id", String(value));
+    else params.delete("pool_id");
     setSearchParams(params, { replace: true });
   };
+
+  const poolOptions = (poolsQuery.data?.items || []).map((p) => ({
+    value: Number(p.id),
+    label: `${p.name}（#${p.id}${p.enabled ? "" : " · 已停用"}）`,
+  }));
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -286,8 +324,16 @@ export function BindingsPage() {
 
       <Card>
         <Space wrap>
-          <Typography.Text>代理池ID:</Typography.Text>
-          <InputNumber min={1} value={poolId} onChange={(value) => setPoolIdAndSyncUrl(Number(value || 1))} />
+          <Typography.Text>代理池:</Typography.Text>
+          <Select
+            style={{ minWidth: 280 }}
+            loading={poolsQuery.isLoading}
+            placeholder={poolsQuery.isError ? "代理池加载失败" : "选择代理池"}
+            options={poolOptions}
+            value={poolId ?? undefined}
+            onChange={(value) => setPoolIdAndSyncUrl(Number(value))}
+            notFoundContent={poolsQuery.isError ? "加载失败" : "暂无代理池"}
+          />
           <Typography.Text>单代理最多绑定令牌数:</Typography.Text>
           <InputNumber
             min={1}
@@ -295,10 +341,18 @@ export function BindingsPage() {
             value={maxTokensPerProxy}
             onChange={(value) => setMaxTokensPerProxy(Number(value || 2))}
           />
-          <Button type="primary" onClick={() => recompute.mutate({ strict: true })} loading={recompute.isPending}>
+          <Button
+            type="primary"
+            onClick={() => recompute.mutate({ strict: true })}
+            loading={recompute.isPending}
+            disabled={poolId == null}
+          >
             重新计算绑定
           </Button>
         </Space>
+        {poolsQuery.isError ? (
+          <Alert type="error" showIcon message="加载代理池列表失败" style={{ marginTop: 12 }} />
+        ) : null}
 
         {recompute.isError ? (
           <Alert
@@ -424,7 +478,9 @@ export function BindingsPage() {
         </Form>
       </Modal>
 
-      {query.isLoading ? (
+      {poolId == null ? (
+        <Alert type="info" showIcon message="请先选择代理池" description="可在“代理池”页面创建后再返回此处。" />
+      ) : query.isLoading ? (
         <Skeleton active />
       ) : query.isError ? (
         <Alert

@@ -345,7 +345,8 @@ export function RecommendationPage() {
         推荐策略
       </Typography.Title>
       <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-        这里管理的是 <Typography.Text code>/random</Typography.Text> 默认的“质量优先推荐”策略：权重/倍率/随机程度都会实时生效（保存后无需重启）。
+        这里管理的是 <Typography.Text code>/random</Typography.Text> 默认策略与推荐参数：默认策略 / quality_samples / 打分权重 / 类别倍率 /
+        去重。保存后实时生效（无需重启）。运行时默认 attempts、r18_strict、失败冷却请在「系统设置」中配置。
       </Typography.Paragraph>
 
       <Space wrap>
