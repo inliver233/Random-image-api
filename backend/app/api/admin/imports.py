@@ -271,7 +271,16 @@ async def _load_import_request(request: Request) -> ImportUpload:
     raise ApiError(code=ErrorCode.INVALID_UPLOAD_TYPE, message="Unsupported content type", status_code=400)
 
 
-@router.post("/imports")
+@router.post(
+    "/imports",
+    summary="Create import",
+    description=(
+        "Parse pximg URL text or Pixiv Batch Downloader JSON; dry_run previews only. "
+        "Non-dry creates Import + `import_images` job via same-txn `enqueue_pending_in_session` "
+        "(SQLite jobs table; JobQueuePort claim backends do not replace payload storage). "
+        "Small batches may execute inline via `resolve_job_queue` + worker claim path."
+    ),
+)
 async def create_import(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
@@ -402,7 +411,14 @@ async def create_import(
         "preview": preview}, request_id=rid)
 
 
-@router.post("/imports/{import_id}/rollback")
+@router.post(
+    "/imports/{import_id}/rollback",
+    summary="Rollback import",
+    description=(
+        "Bulk-set catalog image status for an import via CatalogStore "
+        "(`mode=disable`→status 2, `mode=delete`→status 4). Does not delete job history."
+    ),
+)
 async def rollback_import(
     import_id: int,
     body: ImportRollbackRequest,
@@ -442,7 +458,14 @@ async def rollback_import(
         "updated": updated}, request_id=rid)
 
 
-@router.get("/imports")
+@router.get(
+    "/imports",
+    summary="List imports",
+    description=(
+        "Cursor-paged Import rows with latest linked `import_images` job summary "
+        "(`ref_type=import`). Job status is SQLite-persisted for admin UI."
+    ),
+)
 async def list_imports(
     request: Request,
     limit: int = 50,
@@ -504,7 +527,14 @@ async def list_imports(
     return admin_cursor_list(request, items=items, next_cursor=next_cursor_i, request_id=rid)
 
 
-@router.get("/imports/{import_id}")
+@router.get(
+    "/imports/{import_id}",
+    summary="Get import detail",
+    description=(
+        "Single Import row plus linked job fields. Payload file refs stay under the DB dir; "
+        "catalog writes go through CatalogStore during job execution."
+    ),
+)
 async def get_import(
     import_id: int,
     request: Request,

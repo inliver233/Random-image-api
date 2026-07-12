@@ -72,3 +72,27 @@ def test_admin_list_imports_cursor(tmp_path: Path, monkeypatch) -> None:
 
         bad = client.get("/admin/api/imports", params={"limit": 0}, headers=headers)
         assert bad.status_code == 400
+
+
+def test_admin_imports_openapi_documents_job_queue_coupling() -> None:
+    """Import OpenAPI must document enqueue/CatalogStore coupling (not Title-Case auto only)."""
+    app = create_app()
+    schema = app.openapi()
+    paths = schema["paths"]
+
+    create_op = paths["/admin/api/imports"]["post"]
+    assert create_op.get("summary") == "Create import"
+    create_desc = str(create_op.get("description") or "")
+    assert "enqueue" in create_desc.lower() or "JobQueuePort" in create_desc
+    assert "import_images" in create_desc
+
+    list_op = paths["/admin/api/imports"]["get"]
+    assert list_op.get("summary") == "List imports"
+    assert "import" in str(list_op.get("description") or "").lower()
+
+    get_op = paths["/admin/api/imports/{import_id}"]["get"]
+    assert get_op.get("summary") == "Get import detail"
+
+    rb_op = paths["/admin/api/imports/{import_id}/rollback"]["post"]
+    assert rb_op.get("summary") == "Rollback import"
+    assert "CatalogStore" in str(rb_op.get("description") or "")

@@ -59,3 +59,4 @@ Wire-up reads settings (not raw `os.environ` at call sites):
 | `GET /admin/api/maintenance/modular-ports` | Same honesty shape: `job_queue.backend` / `requested` / `implemented` (no `using_sqlite_fallback` field) |
 | `/metrics` (admin) → modular readiness | `new_pixiv_module_readiness{module="job_queue",flag="implemented"}` (sqlite/memory only). OpenAPI summary documents scrape-time modular + circuit gauges |
 | Admin job CRUD (`/admin/api/jobs*`) | List/detail/retry/cancel/DLQ operate on SQLite `jobs` rows (payload + status for UI). OpenAPI summaries document that claim backends do not replace this table until full external-queue cutover |
+| Admin imports / hydration-runs | Create paths use same-txn `enqueue_pending_in_session` (or inline claim via `resolve_job_queue`). OpenAPI summaries call out SQLite job persistence + CatalogStore where relevant |

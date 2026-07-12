@@ -138,7 +138,14 @@ async def _load_manual_job_json(request: Request) -> dict[str, int | None]:
     return {"illust_id": illust_id, "image_id": image_id}
 
 
-@router.get("/hydration-runs")
+@router.get(
+    "/hydration-runs",
+    summary="List hydration runs",
+    description=(
+        "Cursor-paged HydrationRun rows with latest job (`ref_type=hydration_run`). "
+        "Runs drive backfill/manual hydrate workers via SQLite jobs + JobQueuePort claim."
+    ),
+)
 async def list_hydration_runs(
     request: Request,
     limit: int = 20,
@@ -179,7 +186,14 @@ async def list_hydration_runs(
     return admin_cursor_list(request, items=items, next_cursor=next_cursor, request_id=rid)
 
 
-@router.get("/hydration-runs/{run_id}")
+@router.get(
+    "/hydration-runs/{run_id}",
+    summary="Get hydration run",
+    description=(
+        "Single HydrationRun with latest linked job. Criteria/cursor are soft-parsed JSON; "
+        "worker progress updates SQLite run + job rows."
+    ),
+)
 async def get_hydration_run(
     run_id: int,
     request: Request,
@@ -203,7 +217,15 @@ async def get_hydration_run(
     return admin_ok(request, payload={"item": item}, request_id=rid)
 
 
-@router.post("/hydration-runs/manual")
+@router.post(
+    "/hydration-runs/manual",
+    summary="Create manual hydration job",
+    description=(
+        "Enqueue a one-shot `hydrate_metadata` job (`ref_type=manual_hydrate`) for "
+        "`illust_id` or CatalogStore-resolved `image_id`. Dedupes active pending|running. "
+        "Uses same-txn `enqueue_pending_in_session` (SQLite jobs; JobQueuePort claims later)."
+    ),
+)
 async def create_manual_hydration_job(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
@@ -272,7 +294,15 @@ async def create_manual_hydration_job(
     return await with_sqlite_busy_retry(_op)
 
 
-@router.post("/hydration-runs")
+@router.post(
+    "/hydration-runs",
+    summary="Create hydration run",
+    description=(
+        "Create backfill/manual HydrationRun + linked worker job in one SQLite transaction "
+        "(`enqueue_pending_in_session`). Worker claim path uses JobQueuePort; run status "
+        "remains the admin control plane."
+    ),
+)
 async def create_hydration_run(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
@@ -389,7 +419,14 @@ async def _set_run_and_job_status(
     return await with_sqlite_busy_retry(_op)
 
 
-@router.post("/hydration-runs/{run_id}/pause")
+@router.post(
+    "/hydration-runs/{run_id}/pause",
+    summary="Pause hydration run",
+    description=(
+        "Set run+latest job to `paused` from pending|running. Stops further JobQueuePort "
+        "claim progress until resume."
+    ),
+)
 async def pause_hydration_run(
     run_id: int,
     request: Request,
@@ -405,7 +442,13 @@ async def pause_hydration_run(
     )
 
 
-@router.post("/hydration-runs/{run_id}/resume")
+@router.post(
+    "/hydration-runs/{run_id}/resume",
+    summary="Resume hydration run",
+    description=(
+        "Set paused run+job back to `pending` so JobQueuePort workers can claim again."
+    ),
+)
 async def resume_hydration_run(
     run_id: int,
     request: Request,
@@ -421,7 +464,14 @@ async def resume_hydration_run(
     )
 
 
-@router.post("/hydration-runs/{run_id}/cancel")
+@router.post(
+    "/hydration-runs/{run_id}/cancel",
+    summary="Cancel hydration run",
+    description=(
+        "Set run+job to `canceled` from pending|running|paused. Terminal for this run; "
+        "does not roll back already-hydrated catalog rows."
+    ),
+)
 async def cancel_hydration_run(
     run_id: int,
     request: Request,

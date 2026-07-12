@@ -216,3 +216,34 @@ def test_admin_create_manual_hydration_job_by_image_or_illust(tmp_path: Path, mo
             assert rows[0].status == "pending"
 
     asyncio.run(_verify())
+
+
+def test_admin_hydration_runs_openapi_documents_job_queue_coupling() -> None:
+    """Hydration-run OpenAPI must document SQLite jobs + JobQueuePort claim semantics."""
+    app = create_app()
+    schema = app.openapi()
+    paths = schema["paths"]
+
+    list_op = paths["/admin/api/hydration-runs"]["get"]
+    assert list_op.get("summary") == "List hydration runs"
+    assert "JobQueuePort" in str(list_op.get("description") or "") or "job" in str(
+        list_op.get("description") or ""
+    ).lower()
+
+    get_op = paths["/admin/api/hydration-runs/{run_id}"]["get"]
+    assert get_op.get("summary") == "Get hydration run"
+
+    create_op = paths["/admin/api/hydration-runs"]["post"]
+    assert create_op.get("summary") == "Create hydration run"
+    assert "enqueue" in str(create_op.get("description") or "").lower()
+
+    manual_op = paths["/admin/api/hydration-runs/manual"]["post"]
+    assert manual_op.get("summary") == "Create manual hydration job"
+    assert "manual_hydrate" in str(manual_op.get("description") or "")
+
+    pause_op = paths["/admin/api/hydration-runs/{run_id}/pause"]["post"]
+    assert pause_op.get("summary") == "Pause hydration run"
+    resume_op = paths["/admin/api/hydration-runs/{run_id}/resume"]["post"]
+    assert resume_op.get("summary") == "Resume hydration run"
+    cancel_op = paths["/admin/api/hydration-runs/{run_id}/cancel"]["post"]
+    assert cancel_op.get("summary") == "Cancel hydration run"
