@@ -232,6 +232,18 @@ def test_openapi_documents_public_api_key_security_schemes(tmp_path: Path, monke
         assert "engine_status" in str(feed_params["debug"].get("description") or "")
         assert "engine_status" in str(random_get.get("description") or "")
         assert "engine_status" in str(feed_get.get("description") or "")
+        # Catalog list / delivery routes should have human OpenAPI summaries (parity with /random).
+        for path, expected_summary in (
+            ("/tags", "List catalog tags"),
+            ("/authors", "List catalog authors"),
+            ("/images", "List catalog images"),
+            ("/images/{image_id}", "Get one catalog image"),
+            ("/i/{image_id}.{ext}", "Deliver image bytes or edge redirect"),
+            ("/version", "Build version metadata"),
+        ):
+            op = (paths.get(path) or {}).get("get") or {}
+            assert op.get("summary") == expected_summary, path
+            assert op.get("description"), path
 
 
 def test_favicon_exempt_when_public_api_key_required(tmp_path: Path, monkeypatch) -> None:

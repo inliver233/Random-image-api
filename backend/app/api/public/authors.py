@@ -11,7 +11,14 @@ from app.db.session import resolve_sessionmaker
 router = APIRouter()
 
 
-@router.get("/authors")
+@router.get(
+    "/authors",
+    summary="List catalog authors",
+    description=(
+        "Cursor-paginated author list (`limit`, `cursor`, optional `q` name filter). "
+        "When `PUBLIC_API_KEY_REQUIRED`, send `X-API-Key` or `?api_key=`."
+    ),
+)
 async def list_authors(
     request: Request,
     q: str | None = None,

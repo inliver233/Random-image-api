@@ -12,7 +12,14 @@ from app.db.tag_store import resolve_tag_store
 router = APIRouter()
 
 
-@router.get("/tags")
+@router.get(
+    "/tags",
+    summary="List catalog tags",
+    description=(
+        "Cursor-paginated tag list (`limit`, `cursor`, optional `q` name filter). "
+        "When `PUBLIC_API_KEY_REQUIRED`, send `X-API-Key` or `?api_key=`."
+    ),
+)
 async def list_tags(
     request: Request,
     q: str | None = None,

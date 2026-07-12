@@ -27,7 +27,15 @@ router = APIRouter()
 
 
 
-@router.get("/images")
+@router.get(
+    "/images",
+    summary="List catalog images",
+    description=(
+        "Cursor-paginated image list with the same filter family as `/random` "
+        "(r18, tags, geometry, user_id, illust_id, created range). "
+        "When `PUBLIC_API_KEY_REQUIRED`, send `X-API-Key` or `?api_key=`."
+    ),
+)
 async def list_images(
     request: Request,
     limit: int = 50,
@@ -93,7 +101,14 @@ async def list_images(
     )
 
 
-@router.get("/images/{image_id}")
+@router.get(
+    "/images/{image_id}",
+    summary="Get one catalog image",
+    description=(
+        "Return a single image row plus tag names. "
+        "When `PUBLIC_API_KEY_REQUIRED`, send `X-API-Key` or `?api_key=`."
+    ),
+)
 async def get_image(
     request: Request,
     image_id: int,
@@ -121,7 +136,15 @@ async def get_image(
     )
 
 
-@router.get("/i/{image_id}.{ext}")
+@router.get(
+    "/i/{image_id}.{ext}",
+    summary="Deliver image bytes or edge redirect",
+    description=(
+        "Public image delivery: 302 to signed Image Edge when ready, else local stream. "
+        "`?local=1` forces origin-side stream. When `PUBLIC_API_KEY_REQUIRED`, send "
+        "`X-API-Key` or `?api_key=` (browser navigations typically use the query form)."
+    ),
+)
 async def proxy_image(
     request: Request,
     image_id: int,

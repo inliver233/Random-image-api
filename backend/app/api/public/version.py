@@ -10,7 +10,11 @@ from app.core.public_json import public_ok_json
 router = APIRouter()
 
 
-@router.get("/version")
+@router.get(
+    "/version",
+    summary="Build version metadata",
+    description="Public build info (`version`, `build_time`, `git_commit` env). No catalog dependency.",
+)
 async def version(request: Request) -> Any:
     return public_ok_json(
         request,
