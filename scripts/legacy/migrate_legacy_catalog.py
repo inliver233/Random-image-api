@@ -30,11 +30,18 @@ python scripts/legacy/migrate_legacy_catalog.py import-csv \\
   --imports-csv ./backups/imports.csv \\
   --target-url "sqlite+aiosqlite:///./data/app.db"
 
-# Import plain refresh tokens (env REFRESH_TOKENS shape or simple list)
+# Import plain refresh tokens (JSON file, or env REFRESH_TOKENS)
 python scripts/legacy/migrate_legacy_catalog.py import-tokens \\
   --tokens-json ./tokens.json \\
   --field-encryption-key "$FIELD_ENCRYPTION_KEY" \\
   --target-url "sqlite+aiosqlite:///./data/app.db"
+
+# Same shape as legacy env: JSON array / {tokens:[...]} / comma-separated strings
+python scripts/legacy/migrate_legacy_catalog.py import-tokens \\
+  --from-env REFRESH_TOKENS \\
+  --field-encryption-key "$FIELD_ENCRYPTION_KEY" \\
+  --target-url "sqlite+aiosqlite:///./data/app.db" \\
+  --dry-run
 
 # Live PG → target (requires psycopg installed for source)
 python scripts/legacy/migrate_legacy_catalog.py import-pg \\
@@ -458,12 +465,135 @@ def cmd_import_pg(args: argparse.Namespace) -> int:
     return 0
 
 
+def parse_refresh_token_payload(raw: Any) -> list[dict[str, Any]]:
+    """Normalize REFRESH_TOKENS / tokens.json shapes into insert-ready dicts.
+
+    Accepts:
+    - ``["rt_…", …]``
+    - ``[{"refresh_token":"…","label":"a","enabled":true,"weight":1}, …]``
+    - ``{"tokens":[…]}`` (list elements as above)
+    - comma / whitespace separated plain string (env dump without JSON)
+    """
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return []
+        try:
+            parsed = json.loads(s)
+        except json.JSONDecodeError:
+            parts = [p.strip() for p in s.replace("\n", ",").split(",") if p.strip()]
+            return [
+                {"refresh_token": p, "label": f"legacy-{i+1}"}
+                for i, p in enumerate(parts)
+            ]
+        return parse_refresh_token_payload(parsed)
+
+    items: list[Any]
+    if isinstance(raw, dict) and "tokens" in raw:
+        items = list(raw.get("tokens") or [])
+    elif isinstance(raw, list):
+        items = list(raw)
+    else:
+        raise ValueError("tokens payload must be a list, {tokens:[...]}, or string")
+
+    out: list[dict[str, Any]] = []
+    for i, el in enumerate(items):
+        if isinstance(el, str):
+            token = el.strip()
+            if not token:
+                continue
+            out.append({"refresh_token": token, "label": f"legacy-{i+1}", "enabled": True, "weight": 1.0})
+            continue
+        if not isinstance(el, dict):
+            continue
+        token = str(el.get("refresh_token") or el.get("token") or "").strip()
+        if not token:
+            continue
+        label = _str_or_none(el.get("label")) or f"legacy-{i+1}"
+        enabled = bool(el.get("enabled", True))
+        try:
+            weight = float(el.get("weight") if el.get("weight") is not None else 1.0)
+        except (TypeError, ValueError):
+            weight = 1.0
+        if weight < 0:
+            weight = 0.0
+        out.append(
+            {
+                "refresh_token": token,
+                "label": label,
+                "enabled": enabled,
+                "weight": weight,
+            }
+        )
+    return out
+
+
+def load_refresh_token_items(
+    *,
+    tokens_json: str | None = None,
+    from_env: str | None = None,
+) -> list[dict[str, Any]]:
+    """Load token items from a JSON file and/or an environment variable name."""
+    if tokens_json and from_env:
+        raise ValueError("pass only one of --tokens-json or --from-env")
+    if not tokens_json and not from_env:
+        raise ValueError("require --tokens-json PATH or --from-env VAR_NAME")
+
+    if from_env:
+        name = str(from_env).strip()
+        if not name:
+            raise ValueError("empty --from-env name")
+        raw_env = os.environ.get(name)
+        if raw_env is None:
+            raise ValueError(f"environment variable {name!r} is not set")
+        return parse_refresh_token_payload(raw_env)
+
+    path = Path(str(tokens_json))
+    if not path.is_file():
+        raise ValueError(f"tokens-json not found: {path}")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"tokens-json is not valid JSON: {exc}") from exc
+    return parse_refresh_token_payload(raw)
+
+
 def cmd_import_tokens(args: argparse.Namespace) -> int:
     from sqlalchemy import text
 
+    dry_run = bool(getattr(args, "dry_run", False))
     key = (args.field_encryption_key or os.environ.get("FIELD_ENCRYPTION_KEY") or "").strip()
-    if not key:
-        print("FIELD_ENCRYPTION_KEY required", file=sys.stderr)
+    if not dry_run and not key:
+        print("FIELD_ENCRYPTION_KEY required (or pass --field-encryption-key)", file=sys.stderr)
+        return 2
+
+    try:
+        items = load_refresh_token_items(
+            tokens_json=getattr(args, "tokens_json", None) or None,
+            from_env=getattr(args, "from_env", None) or None,
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    if not items:
+        print("import-tokens: no tokens found in payload", file=sys.stderr)
+        return 2
+
+    if dry_run:
+        for i, item in enumerate(items, start=1):
+            tok = str(item["refresh_token"])
+            preview = (tok[:6] + "…") if len(tok) > 6 else "***"
+            print(
+                f"  [{i}] label={item['label']!r} enabled={item['enabled']} "
+                f"weight={item['weight']} token={preview}"
+            )
+        print(f"import-tokens dry-run: {len(items)} token(s) would be inserted")
+        return 0
+
+    target_url = str(getattr(args, "target_url", "") or "").strip()
+    if not target_url:
+        print("--target-url required unless --dry-run", file=sys.stderr)
         return 2
 
     # Import crypto without requiring full app package path when run from repo root.
@@ -474,32 +604,12 @@ def cmd_import_tokens(args: argparse.Namespace) -> int:
     from app.core.crypto import FieldEncryptor, mask_secret  # type: ignore
 
     encryptor = FieldEncryptor.from_key(key)
-    path = Path(args.tokens_json)
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    items: list[dict[str, Any]]
-    if isinstance(raw, list):
-        items = []
-        for i, el in enumerate(raw):
-            if isinstance(el, str):
-                items.append({"refresh_token": el, "label": f"legacy-{i+1}"})
-            elif isinstance(el, dict):
-                items.append(el)
-    elif isinstance(raw, dict) and "tokens" in raw:
-        items = list(raw["tokens"])
-    else:
-        print("tokens-json must be a list or {tokens:[...]}", file=sys.stderr)
-        return 2
-
-    engine = _connect(args.target_url)
+    engine = _connect(target_url)
     n = 0
     with engine.begin() as conn:
-        for i, item in enumerate(items):
-            if not isinstance(item, dict):
-                continue
-            token = str(item.get("refresh_token") or item.get("token") or "").strip()
-            if not token:
-                continue
-            label = _str_or_none(item.get("label")) or f"legacy-{i+1}"
+        for item in items:
+            token = str(item["refresh_token"])
+            label = str(item["label"])
             enabled = 1 if item.get("enabled", True) else 0
             weight = float(item.get("weight") or 1.0)
             enc = encryptor.encrypt_text(token)
@@ -523,7 +633,7 @@ def cmd_import_tokens(args: argparse.Namespace) -> int:
                 },
             )
             n += 1
-    print(f"import-tokens done: {n} tokens (encrypted with target key)")
+    print(f"import-tokens done: {n} tokens (encrypted with target key; secrets not printed)")
     return 0
 
 
@@ -580,10 +690,31 @@ def build_parser() -> argparse.ArgumentParser:
     ip.add_argument("--verbose", action="store_true")
     ip.set_defaults(func=cmd_import_pg)
 
-    it = sub.add_parser("import-tokens", help="Import plain refresh tokens (encrypt into pixiv_tokens)")
-    it.add_argument("--tokens-json", required=True)
-    it.add_argument("--target-url", required=True)
+    it = sub.add_parser(
+        "import-tokens",
+        help="Import plain refresh tokens (encrypt into pixiv_tokens); TOKEN-IMPORT",
+    )
+    it.add_argument(
+        "--tokens-json",
+        default="",
+        help="Path to tokens.json (list / {tokens:[...]}). Mutually exclusive with --from-env.",
+    )
+    it.add_argument(
+        "--from-env",
+        default="",
+        help="Env var name holding REFRESH_TOKENS-shaped payload (JSON or comma-separated).",
+    )
+    it.add_argument(
+        "--target-url",
+        default="",
+        help="SQLAlchemy URL (required unless --dry-run)",
+    )
     it.add_argument("--field-encryption-key", default="")
+    it.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Parse and count only; do not encrypt or write DB (no key/url required)",
+    )
     it.set_defaults(func=cmd_import_tokens)
 
     return p

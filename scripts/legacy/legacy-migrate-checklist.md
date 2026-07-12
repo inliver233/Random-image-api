@@ -59,15 +59,30 @@ python scripts/legacy/migrate_legacy_catalog.py import-pg \
   --target-url "postgresql+asyncpg://ria:ria@127.0.0.1:5432/random_image"
 ```
 
-## Tokens (D4)
+## Tokens (TOKEN-IMPORT / D4)
 
 ```bash
-# tokens.json: ["rt_…"] or [{"refresh_token":"…","label":"a"}]
+# Preview without writing (no encryption key required):
+python scripts/legacy/migrate_legacy_catalog.py import-tokens \
+  --tokens-json ./tokens.json \
+  --dry-run
+
+# tokens.json: ["rt_…"] or [{"refresh_token":"…","label":"a"}] or {"tokens":[…]}
 python scripts/legacy/migrate_legacy_catalog.py import-tokens \
   --tokens-json ./tokens.json \
   --field-encryption-key "$FIELD_ENCRYPTION_KEY" \
   --target-url "sqlite+aiosqlite:///./data/app.db"
+
+# Or from env REFRESH_TOKENS (JSON array / {tokens:[…]} / comma-separated):
+python scripts/legacy/migrate_legacy_catalog.py import-tokens \
+  --from-env REFRESH_TOKENS \
+  --field-encryption-key "$FIELD_ENCRYPTION_KEY" \
+  --target-url "sqlite+aiosqlite:///./data/app.db"
 ```
+
+- Secrets are never printed on success (masked `***` in DB; dry-run shows only a short prefix).
+- Mutually exclusive: `--tokens-json` **or** `--from-env`.
+- TOKEN-1 still applies after import: hydrate/refresh need at least one **enabled** row.
 
 ## Cold start / r18 (D3)
 
