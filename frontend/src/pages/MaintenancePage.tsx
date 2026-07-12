@@ -146,7 +146,6 @@ type ModularPortsStatusResponse = {
     backend: string;
     requested: string;
     implemented?: boolean;
-    using_sqlite_fallback?: boolean;
   };
   recent_dedup: {
     configured_backend: string;

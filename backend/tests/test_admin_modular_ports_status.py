@@ -39,7 +39,7 @@ def test_admin_modular_ports_status_defaults(tmp_path: Path, monkeypatch) -> Non
         assert body["job_queue"]["backend"] == "sqlite"
         assert body["job_queue"]["requested"] == "sqlite"
         assert body["job_queue"]["implemented"] is True
-        assert body["job_queue"]["using_sqlite_fallback"] is False
+        assert "using_sqlite_fallback" not in body["job_queue"]
         assert body["recent_dedup"]["configured_backend"] == "memory"
         assert body["recent_dedup"]["active_backend"] == "memory"
         assert body["recent_dedup"]["using_memory_fallback"] is False
@@ -82,7 +82,7 @@ def test_admin_modular_ports_status_recent_redis_fallback(tmp_path: Path, monkey
         assert body["job_queue"]["backend"] == "sqlite"
         assert body["job_queue"]["requested"] == "sqlite"
         assert body["job_queue"]["implemented"] is True
-        assert body["job_queue"]["using_sqlite_fallback"] is False
+        assert "using_sqlite_fallback" not in body["job_queue"]
 
 
 def test_admin_modular_ports_status_recent_redis_active(tmp_path: Path, monkeypatch) -> None:

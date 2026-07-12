@@ -209,8 +209,6 @@ async def healthz(request: Request) -> Any:
                 ),
                 "requested": job_queue_requested,
                 "implemented": job_queue_requested in {"sqlite", "memory"},
-                # Always false under fail-loud settings; kept for API shape stability.
-                "using_sqlite_fallback": False,
             },
             # Catalog store dialect (sqlite default; postgres when DATABASE_URL is postgres*).
             "catalog": {

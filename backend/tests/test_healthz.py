@@ -50,7 +50,7 @@ def test_healthz_ok_includes_request_id() -> None:
     assert modules["job_queue"]["backend"] == "sqlite"
     assert modules["job_queue"]["requested"] == "sqlite"
     assert modules["job_queue"]["implemented"] is True
-    assert modules["job_queue"]["using_sqlite_fallback"] is False
+    assert "using_sqlite_fallback" not in modules["job_queue"]
     assert modules["catalog"]["backend"] == "sqlite"
     assert modules["tags"]["backend"] == "sqlite"
     assert modules["recent_dedup"]["backend"] == "memory"
@@ -108,7 +108,7 @@ def test_healthz_job_queue_memory_alias_label(tmp_path: Path, monkeypatch) -> No
         assert jq.get("backend") == "memory"
         assert jq.get("requested") == "memory"
         assert jq.get("implemented") is True
-        assert jq.get("using_sqlite_fallback") is False
+        assert "using_sqlite_fallback" not in jq
 
 
 def test_healthz_recent_dedup_reports_settings_fallback(tmp_path: Path, monkeypatch) -> None:

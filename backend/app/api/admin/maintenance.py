@@ -330,8 +330,6 @@ async def modular_ports_status(
                 "backend": job_queue_backend,
                 "requested": job_requested,
                 "implemented": job_queue_implemented,
-                # Always false under fail-loud settings; kept for API shape stability.
-                "using_sqlite_fallback": False,
             },
             "recent_dedup": {
                 "configured_backend": recent_cfg,

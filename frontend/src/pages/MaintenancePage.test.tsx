@@ -94,7 +94,6 @@ function fixtureFor(url: string, mode: FixtureMode): Response {
           backend: "sqlite",
           requested: "sqlite",
           implemented: true,
-          using_sqlite_fallback: false,
         },
         recent_dedup: {
           configured_backend: "redis",
@@ -114,7 +113,6 @@ function fixtureFor(url: string, mode: FixtureMode): Response {
         backend: "memory",
         requested: "memory",
         implemented: true,
-        using_sqlite_fallback: false,
       },
       recent_dedup: {
         configured_backend: "memory",
