@@ -275,7 +275,7 @@ def build_job_queue(engine: AsyncEngine, *, backend: str = "sqlite") -> JobQueue
         )
     if backend_norm not in {"sqlite", "memory"}:
         raise ValueError(
-            f"Unknown JOB_QUEUE_BACKEND={backend_norm!r}; supported: sqlite, memory"
+            f"JOB_QUEUE_BACKEND={backend_norm!r} is not supported; use sqlite or memory"
         )
     queue = SqliteJobQueue(engine)
     # Label active backend for ops honesty (storage remains SQLite jobs table either way).

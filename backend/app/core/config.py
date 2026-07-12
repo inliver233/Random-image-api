@@ -237,7 +237,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     recent_dedup_backend = _get(env, "RECENT_DEDUP_BACKEND", "memory").lower()
     if recent_dedup_backend not in {"memory", "redis"}:
         recent_dedup_backend = "memory"
-    # sqlite (default) | memory. redis/nats are reserved and rejected (fail loud; no silent fallback).
+    # sqlite (default) | memory. redis/nats/unknown are rejected (fail loud; no silent fallback).
     job_queue_backend = _get(env, "JOB_QUEUE_BACKEND", "sqlite").lower()
     if job_queue_backend in {"redis", "nats"}:
         raise ValueError(
@@ -245,7 +245,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             "use sqlite (default) or memory."
         )
     if job_queue_backend not in {"sqlite", "memory"}:
-        job_queue_backend = "sqlite"
+        raise ValueError(
+            f"JOB_QUEUE_BACKEND={job_queue_backend!r} is not supported; "
+            "use sqlite (default) or memory."
+        )
 
     random_totals_persist_interval_seconds = parse_int_env(
         "RANDOM_TOTALS_PERSIST_INTERVAL_SECONDS",

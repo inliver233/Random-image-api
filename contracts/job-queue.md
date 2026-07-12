@@ -31,7 +31,7 @@ Implementation:
 
 | Env | Default | Role |
 | --- | --- | --- |
-| `JOB_QUEUE_BACKEND` | `sqlite` | Loaded into `Settings.job_queue_backend`. `sqlite` implemented. `memory` is an implemented **alias** of the same SQLite jobs table with active `backend` label `memory`. `redis` / `nats` are **reserved and rejected** at settings/factory (no silent sqlite fallback) |
+| `JOB_QUEUE_BACKEND` | `sqlite` | Loaded into `Settings.job_queue_backend`. `sqlite` implemented. `memory` is an implemented **alias** of the same SQLite jobs table with active `backend` label `memory`. `redis` / `nats` / any other value are **rejected** at settings/factory (no silent sqlite fallback) |
 
 Wire-up reads settings (not raw `os.environ` at call sites):
 

@@ -55,8 +55,8 @@ def test_load_settings_job_queue_backend() -> None:
     s_mem = load_settings({"JOB_QUEUE_BACKEND": "memory"})
     assert s_mem.job_queue_backend == "memory"
 
-    s_weird = load_settings({"JOB_QUEUE_BACKEND": "weird"})
-    assert s_weird.job_queue_backend == "sqlite"
+    with pytest.raises(ValueError, match="not supported|not implemented|reserved"):
+        load_settings({"JOB_QUEUE_BACKEND": "weird"})
 
 
 def test_load_settings_prod_requires_secrets() -> None:

@@ -29,6 +29,11 @@ def test_build_job_queue_defaults_to_sqlite(tmp_path: Path) -> None:
         raise AssertionError("expected ValueError for nats")
     except ValueError as exc:
         assert "not implemented" in str(exc).lower() or "reserved" in str(exc).lower()
+    try:
+        build_job_queue(engine, backend="weird")
+        raise AssertionError("expected ValueError for unknown backend")
+    except ValueError as exc:
+        assert "not supported" in str(exc).lower() or "unknown" in str(exc).lower()
 
     # memory is an implemented alias: same SqliteJobQueue, honest backend label.
     q_mem = build_job_queue(engine, backend="memory")
