@@ -140,6 +140,7 @@ async def push_engine_snapshot(
     timeout_s: float = 60.0,
     catalog: CatalogStore | None = None,
     tag_store: TagStore | None = None,
+    settings: Settings | Any | None = None,
 ) -> dict[str, Any] | None:
     Session = create_sessionmaker(engine)
     async with Session() as session:
@@ -152,6 +153,7 @@ async def push_engine_snapshot(
         revision=revision,
         images=list(built["images"]),
         timeout_s=timeout_s,
+        settings=settings,
     )
     if result is None:
         logger.warning("random-engine snapshot push failed revision=%s count=%s", revision, built["count"])
@@ -190,6 +192,7 @@ async def maybe_warm_engine_snapshot_on_startup(
             timeout_s=float(timeout_s),
             catalog=catalog,
             tag_store=tag_store,
+            settings=settings,
         )
         if result is not None:
             logger.info(
@@ -236,13 +239,16 @@ async def publish_engine_events(
     client: Any,
     events: list[dict[str, Any]],
     timeout_s: float = _ENGINE_EVENTS_TIMEOUT_S,
+    settings: Settings | Any | None = None,
 ) -> dict[str, Any] | None:
     if not events:
         return {"ok": True, "applied": 0}
     last: dict[str, Any] | None = None
     for offset in range(0, len(events), _ENGINE_EVENT_CHUNK):
         chunk = events[offset : offset + _ENGINE_EVENT_CHUNK]
-        result = await engine_apply_events(client, base_url, events=chunk, timeout_s=timeout_s)
+        result = await engine_apply_events(
+            client, base_url, events=chunk, timeout_s=timeout_s, settings=settings
+        )
         if result is None:
             return None
         last = result
@@ -292,7 +298,9 @@ async def maybe_publish_engine_upserts(
         events = build_upsert_events(images)
         if not events:
             return None
-        result = await publish_engine_events(base_url=base, client=use_client, events=events)
+        result = await publish_engine_events(
+            base_url=base, client=use_client, events=events, settings=settings
+        )
         if result is None:
             logger.warning(
                 "random-engine upsert publish failed count=%s illust_id=%s",
@@ -326,7 +334,9 @@ async def maybe_publish_engine_deletes(
         events = build_delete_events(image_ids)
         if not events:
             return None
-        result = await publish_engine_events(base_url=base, client=use_client, events=events)
+        result = await publish_engine_events(
+            base_url=base, client=use_client, events=events, settings=settings
+        )
         if result is None:
             logger.warning("random-engine delete publish failed count=%s", len(events))
         return result
@@ -359,6 +369,7 @@ async def maybe_publish_engine_empty_snapshot(
             revision=revision,
             images=[],
             timeout_s=30.0,
+            settings=settings,
         )
         if result is None:
             logger.warning("random-engine empty snapshot after clear failed")

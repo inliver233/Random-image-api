@@ -99,7 +99,7 @@ def test_engine_apply_events_posts_json() -> None:
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, Any]]] = []
 
-        async def post(self, url: str, json: dict[str, Any], timeout: float) -> _Resp:
+        async def post(self, url: str, json: dict[str, Any], timeout: float, **_kw: Any) -> _Resp:
             self.calls.append((url, json))
             return _Resp()
 
