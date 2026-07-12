@@ -33,7 +33,10 @@ def _build_docs_html(*, base_url: str, public_api_key_required: bool = False) ->
         "wtf": u("/wtf"),
         "wtf_r18": u("/wtf?r18=1"),
         "json_full": u("/random?format=json"),
+        "json_debug": u("/random?format=json&debug=1"),
         "json_simple": u("/random?format=simple_json"),
+        "feed": u("/feed?limit=8"),
+        "feed_debug": u("/feed?limit=8&debug=1"),
         "r18_only": u("/random?r18=1"),
         "safe_only": u("/random?r18=0"),
         "any_r18": u("/random?r18=2"),
@@ -300,9 +303,27 @@ def _build_docs_html(*, base_url: str, public_api_key_required: bool = False) ->
 
       <section class="card">
         <h2>2) JSON / 调试信息</h2>
-        <p><span class="kbd">format=json</span> 返回完整数据（含 tags / debug）；<span class="kbd">format=simple_json</span> 更轻量。</p>
+        <p>
+          <span class="kbd">format=json</span> 返回完整数据（含 tags）；
+          <span class="kbd">format=simple_json</span> 更轻量。
+          默认<strong>不</strong>附带 <span class="kbd">data.debug</span>；加
+          <span class="kbd">debug=1</span> 才会返回双跑元数据（含
+          <span class="kbd">engine_status</span>：
+          <span class="kbd">ok</span> / <span class="kbd">skipped_circuit</span> /
+          <span class="kbd">skipped_sticky</span> / <span class="kbd">skipped_traffic</span> 等）。
+        </p>
         <pre><code>{examples["json_full"]}
+{examples["json_debug"]}
 {examples["json_simple"]}</code></pre>
+        <p style="margin-top:10px;">
+          批量接口 <span class="kbd">/feed</span> 默认也不带 debug；
+          <span class="kbd">?debug=1</span> 时仅在<strong>信封</strong>
+          <span class="kbd">data.debug</span> 暴露 batch 级
+          <span class="kbd">engine_status</span> / <span class="kbd">batch_count</span> /
+          <span class="kbd">topup_count</span>（条目本身保持精简，适合 /wtf）。
+        </p>
+        <pre><code>{examples["feed"]}
+{examples["feed_debug"]}</code></pre>
       </section>
 
       <section class="card">
