@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from app.core.cf_api_proxy import load_cf_api_proxy_config_from_settings
 from app.core.coerce import clamp_float
 from app.core.image_edge import load_image_edge_config_from_settings
+from app.core.r2_prewarm import r2_prewarm_enabled, r2_prewarm_secret
 from app.core.random_engine_client import engine_circuit_snapshot, random_engine_base_url
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.time import iso_utc_ms
@@ -74,6 +75,21 @@ def _cf_api_proxy_public_snapshot(settings: Any) -> dict[str, Any]:
         "enabled_flag": enabled_flag,
         "ready": ready,
         "base_url_count": int(base_url_count),
+    }
+
+
+def _r2_prewarm_public_snapshot(settings: Any) -> dict[str, Any]:
+    """Local R2 prewarm readiness for public /status (config only; no secrets / no webhook probe)."""
+    enabled_flag = bool(getattr(settings, "r2_prewarm_enabled", False)) if settings is not None else False
+    url_configured = (
+        bool(str(getattr(settings, "r2_prewarm_url", "") or "").strip()) if settings is not None else False
+    )
+    # Match /healthz modules.r2_prewarm.ready: flag+url via r2_prewarm_enabled AND secret present.
+    ready = bool(r2_prewarm_enabled(settings) and r2_prewarm_secret(settings)) if settings is not None else False
+    return {
+        "enabled_flag": enabled_flag,
+        "ready": ready,
+        "url_configured": url_configured,
     }
 
 
@@ -197,6 +213,20 @@ def _build_status_html(
         cf_chip = f"cf-api: not ready · flag on · bases {cf_bases}"
     else:
         cf_chip = f"cf-api: off · bases {cf_bases}"
+
+    # R2 prewarm readiness chip (config only; same as /healthz modules.r2_prewarm without secret flags).
+    r2 = payload.get("r2_prewarm") if isinstance(payload.get("r2_prewarm"), dict) else {}
+    r2_ready = bool(r2.get("ready"))
+    r2_flag = bool(r2.get("enabled_flag"))
+    r2_url = bool(r2.get("url_configured"))
+    if r2_ready:
+        r2_chip = "r2-prewarm: ready"
+    elif r2_flag and r2_url:
+        r2_chip = "r2-prewarm: not ready · flag+url"
+    elif r2_flag:
+        r2_chip = "r2-prewarm: not ready · flag on"
+    else:
+        r2_chip = "r2-prewarm: off"
 
     json_url = u("/status.json")
     docs_url = u("/docs")
@@ -458,6 +488,7 @@ def _build_status_html(
         <span class="chip" title="process-local dual-run circuit (same as /healthz modules.random_engine.circuit; no outbound probe)">{eng_chip}</span>
         <span class="chip" title="Image Edge config readiness (same as /healthz modules.image_edge; no secrets / no outbound edge probe)">{edge_chip}</span>
         <span class="chip" title="CF API proxy config readiness (same as /healthz modules.cf_api_proxy; no secrets / no outbound worker probe)">{cf_chip}</span>
+        <span class="chip" title="R2 prewarm config readiness (same as /healthz modules.r2_prewarm ready; no secrets / no webhook probe)">{r2_chip}</span>
       </div>
     </div>
 
@@ -612,6 +643,8 @@ async def status_json(request: Request) -> JSONResponse:
     payload["image_edge"] = _image_edge_public_snapshot(settings)
     # CF API proxy config readiness (same fields as /healthz modules.cf_api_proxy; no secrets / probe).
     payload["cf_api_proxy"] = _cf_api_proxy_public_snapshot(settings)
+    # R2 prewarm config readiness (public subset of /healthz modules.r2_prewarm; no secrets / probe).
+    payload["r2_prewarm"] = _r2_prewarm_public_snapshot(settings)
 
     try:
         payload.update(await _query_gallery_stats(engine))
@@ -647,6 +680,7 @@ async def status_page(request: Request) -> HTMLResponse:
     payload["random_engine"] = _random_engine_public_snapshot(settings)
     payload["image_edge"] = _image_edge_public_snapshot(settings)
     payload["cf_api_proxy"] = _cf_api_proxy_public_snapshot(settings)
+    payload["r2_prewarm"] = _r2_prewarm_public_snapshot(settings)
 
     try:
         payload.update(await _query_gallery_stats(engine))
