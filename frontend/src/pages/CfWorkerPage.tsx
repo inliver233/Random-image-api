@@ -97,7 +97,7 @@ const USAGE_STEPS = [
   "选择类型：API 出口 或 出图边缘，点击部署",
   "成功后自动加入本系统对应出口池，无需手写 BASE_URLS",
   "补全/Token 走 api-worker；用户出图走 img-worker 反代 i.pximg.net，而非住宅",
-  "多 Worker 名 = 多出口节点；注意免费额",
+  "多 Worker 名 = 多出口节点；池内 runtime 成员可「注销」出本系统（不删 CF 脚本）；注意免费额",
 ];
 
 function formatBaseCooldown(rows: BaseCooldownRow[] | undefined): string {
@@ -209,8 +209,83 @@ export function CfWorkerPage() {
     },
   });
 
+  const unregister = useMutation({
+    mutationFn: (payload: { kind: "api" | "image"; base_url: string }) =>
+      apiJson<{ ok: true; unregistered?: boolean; request_id: string }>(
+        "/admin/api/cf-workers/unregister",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      ),
+    onMutate: () => {
+      alerts.clear();
+    },
+    onSuccess: (body, vars) => {
+      const host = String(vars.base_url || "").replace(/^https?:\/\//, "");
+      alerts.setSuccess(
+        `已从 ${vars.kind === "api" ? "API" : "出图"} 运行时池移除 ${host}（env 成员需改环境变量）`,
+        body.request_id,
+      );
+      void queryClient.invalidateQueries({ queryKey: ["admin", "cf-workers", "pool"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin", "maintenance"] });
+    },
+    onError: (err) => {
+      alerts.setErrorMessage(messageFromError(err) || "注销失败", requestIdFromError(err));
+    },
+  });
+
   const pool = poolQuery.data;
   const policy = pool?.egress_policy;
+
+  const renderPoolBases = (side: PoolSide | undefined, kind: "api" | "image") => {
+    const envSet = new Set((side?.env_base_urls || []).map((u) => String(u).replace(/\/$/, "")));
+    const merged = side?.merged_base_urls || [];
+    if (merged.length === 0) {
+      return <Typography.Text type="secondary">（空）</Typography.Text>;
+    }
+    return (
+      <Space direction="vertical" size={4} style={{ width: "100%" }}>
+        {merged.map((raw) => {
+          const base = String(raw || "").replace(/\/$/, "");
+          const fromEnv = envSet.has(base);
+          const host = base.replace(/^https?:\/\//, "");
+          return (
+            <Space key={`${kind}:${base}`} wrap size={8}>
+              <Typography.Text code style={{ fontSize: 12 }}>
+                {host}
+              </Typography.Text>
+              <Tag>{fromEnv ? "env" : "runtime"}</Tag>
+              {!fromEnv ? (
+                <Button
+                  size="small"
+                  danger
+                  loading={
+                    unregister.isPending &&
+                    unregister.variables?.kind === kind &&
+                    unregister.variables?.base_url === base
+                  }
+                  onClick={() => {
+                    const ok = window.confirm(
+                      `从运行时池注销 ${host}？\n不会删除 Cloudflare 上的 Worker 脚本；仅从本系统出口池移除。`,
+                    );
+                    if (!ok) return;
+                    unregister.mutate({ kind, base_url: base });
+                  }}
+                >
+                  注销
+                </Button>
+              ) : (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  env 成员请改 IMAGE_EDGE / CF_API_PROXY 环境变量
+                </Typography.Text>
+              )}
+            </Space>
+          );
+        })}
+      </Space>
+    );
+  };
 
   return (
     <div style={{ maxWidth: 880 }}>
@@ -330,37 +405,37 @@ export function CfWorkerPage() {
           {pool ? (
             <Descriptions size="small" column={1} bordered>
               <Descriptions.Item label="API 池">
-                <Space wrap>
-                  {(pool.api?.runtime_enabled || pool.api?.env_enabled) ? (
-                    <Tag color="blue">enabled</Tag>
-                  ) : (
-                    <Tag>off</Tag>
-                  )}
-                  {policy?.cf_api_proxy_ready ? (
-                    <Tag color="green">ready</Tag>
-                  ) : (
-                    <Tag color="orange">not ready</Tag>
-                  )}
-                  <Typography.Text type="secondary">
-                    {(pool.api?.merged_base_urls || []).join(", ") || "（空）"}
-                  </Typography.Text>
+                <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                  <Space wrap>
+                    {(pool.api?.runtime_enabled || pool.api?.env_enabled) ? (
+                      <Tag color="blue">enabled</Tag>
+                    ) : (
+                      <Tag>off</Tag>
+                    )}
+                    {policy?.cf_api_proxy_ready ? (
+                      <Tag color="green">ready</Tag>
+                    ) : (
+                      <Tag color="orange">not ready</Tag>
+                    )}
+                  </Space>
+                  {renderPoolBases(pool.api, "api")}
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label="出图池">
-                <Space wrap>
-                  {(pool.image?.runtime_enabled || pool.image?.env_enabled) ? (
-                    <Tag color="blue">enabled</Tag>
-                  ) : (
-                    <Tag>off</Tag>
-                  )}
-                  {policy?.image_edge_ready ? (
-                    <Tag color="green">ready</Tag>
-                  ) : (
-                    <Tag color="orange">not ready</Tag>
-                  )}
-                  <Typography.Text type="secondary">
-                    {(pool.image?.merged_base_urls || []).join(", ") || "（空）"}
-                  </Typography.Text>
+                <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                  <Space wrap>
+                    {(pool.image?.runtime_enabled || pool.image?.env_enabled) ? (
+                      <Tag color="blue">enabled</Tag>
+                    ) : (
+                      <Tag>off</Tag>
+                    )}
+                    {policy?.image_edge_ready ? (
+                      <Tag color="green">ready</Tag>
+                    ) : (
+                      <Tag color="orange">not ready</Tag>
+                    )}
+                  </Space>
+                  {renderPoolBases(pool.image, "image")}
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label="住宅策略">

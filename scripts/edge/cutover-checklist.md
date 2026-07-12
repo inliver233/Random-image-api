@@ -39,7 +39,7 @@ Ops-only. **Default path (Admin FE / deploy API):** one-page deploy → auto reg
 4. Inspect: `GET /admin/api/cf-workers/pool`, `GET /admin/api/maintenance/cf-api-proxy`
 5. Enable (if not already via deploy): env `CF_API_PROXY_ENABLED=true` **or** runtime `cf_pool.api.enabled`
 6. Accept: `new_pixiv_pixiv_api_egress_total{via="cf"}` dominates
-7. Rollback: env false + clear runtime enable / unregister bases
+7. Rollback: env false + clear runtime enable / Admin CF Worker 页对 runtime 成员「注销」或 `POST …/unregister`
 
 ## Image edge pool (`edge/img-worker`) — advanced / env
 
