@@ -1,5 +1,5 @@
 ﻿import { useMutation } from "@tanstack/react-query";
-import { Alert, Button, Card, Col, Form, Input, InputNumber, Row, Select, Skeleton, Space, Switch, Typography } from "antd";
+import { Alert, Button, Card, Col, Form, Input, InputNumber, Row, Select, Skeleton, Space, Switch, Tag, Typography } from "antd";
 import React, { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 
@@ -50,7 +50,11 @@ type PlaygroundFormValues = {
 type RandomJsonResponse = {
   ok: true;
   request_id: string;
-  data: { urls?: { proxy?: string } };
+  data: {
+    urls?: { proxy?: string };
+    /** Present when request includes debug=1 (dual-run engine_status, etc.). */
+    debug?: { engine_status?: string; [key: string]: unknown };
+  };
 };
 
 type PlaygroundResult =
@@ -95,6 +99,10 @@ function buildRandomUrl(values: PlaygroundFormValues): string {
     sp.set("format", "image");
   } else {
     sp.set("format", values.format);
+  }
+  // Admin JSON debug: surface dual-run engine_status (incl. skipped_circuit) without extra toggle.
+  if (values.format === "json") {
+    sp.set("debug", "1");
   }
 
   const qs = sp.toString();
@@ -169,6 +177,8 @@ export function rewriteRedirectFallbackUrl(url: string): string {
   const sp = new URLSearchParams(qs);
   sp.delete("redirect");
   sp.set("format", "json");
+  // Match normal JSON playground requests so engine_status is available.
+  sp.set("debug", "1");
   const next = sp.toString();
   return next ? `${path}?${next}` : path;
 }
@@ -550,6 +560,24 @@ export function PlaygroundPage() {
             ) : m.isSuccess ? (
               <Space direction="vertical" size="middle" style={{ width: "100%" }}>
                 <Typography.Text type="secondary">请求ID: {m.data.request_id || "-"}</Typography.Text>
+                {m.data.kind === "json" && m.data.payload.data?.debug?.engine_status ? (
+                  <Space size={[4, 4]} wrap>
+                    <Typography.Text type="secondary">双跑 engine_status:</Typography.Text>
+                    <Tag
+                      color={
+                        m.data.payload.data.debug.engine_status === "ok"
+                          ? "green"
+                          : m.data.payload.data.debug.engine_status === "skipped_circuit"
+                            ? "red"
+                            : m.data.payload.data.debug.engine_status.startsWith("skipped_")
+                              ? "default"
+                              : "orange"
+                      }
+                    >
+                      {m.data.payload.data.debug.engine_status}
+                    </Tag>
+                  </Space>
+                ) : null}
                 <Typography.Text type="secondary">
                   {/* Split FE/API + key-required: absolute, browser-openable request URL. */}
                   请求链接:{" "}

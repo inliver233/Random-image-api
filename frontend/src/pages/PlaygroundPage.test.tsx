@@ -45,7 +45,14 @@ describe("PlaygroundPage", () => {
         }
         if (url.includes("/random") && url.includes("format=json")) {
           return new Response(
-            JSON.stringify({ ok: true, request_id: "req_play", data: { urls: { proxy: "/i/1.jpg" } } }),
+            JSON.stringify({
+              ok: true,
+              request_id: "req_play",
+              data: {
+                urls: { proxy: "/i/1.jpg" },
+                debug: { engine_status: "skipped_circuit" },
+              },
+            }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
@@ -72,6 +79,13 @@ describe("PlaygroundPage", () => {
     expect(await screen.findByText("随机接口调试")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "开始请求" }));
     expect(await screen.findByText(/请求ID:\s*req_play/)).toBeInTheDocument();
+    // JSON mode always sends debug=1 so dual-run engine_status is visible.
+    expect(await screen.findByText("双跑 engine_status:")).toBeInTheDocument();
+    expect(await screen.findByText("skipped_circuit")).toBeInTheDocument();
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    expect(fetchMock).toHaveBeenCalled();
+    const calledUrl = String(fetchMock.mock.calls[0]?.[0] || "");
+    expect(calledUrl).toContain("debug=1");
   });
 
   it("sends X-API-Key header when debug key is set", async () => {
@@ -80,8 +94,13 @@ describe("PlaygroundPage", () => {
       if (url.includes("/random") && url.includes("format=json")) {
         const headers = new Headers(init?.headers || {});
         expect(headers.get("X-API-Key")).toBe("debug-public-key-1234567890");
+        expect(url).toContain("debug=1");
         return new Response(
-          JSON.stringify({ ok: true, request_id: "req_play_key", data: { urls: { proxy: "/i/1.jpg" } } }),
+          JSON.stringify({
+            ok: true,
+            request_id: "req_play_key",
+            data: { urls: { proxy: "/i/1.jpg" }, debug: { engine_status: "ok" } },
+          }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
       }
