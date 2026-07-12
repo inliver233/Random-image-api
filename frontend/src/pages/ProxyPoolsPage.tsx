@@ -337,7 +337,7 @@ export function ProxyPoolsPage() {
         type="info"
         showIcon
         message="池绑定服务补全与令牌出口，不服务公开 /random 出图"
-        description="用户侧图片走 Image Edge；此页配置只影响 hydrate_metadata / OAuth 访问 app-api.pixiv.net 时的代理选择。"
+        description="用户侧图片主路径是自建 CF 出图反代（img-worker / Image Edge → i.pximg.net），不是第三方镜像，也不是本页住宅池。此页仅影响 hydrate_metadata / OAuth 在 CF api-worker 之后的住宅应急出口。"
       />
 
       <Space wrap>

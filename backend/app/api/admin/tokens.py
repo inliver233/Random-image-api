@@ -272,7 +272,8 @@ async def delete_token(
     summary="Test token OAuth refresh",
     description=(
         "Live Pixiv OAuth refresh probe for one stored token. Egress uses "
-        "`iter_pixiv_api_egress` (CF API proxy first when ready, then residential). "
+        "`iter_pixiv_api_egress` (CF api-worker multi-base first when ready, then "
+        "residential last-resort even under RESIDENTIAL_EGRESS_EMERGENCY_ONLY / TOKEN-2). "
         "Does not enqueue jobs; returns success/failure, `via_cf` (bool), and optional "
         "residential `proxy` ids when the winning attempt was residential. "
         "Never returns refresh tokens or CF secrets. Parity with hydrate egress plan "
@@ -330,14 +331,18 @@ async def test_refresh_token(
             runtime = await get_cached_runtime_config(engine)
             oauth_url = config.base_url.rstrip("/") + OAUTH_TOKEN_PATH
             last_exc: BaseException | None = None
-            # CF multi-base first, then residential (same plan as hydrate).
+            # CF multi-base first, then residential last-resort (TOKEN-2 / hydrate parity).
+            # At least one residential/direct try after CF exhaustion (failover_attempts=0 → 1 try).
+            residential_failover_attempts = int(
+                getattr(settings, "proxy_failover_attempts", 0) or 0
+            )
             async for attempt in iter_pixiv_api_egress(
                 engine,
                 settings,
                 runtime,
                 url=oauth_url,
                 token_id=int(token_id),
-                residential_failover_attempts=0,
+                residential_failover_attempts=residential_failover_attempts,
             ):
                 via_label = "cf" if attempt.via_cf else "residential"
                 try:
@@ -412,7 +417,15 @@ async def test_refresh_token(
                 code=ErrorCode.TOKEN_REFRESH_FAILED,
                 message="Token refresh failed",
                 status_code=502,
-                details={"upstream_status": exc.status_code or 0, "backoff_until": backoff_until or ""},
+                details={
+                    "upstream_status": exc.status_code or 0,
+                    "backoff_until": backoff_until or "",
+                    # Ops: distinguish CF gate/upstream vs Pixiv invalid_grant without secrets.
+                    "hint": (
+                        "CF api-worker + residential last-resort both failed or Pixiv rejected "
+                        "the refresh; check CF pool secret/bases, then token validity / reset failures."
+                    ),
+                },
             ) from exc
         except Exception as exc:
             new_error_count = int(row.error_count or 0) + 1
@@ -434,7 +447,13 @@ async def test_refresh_token(
                 code=ErrorCode.TOKEN_REFRESH_FAILED,
                 message="Token refresh failed",
                 status_code=502,
-                details={"backoff_until": backoff_until or ""},
+                details={
+                    "backoff_until": backoff_until or "",
+                    "hint": (
+                        "OAuth transport error after CF-first egress; probe CF api-worker /healthz "
+                        "and residential emergency path."
+                    ),
+                },
             ) from exc
 
         row.error_count = 0

@@ -55,22 +55,24 @@ def allow_residential_pixiv_api_egress(
 ) -> bool:
     """Whether hydrate/OAuth may attempt residential after (or instead of) CF.
 
-    Rules (mandate-aligned):
+    Rules (mandate-aligned · TOKEN-2):
     - force_emergency=True → always allow (admin explicit emergency).
     - emergency_only=False → legacy: always allow residential failover tries.
     - emergency_only=True (default):
-        - If this URL has CF candidates → **skip residential** (CF path exists).
-        - If no candidates → allow residential (only path left).
+        - CF is still **first** (iterator yields CF candidates before residential).
+        - Residential remains **last resort after CF exhaustion** (gate/5xx/transport),
+          so OAuth test-refresh / hydrate do not hard-502 when every CF base fails.
+        - Happy path stays near-zero residential: callers break on first CF success.
+
+    ``cf_candidate_count`` is retained for callers/snapshot honesty; it no longer
+    blocks post-CF residential under emergency_only (that was the TOKEN-2 hole).
     """
+    _ = cf_candidate_count  # ordering is CF-first in iter_pixiv_api_egress; not a deny flag
     if force_emergency or is_force_residential_emergency():
         return True
     if not residential_egress_emergency_only(settings):
         return True
-    # Candidates already mean CF rewrite is available for this URL; do not
-    # re-check settings.ready (tests / partial settings still demote correctly).
-    if int(cf_candidate_count) > 0:
-        return False
-    # No CF path for this URL → residential remains last resort.
+    # emergency_only: still allow residential after CF (or when CF list empty).
     return True
 
 
@@ -110,8 +112,10 @@ def egress_policy_snapshot(settings: Settings | None) -> dict[str, object]:
     cf_cfg = load_cf_api_proxy_config_from_settings(settings) if settings is not None else None
     cf_ready = bool(cf_cfg is not None and cf_cfg.ready)
     edge_ready = image_edge_is_ready(settings) if settings is not None else False
-    # When emergency_only and not force: residential skipped if CF/edge ready.
-    api_residential_if_cf_ready = (not emergency) or force
+    # TOKEN-2: API always allows residential *after* CF exhaustion (CF stays first).
+    # Snapshot flag means "residential may still run when CF pool is ready", not "prefer residential".
+    api_residential_if_cf_ready = True
+    # Image origin: emergency_only + edge ready still demotes residential unless force.
     image_residential_if_edge_ready = (not emergency) or force
     return {
         "residential_egress_emergency_only": emergency,
@@ -121,7 +125,9 @@ def egress_policy_snapshot(settings: Settings | None) -> dict[str, object]:
         "pixiv_api_allows_residential_when_cf_ready": api_residential_if_cf_ready,
         "image_origin_allows_residential_when_edge_ready": image_residential_if_edge_ready,
         "note": (
-            "force_residential_emergency is process-local (admin POST …/egress-policy); "
-            "does not change RESIDENTIAL_EGRESS_EMERGENCY_ONLY env."
+            "TOKEN-2: Pixiv API is CF-first then residential last-resort even under "
+            "RESIDENTIAL_EGRESS_EMERGENCY_ONLY. Image origin still demotes residential when "
+            "edge ready unless force_residential_emergency. force is process-local "
+            "(admin POST …/egress-policy); does not change env."
         ),
     }

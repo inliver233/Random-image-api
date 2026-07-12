@@ -191,8 +191,9 @@ export function SettingsPage() {
                 代理设置（仅 Hydrate / OAuth）
               </Typography.Title>
               <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-                住宅代理池只服务 Pixiv App API 补全与 OAuth。公开出图走 Image Edge（或本地 /i
-                回退），不经过本页代理路由。
+                住宅代理池只服务 Pixiv App API 补全与 OAuth（CF api-worker 优先，住宅为最后手段）。
+                公开出图主路径是<strong>自建 img-worker</strong>（本域 200 拉流），不是本页住宅池，也不是
+                i.pixiv.cat 等第三方镜像。
               </Typography.Paragraph>
 
               <Form.Item label="启用代理" name="proxy_enabled" valuePropName="checked">
@@ -237,37 +238,39 @@ export function SettingsPage() {
               </Form.Item>
 
               <Typography.Title level={5} style={{ marginTop: 12 }}>
-                图片加速（本地 /i 回退）
+                第三方图片镜像（仅本地 /i 回退 · 非自建 CF）
               </Typography.Title>
               <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-                生产主路径是 Image Edge（环境变量 IMAGE_EDGE_*，维护页可看 ready 状态）。以下镜像开关仅影响源站本地反代回退，不是公开出图的一等路径。
+                生产主路径是<strong>自建 CF 出图反代</strong>（img-worker / Image Edge，环境变量 IMAGE_EDGE_*，维护页可看
+                ready）。以下开关只影响源站<strong>本地回退</strong>时把 i.pximg.net 改写到
+                <strong>第三方镜像</strong>（i.pixiv.cat/re/nl）——不是自建反代，也不是公开出图默认路径。
               </Typography.Paragraph>
               <Form.Item
-                label="使用第三方反向代理（仅图片上游）"
+                label="使用第三方图片镜像（仅本地回退上游）"
                 name="image_proxy_use_pixiv_cat"
                 valuePropName="checked"
-                extra="开启后：服务端拉取图片时会把 i.pximg.net 替换为 i.pixiv.*（客户端仍访问本站域名，不会暴露第三方域名）。会按访问地区智能选择上游：大陆优先 i.pixiv.re，非大陆默认 i.pixiv.cat。"
+                extra="开启后：仅本地 /i 回退时服务端把 i.pximg.net 替换为 i.pixiv.*（客户端仍访问本站域名）。与侧栏「CF Worker」部署的自建 img-worker 无关。地区：大陆优先 i.pixiv.re，非大陆默认 i.pixiv.cat。"
               >
                 <Switch />
               </Form.Item>
               <Form.Item
-                label="镜像域名"
+                label="第三方镜像域名"
                 name="image_proxy_pximg_mirror_host"
-                extra="可选 i.pixiv.cat / i.pixiv.re / i.pixiv.nl。未显式指定 pximg_mirror_host 时：大陆访问会自动用 i.pixiv.re；非大陆使用这里选择的镜像（默认 i.pixiv.cat）。"
+                extra="仅第三方镜像：i.pixiv.cat / re / nl。未显式指定时大陆自动 i.pixiv.re。自建 CF 出图请用 CF Worker 页，不要与这里混称。"
               >
                 <Select
                   style={{ maxWidth: 360 }}
                   options={[
-                    { value: "i.pixiv.cat", label: "i.pixiv.cat（默认）" },
-                    { value: "i.pixiv.re", label: "i.pixiv.re（大陆优先）" },
-                    { value: "i.pixiv.nl", label: "i.pixiv.nl（备用）" },
+                    { value: "i.pixiv.cat", label: "i.pixiv.cat（第三方默认）" },
+                    { value: "i.pixiv.re", label: "i.pixiv.re（大陆优先·第三方）" },
+                    { value: "i.pixiv.nl", label: "i.pixiv.nl（第三方备用）" },
                   ]}
                 />
               </Form.Item>
               <Form.Item
-                label="自定义镜像白名单"
+                label="自定义第三方镜像白名单"
                 name="image_proxy_extra_pximg_mirror_hosts"
-                extra="用于公开接口的 proxy= 参数：仅允许这里配置的自定义域名被用作图片上游镜像（防止 SSRF）。示例：i.mirror.example.com"
+                extra="公开接口 proxy= 参数允许的自定义上游域名（防 SSRF）。示例：i.mirror.example.com。不用于自建 CF。"
               >
                 <Select mode="tags" style={{ maxWidth: 520 }} tokenSeparators={[",", "\n", " "]} placeholder="例如：i.mirror.example.com" />
               </Form.Item>

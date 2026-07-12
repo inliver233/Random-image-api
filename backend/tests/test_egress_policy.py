@@ -20,9 +20,14 @@ def test_residential_emergency_only_default_true() -> None:
     assert residential_egress_emergency_only(SimpleNamespace(residential_egress_emergency_only=True)) is True
 
 
-def test_allow_residential_pixiv_api_when_cf_candidates_emergency() -> None:
+def test_allow_residential_pixiv_api_after_cf_exhaustion_emergency_only() -> None:
+    """TOKEN-2: emergency_only still allows residential after CF list is exhausted.
+
+    CF remains first in iter_pixiv_api_egress; this gate no longer denies post-CF
+    residential solely because candidates existed (that hole caused hard 502s).
+    """
     settings = SimpleNamespace(residential_egress_emergency_only=True)
-    assert allow_residential_pixiv_api_egress(settings, cf_candidate_count=2) is False
+    assert allow_residential_pixiv_api_egress(settings, cf_candidate_count=2) is True
     assert (
         allow_residential_pixiv_api_egress(settings, cf_candidate_count=2, force_emergency=True)
         is True
@@ -48,7 +53,19 @@ def test_process_force_residential_emergency_override() -> None:
     settings = SimpleNamespace(residential_egress_emergency_only=True)
     reset_force_residential_emergency_for_tests()
     assert is_force_residential_emergency() is False
-    assert allow_residential_pixiv_api_egress(settings, cf_candidate_count=2) is False
+    # TOKEN-2: emergency_only already allows post-CF residential; force remains for image path.
+    assert allow_residential_pixiv_api_egress(settings, cf_candidate_count=2) is True
+    # Snapshot without force: API last-resort still True; image demoted when edge ready.
+    with (
+        patch("app.core.egress_policy.image_edge_is_ready", return_value=True),
+        patch(
+            "app.core.cf_api_proxy.load_cf_api_proxy_config_from_settings",
+            return_value=None,
+        ),
+    ):
+        snap0 = egress_policy_snapshot(settings)
+        assert snap0["pixiv_api_allows_residential_when_cf_ready"] is True
+        assert snap0["image_origin_allows_residential_when_edge_ready"] is False
     set_force_residential_emergency(True)
     try:
         assert is_force_residential_emergency() is True
@@ -58,5 +75,6 @@ def test_process_force_residential_emergency_override() -> None:
         snap = egress_policy_snapshot(settings)
         assert snap["force_residential_emergency"] is True
         assert snap["pixiv_api_allows_residential_when_cf_ready"] is True
+        assert snap["image_origin_allows_residential_when_edge_ready"] is True
     finally:
         reset_force_residential_emergency_for_tests()

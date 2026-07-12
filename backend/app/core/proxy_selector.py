@@ -42,10 +42,12 @@ async def iter_pixiv_api_egress(
     residential_failover_attempts: int = 0,
     force_residential_emergency: bool = False,
 ) -> AsyncIterator[EgressAttempt]:
-    """Yield CF multi-base candidates first, then residential picks when allowed.
+    """Yield CF multi-base candidates first, then residential last-resort tries.
 
-    Residential is skipped when CF is ready and ``RESIDENTIAL_EGRESS_EMERGENCY_ONLY``
-    (default True) unless ``force_residential_emergency`` is set.
+    Happy path: CF ready → first successful CF attempt wins (near-zero residential).
+    TOKEN-2: when every CF base fails (gate/5xx/transport), residential still runs
+    as emergency — including under ``RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true``.
+    ``force_residential_emergency`` remains the process/admin override path.
 
     When residential is allowed, try count is ``max(1, residential_failover_attempts + 1)``
     so a single direct (no-proxy) try still runs when pools are empty and fail-open.

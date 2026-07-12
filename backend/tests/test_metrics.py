@@ -111,6 +111,9 @@ def test_metrics_exposes_random_jobs_and_proxy_metrics(tmp_path: Path, monkeypat
             text,
         )
         assert "new_pixiv_image_delivery_total" in text
+        # METRICS-1 / H0: same-origin CF stream vs opt-in browser 302 are distinct labels.
+        assert 'path="edge_stream"' in text
+        assert 'path="edge_redirect"' in text
         assert "new_pixiv_upstream_stream_errors_total" in text
         assert "new_pixiv_jobs_claim_total" in text
         assert "new_pixiv_jobs_failed_total" in text

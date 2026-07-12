@@ -720,11 +720,11 @@ export function MaintenancePage() {
                   <Tag color="orange">not ready</Tag>
                 )}
               </Descriptions.Item>
-              <Descriptions.Item label="CF ready 时仍允许住宅 API">
+              <Descriptions.Item label="CF 后住宅 API 末路">
                 {egressPolicy?.pixiv_api_allows_residential_when_cf_ready ? (
-                  <Tag color="orange">allowed</Tag>
+                  <Tag color="blue">last-resort</Tag>
                 ) : (
-                  <Tag>demoted</Tag>
+                  <Tag>blocked</Tag>
                 )}
               </Descriptions.Item>
             </Descriptions>

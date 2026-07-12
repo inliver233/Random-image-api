@@ -70,7 +70,8 @@ def test_iter_pixiv_api_egress_cf_first_then_residential() -> None:
     assert attempts[3].via_cf is False
 
 
-def test_iter_pixiv_api_egress_skips_residential_when_cf_ready_emergency_only() -> None:
+def test_iter_pixiv_api_egress_cf_first_then_residential_emergency_only() -> None:
+    """TOKEN-2: emergency_only keeps CF first, then residential last-resort tries."""
     settings = SimpleNamespace(residential_egress_emergency_only=True)
     residential = ProxyUri(uri="http://u:p@10.0.0.1:8080", endpoint_id=3, pool_id=1)
 
@@ -98,12 +99,16 @@ def test_iter_pixiv_api_egress_skips_residential_when_cf_ready_emergency_only() 
                     residential_failover_attempts=2,
                 )
             ]
-            select.assert_not_called()
+            # failover_attempts=2 → 3 residential reselects after CF.
+            assert select.await_count == 3
             return out
 
     attempts = asyncio.run(_run())
-    assert len(attempts) == 1
+    assert len(attempts) == 1 + 3
     assert attempts[0].via_cf is True
+    assert attempts[0].request_url.startswith("https://cf-a.example/")
+    assert all(not a.via_cf for a in attempts[1:])
+    assert attempts[1].residential == residential
 
 
 def test_iter_pixiv_api_egress_residential_only_when_cf_empty() -> None:

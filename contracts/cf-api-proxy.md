@@ -49,7 +49,7 @@ Override via Worker `ALLOWED_HOSTS` CSV.
 
 When disabled / not ready, `iter_pixiv_api_egress` yields residential-only attempts via `select_proxy_uri_for_url`.
 
-When **ready** and `RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true` (default), residential tries are **skipped** after CF candidates (mandate: residential near-zero). Opt out with `RESIDENTIAL_EGRESS_EMERGENCY_ONLY=false` or `force_residential_emergency` on the iterator.
+When **ready**: CF multi-base is always **first**. Under `RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true` (default), residential is still attempted as **last resort after every CF base fails** (TOKEN-2: OAuth test-refresh / hydrate must not hard-502 solely because CF pool was ready). Happy path stays near-zero residential because callers break on the first CF success. `force_residential_emergency` remains the process/admin override (also used for image-origin policy).
 
 ### Runtime pool overlay (ops register / deploy)
 

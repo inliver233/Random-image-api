@@ -204,3 +204,96 @@ def test_admin_token_test_refresh_openapi_documents_cf_egress() -> None:
     assert op.get("summary") == "Test token OAuth refresh"
     desc = str(op.get("description") or "")
     assert "iter_pixiv_api_egress" in desc or "CF API" in desc
+    assert "TOKEN-2" in desc or "last-resort" in desc or "residential" in desc.lower()
+
+
+def test_admin_token_test_refresh_cf_fail_then_residential_success(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """TOKEN-2: CF gate failure must still allow residential/direct OAuth success."""
+    db_path = tmp_path / "admin_token_test_refresh_cf_fail.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    field_key = Fernet.generate_key().decode("ascii")
+    encryptor = FieldEncryptor.from_key(field_key)
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", field_key)
+    monkeypatch.setenv("PIXIV_OAUTH_CLIENT_ID", "client_id_test")
+    monkeypatch.setenv("PIXIV_OAUTH_CLIENT_SECRET", "client_secret_test")
+    monkeypatch.setenv("PIXIV_OAUTH_HASH_SECRET", "hash_secret_test")
+    # CF pool ready + emergency_only default: must not skip residential after CF fail.
+    monkeypatch.setenv("CF_API_PROXY_ENABLED", "true")
+    monkeypatch.setenv("CF_API_PROXY_SECRET", "cf-secret")
+    monkeypatch.setenv("CF_API_PROXY_BASE_URLS", "https://api-cf.example.com")
+    monkeypatch.setenv("RESIDENTIAL_EGRESS_EMERGENCY_ONLY", "true")
+
+    app = create_app()
+    token_id: int | None = None
+    refresh_token = "rt_old"
+    rotated_refresh_token = "rt_new"
+    seen_urls: list[str] = []
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            row = PixivToken(
+                label="acc1",
+                enabled=1,
+                refresh_token_enc=encryptor.encrypt_text(refresh_token),
+                refresh_token_masked="***",
+                weight=1.0,
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+            nonlocal token_id
+            token_id = int(row.id)
+
+        await app.state.engine.dispose()
+
+    asyncio.run(_seed())
+    assert token_id is not None
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        url = str(req.url)
+        seen_urls.append(url)
+        if "api-cf.example.com" in url:
+            # Worker gate / bad secret style failure — should_failover_cf_attempt True.
+            return httpx.Response(403, json={"ok": False, "message": "Forbidden"})
+        assert "oauth.secure.pixiv.net" in url
+        return httpx.Response(
+            200,
+            json={
+                "response": {
+                    "access_token": "access_token_test",
+                    "token_type": "bearer",
+                    "expires_in": 3600,
+                    "refresh_token": rotated_refresh_token,
+                    "scope": "",
+                    "user": {"id": 99},
+                }
+            },
+        )
+
+    app.state.httpx_transport = httpx.MockTransport(handler)
+
+    admin_token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        resp = client.post(
+            f"/admin/api/tokens/{token_id}/test-refresh",
+            headers={"Authorization": f"Bearer {admin_token}", "X-Request-Id": "req_cf_fail"},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["via_cf"] is False
+        assert body["expires_in"] == 3600
+        assert any("api-cf.example.com" in u for u in seen_urls)
+        assert any("oauth.secure.pixiv.net" in u for u in seen_urls)

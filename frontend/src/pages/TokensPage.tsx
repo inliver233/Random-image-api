@@ -291,8 +291,8 @@ export function TokensPage() {
       <Alert
         type="info"
         showIcon
-        message="Token 刷新默认走 CF API 出口池（池 ready 时）"
-        description="测试刷新成功时会显示「经 CF API 代理」。住宅绑定仅应急；日常出口请在侧栏 CF Worker 部署/启用 api-worker。"
+        message="Token 刷新：自建 CF api-worker 优先，住宅为最后手段"
+        description="测试刷新成功会显示「经 CF API 代理」或应急「经代理/直连」。日常请在侧栏 CF Worker 部署/启用 api-worker；与自建出图 img-worker、第三方 i.pixiv.* 镜像无关。持续 502 时先探针 api-worker /healthz 与密钥，再检查令牌本身或重置失败计数。"
       />
 
       <ActionAlerts

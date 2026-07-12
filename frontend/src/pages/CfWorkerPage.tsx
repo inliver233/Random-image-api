@@ -457,7 +457,7 @@ export function CfWorkerPage() {
           ))}
         </ol>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 12 }}>
-          高级不在本页：R2 / Engine / Ports 见维护工具折叠；本地应急镜像见系统设置（非公开出图主路径）。
+          高级不在本页：R2 / Engine / Ports 见维护工具折叠；第三方图片镜像（i.pixiv.cat 等，非自建 CF）见系统设置（仅本地 /i 回退，非公开出图主路径）。
         </Typography.Paragraph>
       </Card>
 

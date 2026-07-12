@@ -125,7 +125,8 @@ function fixtureFor(url: string, mode: FixtureMode): Response {
         residential_egress_emergency_only: true,
         cf_api_proxy_ready: mode === "ready",
         image_edge_ready: mode === "ready",
-        pixiv_api_allows_residential_when_cf_ready: mode !== "ready",
+        // TOKEN-2: API always allows residential *after* CF exhaustion when pool is ready.
+        pixiv_api_allows_residential_when_cf_ready: true,
         image_origin_allows_residential_when_edge_ready: mode !== "ready",
       },
       note: "Deploy/register does not flip flags",
