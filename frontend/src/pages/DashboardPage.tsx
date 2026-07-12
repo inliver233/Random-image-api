@@ -523,18 +523,28 @@ export function DashboardPage() {
                     </>
                   ) : null}
                   {cfApiProxy.data ? (
-                    <Tag
-                      color={
-                        cfApiProxy.data.ready ? "green" : cfApiProxy.data.enabled_flag ? "orange" : undefined
-                      }
-                    >
-                      cf_api_proxy=
-                      {cfApiProxy.data.ready
-                        ? "ready"
-                        : cfApiProxy.data.enabled_flag
-                          ? "flag-on-not-ready"
-                          : "off"}
-                    </Tag>
+                    <>
+                      <Tag
+                        color={
+                          cfApiProxy.data.ready
+                            ? "green"
+                            : cfApiProxy.data.enabled_flag
+                              ? "orange"
+                              : undefined
+                        }
+                      >
+                        cf_api_proxy=
+                        {cfApiProxy.data.ready
+                          ? "ready"
+                          : cfApiProxy.data.enabled_flag
+                            ? "flag-on-not-ready"
+                            : "off"}
+                      </Tag>
+                      <Tag>
+                        bases={cfApiProxy.data.base_url_count}
+                        {cfApiProxy.data.has_secret ? "" : " · no-secret"}
+                      </Tag>
+                    </>
                   ) : null}
                   {r2Prewarm.data ? (
                     <Tag

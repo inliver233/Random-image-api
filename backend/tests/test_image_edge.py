@@ -253,6 +253,62 @@ def test_pick_image_edge_base_url_is_sticky() -> None:
     assert other in cfg.base_urls
 
 
+def test_ordered_image_edge_base_urls_sticky_first() -> None:
+    from app.core.image_edge import ordered_image_edge_base_urls, pick_image_edge_base_url
+
+    cfg = ImageEdgeConfig(
+        enabled=True,
+        base_urls=["https://img-a.example.com", "https://img-b.example.com", "https://img-c.example.com"],
+        secret="s",
+        sign_ttl_seconds=60,
+    )
+    path = "/img-original/img/2020/01/01/00/00/00/1_p0.jpg"
+    ordered = ordered_image_edge_base_urls(cfg, path)
+    sticky = pick_image_edge_base_url(cfg, path)
+    assert ordered[0] == sticky
+    assert len(ordered) == 3
+    assert set(ordered) == set(cfg.base_urls)
+
+
+def test_resolve_image_edge_signed_candidates_orders_sticky_first() -> None:
+    from app.core.image_edge import (
+        pick_image_edge_base_url,
+        pximg_path_from_original_url,
+        resolve_image_edge_signed_candidates,
+    )
+
+    s = load_settings(
+        {
+            "APP_ENV": "dev",
+            "IMAGE_EDGE_ENABLED": "true",
+            "IMAGE_EDGE_SECRET": "edge-secret",
+            "IMAGE_EDGE_BASE_URLS": "https://img-a.example.com,https://img-b.example.com,https://img-c.example.com",
+            "IMAGE_EDGE_SIGN_TTL_SECONDS": "600",
+        }
+    )
+    original = "https://i.pximg.net/img-original/img/2020/01/01/00/00/00/1_p0.jpg"
+    path = pximg_path_from_original_url(original)
+    assert path is not None
+    cfg = load_image_edge_config_from_settings(s)
+    assert cfg is not None
+    now = 1_700_000_000
+    candidates = resolve_image_edge_signed_candidates(settings=s, original_url=original, now=now)
+    assert len(candidates) == 3
+    sticky = pick_image_edge_base_url(cfg, path)
+    assert candidates[0].startswith(sticky.rstrip("/") + "/u/")
+    bases = [u.split("/u/")[0] for u in candidates]
+    assert len(set(bases)) == 3
+    # Empty when disabled / non-pximg.
+    off = load_settings({"APP_ENV": "dev", "IMAGE_EDGE_ENABLED": "false"})
+    assert resolve_image_edge_signed_candidates(settings=off, original_url=original) == []
+    assert (
+        resolve_image_edge_signed_candidates(
+            settings=s, original_url="https://cdn.example/x.jpg"
+        )
+        == []
+    )
+
+
 def test_sign_rejects_disallowed_path() -> None:
     cfg = ImageEdgeConfig(
         enabled=True,

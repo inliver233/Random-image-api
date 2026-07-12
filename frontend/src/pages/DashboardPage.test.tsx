@@ -290,6 +290,8 @@ describe("DashboardPage", () => {
     expect(await screen.findByText(/api_key_rl=memory/)).toBeInTheDocument();
     expect(await screen.findByText("api_key required")).toBeInTheDocument();
     expect(await screen.findByText(/image_edge=flag-on-not-ready/)).toBeInTheDocument();
+    // image_edge + cf_api_proxy both surface bases= / no-secret (CF tag parity).
+    expect((await screen.findAllByText(/bases=0\s*·\s*no-secret/)).length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText(/cf_api_proxy=off/)).toBeInTheDocument();
     expect(await screen.findByText(/r2_prewarm=flag-on-not-ready/)).toBeInTheDocument();
     expect(await screen.findByText(/engine=enabled-not-ready/)).toBeInTheDocument();

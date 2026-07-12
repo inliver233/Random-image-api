@@ -142,6 +142,15 @@ Backend note: pure edge **302** does **not** call `mark_image_ok` (bytes not ver
 | `IMAGE_EDGE_SECRET_PREVIOUS` | Optional previous secret for zero-downtime rotation (**verify only** on Worker; backend never signs with it) |
 | `IMAGE_EDGE_SIGN_TTL_SECONDS` | default `604800` |
 
+### Multi-base selection (BFF)
+
+| Helper | Behavior |
+| --- | --- |
+| `pick_image_edge_base_url(cfg, path)` | Sticky SHA-256 pick: same path → same base (cache locality) |
+| `ordered_image_edge_base_urls(cfg, path)` | Sticky first, then remaining bases (deduped) — same order shape as CF API `resolve_pixiv_api_cf_candidates` |
+| `resolve_image_edge_signed_candidates(settings, original_url)` | Signs once per ordered base; empty when edge not ready / non-pximg |
+| Public 302 / `urls.proxy` | Sticky primary only (clients cannot walk a candidate list on a single Location) |
+
 ### Secret rotation (zero-downtime)
 
 1. Deploy Worker with `IMAGE_EDGE_SECRET=<new>` and `IMAGE_EDGE_SECRET_PREVIOUS=<old>` (both secrets via `wrangler secret put`).

@@ -171,6 +171,28 @@ def pick_image_edge_base_url(cfg: ImageEdgeConfig, path: str) -> str:
     return bases[idx]
 
 
+def ordered_image_edge_base_urls(cfg: ImageEdgeConfig, path: str) -> list[str]:
+    """Sticky base first, then remaining configured bases (deduped).
+
+    Mirrors ``resolve_pixiv_api_cf_candidates`` ordering for CF API proxy multi-deploy.
+    Public 302 still uses sticky alone (clients cannot walk a candidate list); this helper
+    is for ops probes, multi-URL JSON surfaces, and future BFF-side retries.
+    """
+    try:
+        sticky = pick_image_edge_base_url(cfg, path)
+    except ValueError:
+        return []
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for base in [sticky, *list(cfg.base_urls or [])]:
+        b = str(base or "").strip().rstrip("/")
+        if not b or b in seen:
+            continue
+        seen.add(b)
+        ordered.append(b)
+    return ordered
+
+
 def sign_image_edge_path(cfg: ImageEdgeConfig, path: str, *, now: int | None = None, base_url: str | None = None) -> str:
     path = (path or "").strip()
     if not path.startswith("/"):
@@ -204,6 +226,37 @@ def build_image_edge_url(
         return None
 
 
+def resolve_image_edge_signed_candidates(
+    *,
+    settings: Settings | None,
+    original_url: str,
+    now: int | None = None,
+) -> list[str]:
+    """Ordered signed edge URLs: sticky base first, then remaining bases (deduped).
+
+    Empty when edge is not ready or ``original_url`` is not a pximg path.
+    Default public 302 / ``urls.proxy`` still use the sticky primary only; prefer this
+    when callers need multi-deploy diversity (ops probe, alternate URL lists).
+    """
+    if settings is None:
+        return []
+    cfg = load_image_edge_config_from_settings(settings)
+    if cfg is None:
+        return []
+    path = pximg_path_from_original_url(original_url)
+    if path is None:
+        return []
+    out: list[str] = []
+    for base in ordered_image_edge_base_urls(cfg, path):
+        try:
+            signed = sign_image_edge_path(cfg, path, now=now, base_url=base)
+        except Exception:
+            continue
+        if signed:
+            out.append(signed)
+    return out
+
+
 def resolve_public_proxy_url(
     *,
     settings: Settings,
@@ -224,7 +277,11 @@ def resolve_image_edge_redirect_url(
     settings: Settings,
     original_url: str,
 ) -> str | None:
-    """Return absolute signed edge URL for 302, or None to keep local stream/proxy."""
+    """Return absolute signed edge URL for 302, or None to keep local stream/proxy.
+
+    Sticky multi-base only (same as ``build_image_edge_url``). For ordered multi-base
+    signed candidates see ``resolve_image_edge_signed_candidates``.
+    """
     cfg = load_image_edge_config_from_settings(settings)
     if cfg is None:
         return None
