@@ -7,10 +7,19 @@ from cryptography.fernet import Fernet, InvalidToken
 
 MASKED = "***"
 
+# Process-local cache: Fernet construction validates the key every call; reuse instances.
+_FIELD_ENCRYPTOR_CACHE: dict[str, "FieldEncryptor"] = {}
+_FIELD_ENCRYPTOR_CACHE_MAX = 8
+
 
 def mask_secret(value: str | None) -> str:
     value = (value or "").strip()
     return MASKED if value else ""
+
+
+def reset_field_encryptor_cache_for_tests() -> None:
+    """Clear process-local FieldEncryptor cache (tests only)."""
+    _FIELD_ENCRYPTOR_CACHE.clear()
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,14 +28,25 @@ class FieldEncryptor:
 
     @classmethod
     def from_key(cls, key: str) -> "FieldEncryptor":
-        key = (key or "").strip()
-        if not key:
+        key_n = (key or "").strip()
+        if not key_n:
             raise ValueError("FIELD_ENCRYPTION_KEY is required")
+        cached = _FIELD_ENCRYPTOR_CACHE.get(key_n)
+        if cached is not None:
+            return cached
         try:
-            fernet = Fernet(key.encode("utf-8"))
+            fernet = Fernet(key_n.encode("utf-8"))
         except Exception as exc:
             raise ValueError("Invalid FIELD_ENCRYPTION_KEY") from exc
-        return cls(_fernet=fernet)
+        inst = cls(_fernet=fernet)
+        if len(_FIELD_ENCRYPTOR_CACHE) >= _FIELD_ENCRYPTOR_CACHE_MAX and key_n not in _FIELD_ENCRYPTOR_CACHE:
+            try:
+                oldest = next(iter(_FIELD_ENCRYPTOR_CACHE))
+                _FIELD_ENCRYPTOR_CACHE.pop(oldest, None)
+            except StopIteration:
+                pass
+        _FIELD_ENCRYPTOR_CACHE[key_n] = inst
+        return inst
 
     def encrypt_text(self, plaintext: str) -> str:
         if not isinstance(plaintext, str):

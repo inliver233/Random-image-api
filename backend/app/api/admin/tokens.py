@@ -20,7 +20,7 @@ from app.core.admin_request import (
 )
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.errors import ApiError, ErrorCode
-from app.core.proxy_routing import select_proxy_uri_for_url
+from app.core.proxy_selector import iter_pixiv_api_egress
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_settings import load_runtime_config
 from app.core.time import iso_utc_ms
@@ -279,25 +279,62 @@ async def test_refresh_token(
             raise ApiError(code=ErrorCode.INTERNAL_ERROR, message="Invalid stored token", status_code=500) from exc
 
         now = iso_utc_ms()
+        picked_proxy = None
+        token = None
 
         try:
             runtime = await load_runtime_config(engine)
             oauth_url = config.base_url.rstrip("/") + OAUTH_TOKEN_PATH
-            picked_proxy = await select_proxy_uri_for_url(
+            last_exc: BaseException | None = None
+            # CF multi-base first, then residential (same plan as hydrate).
+            async for attempt in iter_pixiv_api_egress(
                 engine,
                 settings,
                 runtime,
                 url=oauth_url,
                 token_id=int(token_id),
-            )
-            proxy_uri = picked_proxy.uri if picked_proxy is not None else None
+                residential_failover_attempts=0,
+            ):
+                try:
+                    if attempt.via_cf:
+                        token = await refresh_access_token(
+                            refresh_token=refresh_token,
+                            config=config,
+                            transport=transport,
+                            proxy=None,
+                            request_url=attempt.request_url,
+                            extra_headers=attempt.extra_headers,
+                        )
+                    else:
+                        token = await refresh_access_token(
+                            refresh_token=refresh_token,
+                            config=config,
+                            transport=transport,
+                            proxy=attempt.proxy_uri,
+                        )
+                except PixivOauthError as exc:
+                    if exc.status_code is None or int(exc.status_code) >= 500:
+                        last_exc = exc
+                        # Soft fail-open: no residential + not CF → stop; else try next.
+                        if attempt.residential is None and not attempt.via_cf:
+                            break
+                        continue
+                    raise
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt.residential is None and not attempt.via_cf:
+                        break
+                    continue
+                else:
+                    picked_proxy = attempt.residential
+                    break
 
-            token = await refresh_access_token(
-                refresh_token=refresh_token,
-                config=config,
-                transport=transport,
-                proxy=proxy_uri,
-            )
+            if token is None:
+                if isinstance(last_exc, PixivOauthError):
+                    raise last_exc
+                if last_exc is not None:
+                    raise last_exc
+                raise PixivOauthError("OAuth refresh failed", status_code=None)
         except PixivOauthError as exc:
             new_error_count = int(row.error_count or 0) + 1
             backoff_s = refresh_backoff_seconds(attempt=new_error_count, status_code=exc.status_code)

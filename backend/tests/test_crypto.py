@@ -25,6 +25,17 @@ def test_encrypt_decrypt_roundtrip() -> None:
     assert crypto.decrypt_text(token) == plaintext
 
 
+def test_from_key_caches_instance() -> None:
+    from app.core.crypto import reset_field_encryptor_cache_for_tests
+
+    reset_field_encryptor_cache_for_tests()
+    key = Fernet.generate_key().decode("utf-8")
+    a = FieldEncryptor.from_key(key)
+    b = FieldEncryptor.from_key(key)
+    assert a is b
+    assert a.decrypt_text(a.encrypt_text("x")) == "x"
+
+
 def test_requires_key() -> None:
     with pytest.raises(ValueError, match="FIELD_ENCRYPTION_KEY is required"):
         FieldEncryptor.from_key("")
