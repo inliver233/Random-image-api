@@ -124,3 +124,44 @@ def test_admin_image_edge_status_runtime_overlay_bases_not_missing(tmp_path: Pat
         assert body.get("runtime_base_url_count", 0) >= 1
         assert "https://img-rt.example.workers.dev" in body["base_urls"]
     reset_overlay_for_tests()
+
+
+def test_admin_image_edge_status_overlay_bases_when_flag_off(tmp_path: Path, monkeypatch) -> None:
+    """Ops register before enable: surface runtime bases even when ready is false."""
+    from app.core.cf_pool_overlay import reset_overlay_for_tests, set_image_overlay_bases
+
+    db_path = tmp_path / "admin_image_edge_overlay_flag_off.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
+    monkeypatch.delenv("IMAGE_EDGE_ENABLED", raising=False)
+    monkeypatch.delenv("IMAGE_EDGE_SECRET", raising=False)
+    monkeypatch.delenv("IMAGE_EDGE_BASE_URLS", raising=False)
+    reset_overlay_for_tests()
+    set_image_overlay_bases(["https://img-reg.example.workers.dev"])
+
+    app = create_app()
+    with TestClient(app) as client:
+        token = client.post(
+            "/admin/api/login",
+            headers={"X-Request-Id": "req_test"},
+            json={"username": "admin", "password": "pass_test"},
+        ).json()["token"]
+
+        resp = client.get(
+            "/admin/api/maintenance/image-edge",
+            headers={"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["ready"] is False
+        assert body["enabled_flag"] is False
+        assert body.get("runtime_base_url_count", 0) >= 1
+        assert "https://img-reg.example.workers.dev" in body["base_urls"]
+        assert body.get("base_url_count", 0) >= 1
+    reset_overlay_for_tests()

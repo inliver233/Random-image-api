@@ -64,6 +64,13 @@ async def probe_cf_worker_base(
         out["service"] = data.get("service")
         if "secret_configured" in data:
             out["secret_configured"] = bool(data.get("secret_configured"))
+        # api-worker healthz can be ok:true with empty PROXY_SECRET (fail-closed only on /p/*).
+        # Treat missing secret as not cutover-ready; do not clear cooldown as success.
+        if kind_l == "api" and out["secret_configured"] is False:
+            out["ok"] = False
+            out["error"] = "secret_not_configured"
+            # Config gap, not egress failure — skip success/fail cooldown mutation.
+            return out
         if body_ok:
             out["ok"] = True
             _record_outcome(kind_l, base, ok=True)

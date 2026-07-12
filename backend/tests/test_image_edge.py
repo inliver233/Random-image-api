@@ -297,8 +297,13 @@ def test_image_edge_base_cooldown_demotes_failed_base() -> None:
     assert len(second) == 3
     assert second[0] != sticky
     assert second[-1] == sticky
-    # Public sticky pick is unchanged (cache locality).
+    # Hash sticky is unchanged, but public signing must prefer a hot base.
     assert pick_image_edge_base_url(cfg, path) == sticky
+    from app.core.image_edge import sign_image_edge_path
+
+    signed = sign_image_edge_path(cfg, path)
+    assert second[0] in signed
+    assert sticky not in signed.split("/u/")[0]
     record_image_edge_base_outcome(sticky, ok=True)
     assert is_image_edge_base_cooling(sticky) is False
     third = ordered_image_edge_base_urls(cfg, path)

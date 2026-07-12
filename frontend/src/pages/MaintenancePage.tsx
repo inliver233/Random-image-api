@@ -388,6 +388,32 @@ export function MaintenancePage() {
     },
   });
 
+  const setForceResidential = useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiJson<{ ok: true; force_residential_emergency?: boolean; request_id: string }>(
+        "/admin/api/cf-workers/egress-policy",
+        {
+          method: "POST",
+          body: JSON.stringify({ force_residential_emergency: enabled }),
+        },
+      ),
+    onMutate: () => {
+      cfPoolAlerts.clear();
+    },
+    onSuccess: (data, enabled) => {
+      cfPoolAlerts.setSuccess(
+        enabled
+          ? "已开启进程内强制住宅应急（不持久；非公开出图主路径）"
+          : "已关闭进程内强制住宅应急",
+        data.request_id,
+      );
+      void queryClient.invalidateQueries({ queryKey: ["admin", "cf-workers", "pool"] });
+    },
+    onError: (err) => {
+      cfPoolAlerts.setError(err);
+    },
+  });
+
   const engine = engineStatus.data;
   const health = engine?.health && typeof engine.health === "object" ? engine.health : null;
   const indexSize =
@@ -488,7 +514,9 @@ export function MaintenancePage() {
       <Card title="CF API Proxy（hydrate/OAuth 出口）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
           只读配置状态（不展示密钥）。hydrate 的 OAuth refresh 与 illust detail 优先经 CF Worker
-          出口；失败回退住宅代理池。默认{" "}
+          出口。默认 <Typography.Text code>RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true</Typography.Text>
+          ：存在 CF 候选时住宅<strong>不会</strong>作为正常 failover；仅无 CF 候选、进程强制应急、或 env 显式关闭 emergency-only
+          时才走住宅。默认{" "}
           <Typography.Text code>CF_API_PROXY_ENABLED=false</Typography.Text>
           。部署见 <Typography.Text code>edge/api-worker</Typography.Text>。
         </Typography.Paragraph>
@@ -552,11 +580,28 @@ export function MaintenancePage() {
                 )}
               </Descriptions.Item>
               <Descriptions.Item label="进程强制住宅">
-                {egressPolicy?.force_residential_emergency ? (
-                  <Tag color="red">FORCE ON</Tag>
-                ) : (
-                  <Tag>off</Tag>
-                )}
+                <Space wrap>
+                  {egressPolicy?.force_residential_emergency ? (
+                    <Tag color="red">FORCE ON</Tag>
+                  ) : (
+                    <Tag>off</Tag>
+                  )}
+                  <Switch
+                    checkedChildren="应急开"
+                    unCheckedChildren="应急关"
+                    checked={Boolean(egressPolicy?.force_residential_emergency)}
+                    loading={setForceResidential.isPending}
+                    onChange={(checked) => {
+                      if (checked) {
+                        const ok = window.confirm(
+                          "开启进程内强制住宅应急？仅影响本 BFF 进程、不持久化，且不是公开出图主路径。",
+                        );
+                        if (!ok) return;
+                      }
+                      setForceResidential.mutate(checked);
+                    }}
+                  />
+                </Space>
               </Descriptions.Item>
               <Descriptions.Item label="CF API ready">
                 {egressPolicy?.cf_api_proxy_ready ? (

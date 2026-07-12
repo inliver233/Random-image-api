@@ -20,8 +20,8 @@ _ALLOWED_EDGE_EXTS = frozenset({"jpg", "jpeg", "png", "gif", "webp"})
 _EDGE_CFG_FROM_SETTINGS: dict[tuple[Any, ...], ImageEdgeConfig | None] = {}
 _EDGE_CFG_CACHE_MAX = 32
 
-# Process-local soft cooldown for multi-base image edge (ops candidates / alternate lists).
-# Public 302 sticky path stays sticky for cache locality; ordered helpers demote cooling bases.
+# Process-local soft cooldown for multi-base image edge.
+# Public 302 prefers sticky when healthy; cooling sticky is demoted via ordered helpers.
 _IMAGE_EDGE_BASE_COOLDOWN_S = 30.0
 _image_edge_base_lock = threading.Lock()
 _image_edge_base_cool_until: dict[str, float] = {}
@@ -228,8 +228,8 @@ def record_image_edge_base_outcome(
 ) -> None:
     """Record image-edge worker base success/failure for process-local demotion.
 
-    Success clears cooldown. Failure opens/extends cooldown so ordered candidate lists
-    demote that base. Public sticky 302 still uses sticky alone. Best-effort; never raises.
+    Success clears cooldown. Failure opens/extends cooldown so ordered lists and public
+    302 signing demote that base (prefer next hot base). Best-effort; never raises.
     """
     try:
         b = normalize_image_edge_base_url(base)
@@ -265,12 +265,11 @@ def order_image_edge_bases_for_failover(bases: list[str], *, now: float | None =
 
 
 def ordered_image_edge_base_urls(cfg: ImageEdgeConfig, path: str) -> list[str]:
-    """Sticky base first, then remaining configured bases (deduped).
+    """Sticky base first when healthy, then remaining bases (deduped).
 
     Mirrors ``resolve_pixiv_api_cf_candidates`` ordering for CF API proxy multi-deploy.
-    Public 302 still uses sticky alone (clients cannot walk a candidate list); this helper
-    is for ops probes, multi-URL JSON surfaces, and future BFF-side retries.
     Cooling bases (process-local after probe/egress hard fails) are demoted to the end.
+    Public 302 / ``urls.proxy`` use the first entry so a cooling sticky does not pin traffic.
     """
     try:
         sticky = pick_image_edge_base_url(cfg, path)
@@ -293,7 +292,11 @@ def sign_image_edge_path(cfg: ImageEdgeConfig, path: str, *, now: int | None = N
         raise ValueError("path must start with '/'")
     if not is_edge_allowed_path(path):
         raise ValueError("path not allowed by image edge contract")
-    base = (base_url or pick_image_edge_base_url(cfg, path) or "").rstrip("/")
+    if base_url is not None and str(base_url).strip():
+        base = str(base_url).strip().rstrip("/")
+    else:
+        ordered = ordered_image_edge_base_urls(cfg, path)
+        base = (ordered[0] if ordered else pick_image_edge_base_url(cfg, path) or "").rstrip("/")
     if not base:
         raise ValueError("base_url is required")
     exp = int(now if now is not None else time.time()) + int(cfg.sign_ttl_seconds)

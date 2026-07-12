@@ -100,13 +100,20 @@ def probe_healthz(base: str, *, timeout: float = 15.0) -> dict[str, Any]:
             result["service"] = payload.get("service")
             result["secret_required"] = payload.get("secret_required")
             result["allowed_hosts"] = payload.get("allowed_hosts")
+            # Worker may report ok:true with empty PROXY_SECRET; surface for cutover readiness.
+            if "secret_configured" in payload:
+                result["secret_configured"] = bool(payload.get("secret_configured"))
+            else:
+                result["secret_configured"] = None
             result["service_ok"] = payload.get("ok") is True and str(
                 payload.get("service") or ""
             ) == SERVICE_NAME
         except Exception:
             result["service_ok"] = False
+            result["secret_configured"] = None
     else:
         result["service_ok"] = False
+        result["secret_configured"] = None
     return result
 
 
@@ -147,20 +154,32 @@ def probe_proxy(
 def summarize_matrix(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total = len(rows)
     health_ok = sum(1 for r in rows if (r.get("healthz") or {}).get("service_ok"))
+    # secret_configured=false means Worker will 403 /p/* even when healthz service_ok.
+    secret_ok = sum(
+        1
+        for r in rows
+        if (r.get("healthz") or {}).get("service_ok")
+        and (r.get("healthz") or {}).get("secret_configured") is not False
+    )
     proxy_pass = sum(1 for r in rows if (r.get("proxy") or {}).get("pass"))
     latencies = [
         float((r.get("proxy") or {}).get("elapsed_ms") or 0)
         for r in rows
         if (r.get("proxy") or {}).get("elapsed_ms") is not None
     ]
+    ready = health_ok == total and total > 0 and secret_ok == total
     return {
         "bases": total,
         "healthz_ok": health_ok,
+        "secret_configured_ok": secret_ok,
         "proxy_pass": proxy_pass,
         "all_healthz_ok": health_ok == total and total > 0,
         "proxy_p50_ms": sorted(latencies)[len(latencies) // 2] if latencies else None,
-        "ready_for_cf_api_proxy_flag": health_ok == total and total > 0,
-        "note": "Set CF_API_PROXY_ENABLED only after healthz_ok on all bases and secret match.",
+        "ready_for_cf_api_proxy_flag": ready,
+        "note": (
+            "Set CF_API_PROXY_ENABLED only after healthz_ok + secret_configured on all bases "
+            "(and proxy path pass when --secret provided)."
+        ),
     }
 
 
@@ -223,12 +242,16 @@ def main(argv: list[str] | None = None) -> int:
         with open(args.out, "w", encoding="utf-8") as f:
             f.write(text + "\n")
 
-    # Exit 0 if all requested probes pass.
+    # Exit 0 if all requested probes pass (healthz + secret_configured + proxy).
     ok = True
     for row in rows:
         hz = row.get("healthz")
-        if hz is not None and not hz.get("service_ok"):
-            ok = False
+        if hz is not None:
+            if not hz.get("service_ok"):
+                ok = False
+            # Explicit false = Worker empty PROXY_SECRET (not cutover-ready).
+            if hz.get("secret_configured") is False:
+                ok = False
         pr = row.get("proxy")
         if pr is not None and not pr.get("pass"):
             ok = False

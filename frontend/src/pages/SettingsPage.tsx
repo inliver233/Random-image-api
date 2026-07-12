@@ -201,15 +201,19 @@ export function SettingsPage() {
               <Form.Item label="失败即拦截（严格模式）" name="proxy_fail_closed" valuePropName="checked">
                 <Switch />
               </Form.Item>
-              <Form.Item label="代理路由模式" name="proxy_route_mode">
+              <Form.Item
+                label="代理路由模式"
+                name="proxy_route_mode"
+                extra="住宅/池代理服务 Pixiv 补全与 OAuth，不是公开出图主路径。生产推荐「仅 Pixiv」；「全部流量」仅应急排障，勿当主模式。"
+              >
                 <Select
                   options={[
-                    { value: "pixiv_only", label: "仅 Pixiv" },
-                    { value: "all", label: "全部流量" },
+                    { value: "pixiv_only", label: "仅 Pixiv（推荐）" },
+                    { value: "all", label: "全部流量（应急/排障，勿作主模式）" },
                     { value: "allowlist", label: "仅白名单域名" },
                     { value: "off", label: "关闭" },
                   ]}
-                  style={{ maxWidth: 320 }}
+                  style={{ maxWidth: 420 }}
                 />
               </Form.Item>
               <Form.Item label="白名单域名" name="proxy_allowlist_domains">

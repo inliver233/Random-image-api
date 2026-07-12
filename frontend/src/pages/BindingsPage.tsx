@@ -334,6 +334,13 @@ export function BindingsPage() {
       </Typography.Title>
 
       <Alert
+        type="warning"
+        showIcon
+        message="绑定服务补全/OAuth 出口，不服务公开 /random 出图"
+        description="令牌主代理/覆盖代理仅用于 Pixiv App API 补全与 OAuth 等控制面出口；公开图片主路径走 CF Image Edge（或本地 /i）。勿把住宅池当作用户出图主池。"
+      />
+
+      <Alert
         type="info"
         showIcon
         message="说明"

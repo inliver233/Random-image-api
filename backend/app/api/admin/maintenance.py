@@ -148,22 +148,39 @@ async def image_edge_status(
     ttl = int(getattr(settings, "image_edge_sign_ttl_seconds", 604800) or 604800) if settings is not None else 604800
     cfg = load_image_edge_config_from_settings(settings) if settings is not None else None
     ready = cfg is not None
-    merged_count = len(cfg.base_urls) if cfg is not None else max(len(raw_bases), len(rt_bases))
+    # Always surface env∪overlay membership even when flag/secret not ready
+    # (ops register before enable; empty base_urls while runtime_base_url_count>0 misleads cutover).
+    try:
+        from app.core.cf_pool_overlay import merge_image_bases_with_overlay
+
+        merged_bases = list(cfg.base_urls) if cfg is not None else merge_image_bases_with_overlay(raw_bases)
+    except Exception:
+        merged_bases = list(cfg.base_urls) if cfg is not None else list(raw_bases)
+        if not merged_bases and rt_bases:
+            # Best-effort de-dupe preserve order when merge helper unavailable.
+            seen: set[str] = set()
+            merged_bases = []
+            for b in list(raw_bases) + list(rt_bases):
+                s = str(b or "").strip()
+                if s and s not in seen:
+                    seen.add(s)
+                    merged_bases.append(s)
+    merged_count = len(merged_bases)
     missing: list[str] = []
     if not flag_enabled:
         missing.append("IMAGE_EDGE_ENABLED")
     if not secret:
         missing.append("IMAGE_EDGE_SECRET")
     # Bases may come from env CSV and/or runtime overlay (register/deploy).
-    if not raw_bases and not rt_bases and not (cfg is not None and cfg.base_urls):
+    if not merged_bases:
         missing.append("IMAGE_EDGE_BASE_URLS")
     return admin_ok(
         request,
         payload={
             "enabled_flag": flag_enabled,
             "ready": ready,
-            "base_urls": list(cfg.base_urls) if cfg is not None else list(raw_bases),
-            "base_url_count": len(cfg.base_urls) if cfg is not None else len(raw_bases),
+            "base_urls": merged_bases,
+            "base_url_count": merged_count,
             "env_base_url_count": len(raw_bases),
             "runtime_base_url_count": len(rt_bases),
             "merged_base_url_count": merged_count,
@@ -207,12 +224,29 @@ async def cf_api_proxy_status(
     secret = str(getattr(settings, "cf_api_proxy_secret", "") or "").strip() if settings is not None else ""
     cfg = load_cf_api_proxy_config_from_settings(settings) if settings is not None else None
     ready = bool(cfg is not None and cfg.ready)
-    merged_count = len(cfg.base_urls) if cfg is not None else max(len(raw_bases), len(rt_bases))
+    # Always surface env∪overlay membership even when flag/secret not ready
+    # (load_* returns None when disabled — still show registered pool members).
+    if cfg is not None and getattr(cfg, "base_urls", None):
+        merged_bases = list(cfg.base_urls)
+    else:
+        try:
+            from app.core.cf_pool_overlay import merge_api_bases_with_overlay
+
+            merged_bases = merge_api_bases_with_overlay(raw_bases)
+        except Exception:
+            seen: set[str] = set()
+            merged_bases = []
+            for b in list(raw_bases) + list(rt_bases):
+                s = str(b or "").strip()
+                if s and s not in seen:
+                    seen.add(s)
+                    merged_bases.append(s)
+    merged_count = len(merged_bases)
     missing: list[str] = []
     if not flag_enabled:
         missing.append("CF_API_PROXY_ENABLED")
     # Bases may come from env CSV and/or runtime overlay (register/deploy).
-    if not raw_bases and not rt_bases and not (cfg is not None and cfg.base_urls):
+    if not merged_bases:
         missing.append("CF_API_PROXY_BASE_URLS")
     # Worker PROXY_SECRET is fail-closed; BFF secret required for ready.
     if not secret:
@@ -222,8 +256,8 @@ async def cf_api_proxy_status(
         payload={
             "enabled_flag": flag_enabled,
             "ready": ready,
-            "base_urls": list(cfg.base_urls) if cfg is not None else list(raw_bases),
-            "base_url_count": len(cfg.base_urls) if cfg is not None else len(raw_bases),
+            "base_urls": merged_bases,
+            "base_url_count": merged_count,
             "env_base_url_count": len(raw_bases),
             "runtime_base_url_count": len(rt_bases),
             "merged_base_url_count": merged_count,

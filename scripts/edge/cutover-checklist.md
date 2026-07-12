@@ -18,7 +18,10 @@ Ops-only. Deploy/register **never** flips `CF_API_PROXY_ENABLED` / `IMAGE_EDGE_E
    ```text
    python scripts/edge/probe-api-proxy.py --bases https://a,https://b --secret $SECRET --healthz --proxy-path --out api-proxy-matrix.json
    # Or admin (merged pool / override base_urls; records process-local cooldown on hard fail):
-   # POST /admin/api/cf-workers/probe  {"kind":"api"}  or  {"kind":"all","base_urls":["https://a","https://b"]}
+   # POST /admin/api/cf-workers/probe  {"kind":"all"}
+   # POST /admin/api/cf-workers/probe  {"kind":"api","base_urls":["https://a","https://b"]}
+   # POST /admin/api/cf-workers/probe  {"kind":"image","base_urls":["https://img-a"]}
+   # Note: base_urls override requires kind=api|image (not kind=all) — otherwise 400.
    ```
    Expect `service_ok` + secret match on each base (CLI) / `ok` + `service` on admin probe.
 3. Membership without enable:

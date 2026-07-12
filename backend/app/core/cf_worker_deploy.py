@@ -54,6 +54,13 @@ class CfWorkerDeployResult:
     base_url: str
     secrets_set: list[str]
     deployed: bool = True
+    # Admin deploy never attaches R2 bucket bindings (wrangler/dashboard only).
+    # R2_MODE plain var is set for image workers but is a no-op until env.R2 exists.
+    r2_binding: bool = False
+    r2_note: str = (
+        "Admin deploy does not attach R2 bucket binding; "
+        "R2_MODE is ignored until bound via wrangler/dashboard."
+    )
 
 
 class CfWorkerDeployError(RuntimeError):
@@ -76,6 +83,11 @@ def resolve_worker_script_path(kind: WorkerKind, *, root: Path | None = None) ->
     return base / "edge" / "img-worker" / "src" / "index.js"
 
 
+def resolve_worker_pure_path(kind: WorkerKind, *, root: Path | None = None) -> Path:
+    """Sibling pure.js imported by index.js (must ship with Admin CF API upload)."""
+    return resolve_worker_script_path(kind, root=root).parent / "pure.js"
+
+
 def load_worker_script(kind: WorkerKind, *, root: Path | None = None) -> bytes:
     path = resolve_worker_script_path(kind, root=root)
     if not path.is_file():
@@ -83,6 +95,17 @@ def load_worker_script(kind: WorkerKind, *, root: Path | None = None) -> bytes:
     raw = path.read_bytes()
     if not raw.strip():
         raise CfWorkerDeployError(f"Worker script empty: {path}", status_code=500)
+    return raw
+
+
+def load_worker_pure_script(kind: WorkerKind, *, root: Path | None = None) -> bytes:
+    """Load pure.js module required by index.js ES module imports."""
+    path = resolve_worker_pure_path(kind, root=root)
+    if not path.is_file():
+        raise CfWorkerDeployError(f"Worker pure.js not found: {path}", status_code=500)
+    raw = path.read_bytes()
+    if not raw.strip():
+        raise CfWorkerDeployError(f"Worker pure.js empty: {path}", status_code=500)
     return raw
 
 
@@ -223,6 +246,7 @@ async def _upload_worker_script(
     kind: WorkerKind,
     script: bytes,
     bindings: list[dict[str, Any]],
+    pure_script: bytes | None = None,
 ) -> None:
     module_name = _MODULE_NAME[kind]
     meta = {
@@ -230,9 +254,12 @@ async def _upload_worker_script(
         "compatibility_date": _DEFAULT_COMPAT_DATE,
         "bindings": bindings,
     }
+    # index.js imports "./pure.js"; Admin CF API multipart must include both modules.
+    pure_bytes = pure_script if pure_script is not None else load_worker_pure_script(kind)
     files = {
         "metadata": ("metadata", json.dumps(meta, separators=(",", ":")), "application/json"),
         module_name: (module_name, script, "application/javascript+module"),
+        "pure.js": ("pure.js", pure_bytes, "application/javascript+module"),
     }
     url = _cf_script_url(account_id, worker_name)
     headers = {
@@ -331,6 +358,7 @@ async def deploy_cf_worker(
         image_edge_secret_previous=image_edge_secret_previous,
     )
     script = load_worker_script(kind_norm, root=root)
+    pure_script = load_worker_pure_script(kind_norm, root=root)
     bindings = _build_bindings(kind=kind_norm, plain_vars=plain_vars, secrets=secrets)
 
     owns_client = client is None
@@ -344,6 +372,7 @@ async def deploy_cf_worker(
             kind=kind_norm,
             script=script,
             bindings=bindings,
+            pure_script=pure_script,
         )
         await _enable_workers_dev_subdomain(
             http, api_token=token, account_id=acc, worker_name=name
@@ -374,4 +403,11 @@ async def deploy_cf_worker(
         base_url=base,
         secrets_set=sorted(secrets.keys()),
         deployed=True,
+        r2_binding=False,
+        r2_note=(
+            "Admin deploy does not attach R2 bucket binding; "
+            "R2_MODE is ignored until bound via wrangler/dashboard."
+            if kind_norm == "image"
+            else "R2 not applicable for api-worker."
+        ),
     )

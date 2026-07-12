@@ -51,7 +51,16 @@ def test_secrets_for_kind_image_hmac() -> None:
 
 
 def test_load_worker_script_exists() -> None:
+    from app.core.cf_worker_deploy import load_worker_pure_script, resolve_worker_pure_path
+
     api = load_worker_script("api")
     img = load_worker_script("image")
     assert b"PROXY_SECRET" in api or b"allowed" in api.lower() or len(api) > 100
     assert len(img) > 100
+    api_pure = load_worker_pure_script("api")
+    img_pure = load_worker_pure_script("image")
+    assert len(api_pure) > 20
+    assert len(img_pure) > 20
+    # index.js ES modules import ./pure.js — both must exist next to scripts.
+    assert resolve_worker_pure_path("api").name == "pure.js"
+    assert resolve_worker_pure_path("image").is_file()

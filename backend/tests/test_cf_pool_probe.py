@@ -140,3 +140,36 @@ def test_probe_empty_base_url() -> None:
     out = asyncio.run(_run())
     assert out["ok"] is False
     assert out["error"] == "empty_base_url"
+
+
+def test_probe_cf_worker_base_api_secret_not_configured() -> None:
+    """healthz may be ok:true with empty PROXY_SECRET — not cutover-ready, no cooldown clear."""
+    reset_cf_base_cooldown_for_tests()
+    client = AsyncMock(spec=httpx.AsyncClient)
+    client.get = AsyncMock(
+        return_value=_json_response(
+            200,
+            {
+                "ok": True,
+                "service": "random-image-api-proxy",
+                "secret_configured": False,
+            },
+        )
+    )
+
+    async def _run() -> dict:
+        return await probe_cf_worker_base(
+            client,
+            kind="api",
+            base_url="https://api-nosecret.example.workers.dev/",
+            timeout_s=1.0,
+        )
+
+    out = asyncio.run(_run())
+    assert out["ok"] is False
+    assert out["error"] == "secret_not_configured"
+    assert out["secret_configured"] is False
+    assert out["body_ok"] is True
+    # Config gap must not open egress cooldown (would demote a good base wrongly).
+    assert is_cf_base_cooling("https://api-nosecret.example.workers.dev") is False
+    reset_cf_base_cooldown_for_tests()

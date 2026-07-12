@@ -157,10 +157,11 @@ async def random_image(
             job_queue=job_queue,
         )
 
+        # Multi-process: refresh runtime image pool before minting edge URLs (redirect or JSON proxy).
+        await ensure_image_edge_overlay_fresh(getattr(request.app.state, "engine", None))
         if format == "image" and redirect == 1:
             # Prefer CF image edge only when ready (flag+secret+bases). Default-off
             # must not emit edge_unavailable on every local /i redirect.
-            await ensure_image_edge_overlay_fresh(getattr(request.app.state, "engine", None))
             prefer_edge = prefer_image_edge(
                 proxy_override=proxy_override,
                 pixiv_cat=int(pixiv_cat),
@@ -224,8 +225,9 @@ async def random_image(
             local_url=urls.local_url,
         )
 
-    # When edge is ready and client did not force local mirror/proxy, hand bytes off to CF.
-    # Overlay freshness is also awaited inside deliver_random_image_stream before sign.
+    # Multi-process: refresh overlay before readiness gate so runtime-only bases can enable edge.
+    # deliver_random_image_stream also refreshes before sign; this avoids false prefer=false.
+    await ensure_image_edge_overlay_fresh(getattr(request.app.state, "engine", None))
     prefer_edge_redirect = prefer_image_edge(
         proxy_override=proxy_override,
         pixiv_cat=int(pixiv_cat),

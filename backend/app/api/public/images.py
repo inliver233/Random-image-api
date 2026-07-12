@@ -179,12 +179,14 @@ async def proxy_image(
             proxy=proxy,
         )
         force_local = force_local_from_query(request.query_params)
+        # Runtime image_proxy_use_pixiv_cat must NOT demote edge (parity with
+        # image_delivery.deliver_random_image_stream). Only query overrides skip edge.
         prefer_edge = prefer_image_edge(
             proxy_override=resolved.proxy_override,
             pixiv_cat=int(pixiv_cat),
             pximg_mirror_host_override=resolved.pximg_mirror_host_override,
             force_local=force_local,
-        ) and not resolved.use_pixiv_cat
+        )
         edge_ready = (
             settings is not None and load_image_edge_config_from_settings(settings) is not None
         )

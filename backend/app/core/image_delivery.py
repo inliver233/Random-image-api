@@ -132,6 +132,9 @@ async def deliver_known_image(
     # Multi-process: refresh runtime image pool members before readiness/sign.
     await ensure_image_edge_overlay_fresh(engine)
     # Gate on edge ready: default-off must not count edge_unavailable on every /i.
+    # Runtime image_proxy_use_pixiv_cat must NOT demote edge — only explicit query
+    # overrides (proxy= / pixiv_cat=1 / pximg_mirror_host= / local=1) skip edge.
+    # Runtime mirror default applies only on local cascade after edge miss.
     prefer_edge = (
         prefer_image_edge(
             proxy_override=proxy_override,
@@ -139,7 +142,6 @@ async def deliver_known_image(
             pximg_mirror_host_override=pximg_mirror_host_override,
             force_local=force_local,
         )
-        and not use_pixiv_cat
         and image_edge_is_ready(settings)
     )
     if prefer_edge:

@@ -320,6 +320,9 @@ async def cf_workers_deploy(
             "secrets_set": list(result.secrets_set),
             "registered": bool(register),
             "runtime_base_urls": list(runtime_bases),
+            # R2 bucket binding is never attached by this deploy path (wrangler/dashboard only).
+            "r2_binding": bool(getattr(result, "r2_binding", False)),
+            "r2_note": str(getattr(result, "r2_note", "") or ""),
             "cutover_hint": (
                 "Probe healthz, set CF_API_PROXY_BASE_URLS / IMAGE_EDGE_BASE_URLS (or rely on "
                 "runtime pool), match secrets, then enable CF_API_PROXY_ENABLED / IMAGE_EDGE_ENABLED."

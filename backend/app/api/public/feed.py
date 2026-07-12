@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from app.core.errors import ApiError, ErrorCode
+from app.core.image_edge import ensure_image_edge_overlay_fresh
 from app.core.imgproxy import load_imgproxy_config_from_settings
 from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.random_delivery import (
@@ -22,6 +23,7 @@ from app.core.random_response import (
 )
 from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.db.session import resolve_sessionmaker
+
 router = APIRouter()
 
 # Keep batch modest: enough for /wtf steps, small enough for one SQLite session loop.
@@ -87,6 +89,9 @@ async def feed_images(
     job_queue = getattr(request.app.state, "job_queue", None)
     Session = resolve_sessionmaker(request, engine)
     runtime = await resolve_runtime_for_request(request, engine)
+    # Multi-process: refresh runtime image pool before minting signed edge proxy URLs.
+    # /wtf is feed-driven; without this, overlay bases registered on another BFF stay invisible.
+    await ensure_image_edge_overlay_fresh(engine)
 
     # Keep parity with /random query resolution (mirror/proxy flags may affect future URL policy).
     resolve_proxy_mirror(
