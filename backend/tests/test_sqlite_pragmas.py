@@ -39,9 +39,27 @@ def test_sqlite_pragmas_applied(tmp_path: Path) -> None:
 
 
 def test_is_sqlite_busy_error() -> None:
+    from sqlalchemy.exc import OperationalError as SAOperationalError
+
+    from app.db.session import is_transient_db_contention_error
+
     assert is_sqlite_busy_error(sqlite3.OperationalError("database is locked"))
     assert is_sqlite_busy_error(sqlite3.OperationalError("database table is locked"))
     assert not is_sqlite_busy_error(ValueError("nope"))
+
+    # Postgres contention strings via SQLAlchemy OperationalError message.
+    assert is_sqlite_busy_error(SAOperationalError("stmt", {}, Exception("deadlock detected")))
+    assert is_sqlite_busy_error(
+        SAOperationalError("stmt", {}, Exception("could not serialize access due to concurrent update"))
+    )
+    assert is_sqlite_busy_error(
+        SAOperationalError("stmt", {}, Exception("canceling statement due to lock timeout"))
+    )
+    assert not is_sqlite_busy_error(SAOperationalError("stmt", {}, Exception("syntax error at or near")))
+
+    # Alias parity.
+    assert is_transient_db_contention_error is is_sqlite_busy_error
+    assert is_transient_db_contention_error(sqlite3.OperationalError("database is busy"))
 
 
 def test_with_sqlite_busy_retry_retries_then_succeeds() -> None:

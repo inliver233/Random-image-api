@@ -20,21 +20,58 @@ _SESSIONMAKER_BY_ENGINE: weakref.WeakKeyDictionary[AsyncEngine, async_sessionmak
 )
 
 
+def _is_transient_contention_message(msg: str) -> bool:
+    """SQLite busy + common Postgres contention strings (asyncpg/psycopg)."""
+    text = (msg or "").lower()
+    if not text:
+        return False
+    sqlite_hits = (
+        "database is locked",
+        "database table is locked",
+        "database schema is locked",
+        "database is busy",
+    )
+    if any(h in text for h in sqlite_hits):
+        return True
+    # Postgres: retry-safe contention / serialization (no silent swallow of hard errors).
+    pg_hits = (
+        "deadlock detected",
+        "could not serialize access",
+        "canceling statement due to lock timeout",
+        "lock_not_available",
+        "tuple concurrently updated",
+    )
+    return any(h in text for h in pg_hits)
+
+
 def is_sqlite_busy_error(exc: BaseException) -> bool:
+    """True for transient DB contention worth retrying (SQLite busy + PG deadlock/serialize).
+
+    Name is historical (SQLite-first); Postgres messages are included so
+    ``with_sqlite_busy_retry`` remains useful after dialect cutover without a
+    second wrapper. Hard failures must not match.
+    """
     if isinstance(exc, TimeoutError):
         return True
     if isinstance(exc, sqlite3.OperationalError):
-        msg = str(exc).lower()
-        return (
-            "database is locked" in msg
-            or "database table is locked" in msg
-            or "database schema is locked" in msg
-            or "database is busy" in msg
-        )
+        return _is_transient_contention_message(str(exc))
     if isinstance(exc, OperationalError):
         orig = getattr(exc, "orig", None)
-        return is_sqlite_busy_error(orig) if isinstance(orig, BaseException) else False
+        if isinstance(orig, BaseException) and is_sqlite_busy_error(orig):
+            return True
+        return _is_transient_contention_message(str(exc))
+    # Bare driver errors sometimes surface without SQLAlchemy wrap (asyncpg).
+    if isinstance(exc, Exception) and not isinstance(exc, (KeyboardInterrupt, SystemExit)):
+        # Only treat known contention strings — do not retry arbitrary Exception.
+        if type(exc).__module__.startswith(("asyncpg", "psycopg", "psycopg2")) or type(
+            exc
+        ).__name__ in {"DeadlockDetectedError", "SerializationError", "LockNotAvailableError"}:
+            return _is_transient_contention_message(str(exc))
     return False
+
+
+# Alias for callers that want dialect-neutral naming (same predicate).
+is_transient_db_contention_error = is_sqlite_busy_error
 
 
 async def with_sqlite_busy_retry(
