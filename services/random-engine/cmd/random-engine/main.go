@@ -776,9 +776,10 @@ func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLi
 	}
 
 	age := ageDaysFromPixiv(im.CreatedAtPixiv)
+	// Align Python score_image_with_time_boosts freshness: -age/half_life (not exp half-life).
 	fresh := 0.0
 	if age != nil && halfLifeDays > 0 {
-		fresh = math.Exp(-(*age) * math.Ln2 / halfLifeDays)
+		fresh = -(*age) / halfLifeDays
 	}
 	vel := 0.0
 	if age != nil {
@@ -790,7 +791,7 @@ func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLi
 		wView*math.Log1p(vw) +
 		wComment*math.Log1p(cm) +
 		wPixels*math.Log1p(pixels/1_000_000.0) +
-		wRate*math.Log1p(rate*100.0) +
+		wRate*math.Log1p(rate*1000.0) +
 		wFresh*fresh +
 		wVel*math.Log1p(vel)
 

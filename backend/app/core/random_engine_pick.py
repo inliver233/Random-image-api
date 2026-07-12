@@ -612,15 +612,19 @@ async def pick_with_strategy(
             "engine_traffic_percent": int(getattr(settings, "random_engine_traffic_percent", 100) or 0),
         }
     elif skip_engine:
-        # Sticky Python path after first dual-run attempt — no traffic metric pollution.
-        try:
-            observe_random_engine_pick(status="skipped_sticky")
-        except Exception:
-            pass
-        debug_base = {
-            **debug_base,
-            "engine_status": "skipped_sticky",
-        }
+        # Sticky Python path after first dual-run attempt (/feed top-up, stream retry).
+        # Only count when dual-run is configured; default-off must not spam skipped_sticky
+        # on every feed top-up while RANDOM_ENGINE_ENABLED=0.
+        engine_configured = bool(getattr(settings, "random_engine_enabled", False)) and bool(engine_url)
+        if engine_configured:
+            try:
+                observe_random_engine_pick(status="skipped_sticky")
+            except Exception:
+                pass
+            debug_base = {
+                **debug_base,
+                "engine_status": "skipped_sticky",
+            }
 
     if pick_ctx.strategy_norm == "random":
         return await pick_by_random_key(

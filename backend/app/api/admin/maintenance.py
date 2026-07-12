@@ -17,10 +17,13 @@ from app.core.random_engine_client import (
     engine_circuit_snapshot,
     engine_filter_count,
     engine_health,
+    engine_pick,
     random_engine_base_url,
 )
-from app.core.random_engine_pick import build_engine_filters
+from app.core.random_engine_pick import build_engine_filters, build_engine_pick_payload
+from app.core.random_delivery import resolve_catalog_store
 from app.core.random_engine_sync import push_engine_snapshot
+from app.core.recommendation import quality_score
 from app.core.random_request import parse_random_filters
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_config_cache import resolve_runtime_for_request
@@ -33,6 +36,7 @@ from app.db.request_logs_cleanup import (
     preview_request_logs_cleanup,
 )
 from app.db.session import resolve_sessionmaker
+
 router = APIRouter()
 
 
@@ -577,12 +581,14 @@ def _coerce_tag_list(raw: Any) -> list[str] | None:
 
 @router.post(
     "/maintenance/random-engine/compare-filters",
-    summary="Compare random-engine filter cardinality",
+    summary="Compare random-engine filter cardinality (+ optional seeded pick probe)",
     description=(
-        "Statistical dual-run check: SQLite filter cardinality vs Go engine index. "
-        "Does not compare sampled pick ids (non-deterministic). Optional body fields "
+        "Dual-run gate: SQLite filter cardinality vs Go engine index. Optional body fields "
         "mirror public `/random` query params (r18, tags, mins, …). Defaults = safe r18=0. "
-        "Returns `match`/`python_filtered`/`engine_filtered`/`delta` plus engine index meta."
+        "Returns `match`/`python_filtered`/`engine_filtered`/`delta` plus engine index meta. "
+        "Also runs a seeded strategy=random pick probe: engine pick id must exist in the "
+        "catalog under the same filters (membership / index freshness). This is stronger "
+        "than cardinality alone but still not a quality-score equality check (sampling)."
     ),
 )
 async def random_engine_compare_filters(
@@ -675,32 +681,35 @@ async def random_engine_compare_filters(
     )
 
     pick_port = resolve_random_pick(getattr(request.app.state, "random_pick", None))
+    catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
+    pick_kwargs = {
+        "r18": int(filters.r18),
+        "r18_strict": bool(r18_strict),
+        "orientation": orientation_code,
+        "ai_type": filters.ai_type_i,
+        "illust_type": filters.illust_type_i,
+        "min_width": int(filters.min_width_i),
+        "min_height": int(filters.min_height_i),
+        "min_pixels": int(filters.min_pixels_i),
+        "min_bookmarks": int(filters.min_bookmarks_i),
+        "min_views": int(filters.min_views_i),
+        "min_comments": int(filters.min_comments_i),
+        "included_tags": filters.included,
+        "excluded_tags": filters.excluded,
+        "user_id": filters.user_id,
+        "illust_id": filters.illust_id,
+        "created_from": filters.created_from_norm,
+        "created_to": filters.created_to_norm,
+        "exclude_image_ids": None,
+        "fail_cooldown_before": fail_cooldown_before,
+    }
     Session = resolve_sessionmaker(request)
     async with Session() as session:
-        python_count = await pick_port.count_candidates(
-            session,
-            r18=int(filters.r18),
-            r18_strict=bool(r18_strict),
-            orientation=orientation_code,
-            ai_type=filters.ai_type_i,
-            illust_type=filters.illust_type_i,
-            min_width=int(filters.min_width_i),
-            min_height=int(filters.min_height_i),
-            min_pixels=int(filters.min_pixels_i),
-            min_bookmarks=int(filters.min_bookmarks_i),
-            min_views=int(filters.min_views_i),
-            min_comments=int(filters.min_comments_i),
-            included_tags=filters.included,
-            excluded_tags=filters.excluded,
-            user_id=filters.user_id,
-            illust_id=filters.illust_id,
-            created_from=filters.created_from_norm,
-            created_to=filters.created_to_norm,
-            exclude_image_ids=None,
-            fail_cooldown_before=fail_cooldown_before,
-        )
+        python_count = await pick_port.count_candidates(session, **pick_kwargs)
 
-    engine_result = await engine_filter_count(client, base, filters=engine_filters, timeout_s=5.0)
+    engine_result = await engine_filter_count(
+        client, base, filters=engine_filters, timeout_s=5.0, settings=settings
+    )
     if engine_result is None:
         raise ApiError(
             code=ErrorCode.UPSTREAM_STREAM_ERROR,
@@ -718,11 +727,66 @@ async def random_engine_compare_filters(
     revision = str(engine_result.get("revision") or "")
 
     delta = int(python_count) - int(engine_count)
-    match = delta == 0
+    cardinality_match = delta == 0
+
+    # Seeded random pick probe: engine id must be present in catalog (index freshness / membership).
+    probe_seed = "compare-filters-probe-v1"
+    pick_payload = build_engine_pick_payload(
+        filters=engine_filters,
+        strategy="random",
+        quality=None,
+        seed=probe_seed,
+        limit=1,
+        debug=False,
+    )
+    engine_pick_body = await engine_pick(
+        client, base, payload=pick_payload, timeout_s=5.0, settings=settings
+    )
+    pick_probe: dict[str, Any] = {
+        "seed": probe_seed,
+        "strategy": "random",
+        "engine_status": None,
+        "engine_image_id": None,
+        "in_catalog": None,
+        "python_quality_score": None,
+        "ok": False,
+        "detail": "engine_pick_unavailable",
+    }
+    if isinstance(engine_pick_body, dict):
+        pick_probe["engine_status"] = str(engine_pick_body.get("code") or "")
+        items = engine_pick_body.get("items")
+        first = items[0] if isinstance(items, list) and items else None
+        if isinstance(first, dict) and first.get("id") is not None:
+            try:
+                engine_image_id = int(first["id"])
+            except Exception:
+                engine_image_id = None
+            pick_probe["engine_image_id"] = engine_image_id
+            if engine_image_id is not None:
+                async with Session() as session:
+                    row = await catalog.get_image_by_id(session, image_id=int(engine_image_id))
+                if row is None:
+                    pick_probe["in_catalog"] = False
+                    pick_probe["detail"] = "engine_id_missing_in_catalog"
+                else:
+                    pick_probe["in_catalog"] = True
+                    try:
+                        pick_probe["python_quality_score"] = float(quality_score(row))
+                    except Exception:
+                        pick_probe["python_quality_score"] = None
+                    pick_probe["ok"] = True
+                    pick_probe["detail"] = "engine_id_in_catalog"
+        elif str(engine_pick_body.get("code") or "") in {"INDEX_NOT_READY", "NO_MATCH"}:
+            pick_probe["detail"] = str(engine_pick_body.get("code") or "no_items")
+            # Empty index / no match is ok for probe when cardinality also empty.
+            pick_probe["ok"] = int(engine_count) == 0 and int(python_count) == 0
+
+    match = bool(cardinality_match) and bool(pick_probe.get("ok"))
     return admin_ok(
         request,
         payload={
             "match": match,
+            "cardinality_match": bool(cardinality_match),
             "python_filtered": int(python_count),
             "engine_filtered": int(engine_count),
             "delta": int(delta),
@@ -731,6 +795,7 @@ async def random_engine_compare_filters(
             "filters": engine_filters,
             "r18_strict": int(r18_strict),
             "fail_cooldown_before": fail_cooldown_before,
+            "pick_probe": pick_probe,
         },
         request_id=rid,
     )

@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from app.core.errors import ApiError
-from app.core.image_edge import resolve_image_edge_redirect_url
+from app.core.image_edge import image_edge_is_ready, resolve_image_edge_redirect_url
 from app.core.metrics import observe_image_delivery
 from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.random_delivery import (
@@ -154,14 +154,14 @@ async def random_image(
         )
 
         if format == "image" and redirect == 1:
-            # Prefer CF image edge as primary public delivery when configured.
-            # Explicit local mirror/proxy overrides (incl. local=1) keep the local /i/ fallback path.
+            # Prefer CF image edge only when ready (flag+secret+bases). Default-off
+            # must not emit edge_unavailable on every local /i redirect.
             prefer_edge = prefer_image_edge(
                 proxy_override=proxy_override,
                 pixiv_cat=int(pixiv_cat),
                 pximg_mirror_host_override=pximg_mirror_host_override,
                 force_local=force_local,
-            )
+            ) and image_edge_is_ready(getattr(request.app.state, "settings", None))
             edge_url = (
                 resolve_image_edge_redirect_url(
                     settings=request.app.state.settings,
@@ -176,7 +176,7 @@ async def random_image(
                 resp = build_edge_redirect_response(edge_url=edge_url, cache_control="no-store")
             else:
                 if prefer_edge:
-                    # Prefer edge but no signed URL → local /i redirect cascade.
+                    # Edge ready but sign/path failed → local /i redirect cascade.
                     observe_image_delivery(path="edge_unavailable")
                 observe_image_delivery(path="local_i_redirect")
                 resp = build_local_i_redirect_response(
@@ -219,13 +219,13 @@ async def random_image(
             local_url=urls.local_url,
         )
 
-    # When edge is enabled and client did not force local mirror/proxy, hand bytes off to CF.
+    # When edge is ready and client did not force local mirror/proxy, hand bytes off to CF.
     prefer_edge_redirect = prefer_image_edge(
         proxy_override=proxy_override,
         pixiv_cat=int(pixiv_cat),
         pximg_mirror_host_override=pximg_mirror_host_override,
         force_local=force_local,
-    )
+    ) and image_edge_is_ready(getattr(request.app.state, "settings", None))
 
     async def _pick_for_delivery(
         *,

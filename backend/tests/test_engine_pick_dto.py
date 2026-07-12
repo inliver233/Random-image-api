@@ -205,6 +205,62 @@ def test_pick_with_strategy_skip_engine_bypasses_engine(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_pick_with_strategy_skip_engine_default_off_no_sticky_metric(monkeypatch) -> None:
+    """Default-off dual-run must not spam skipped_sticky on feed top-up."""
+    from types import SimpleNamespace
+
+    from app.core.random_engine_pick import pick_with_strategy
+
+    observed: list[str] = []
+
+    def _observe(*, status: str, **_k: Any) -> None:
+        observed.append(str(status))
+
+    monkeypatch.setattr("app.core.random_engine_pick.observe_random_engine_pick", _observe)
+    monkeypatch.setattr(
+        "app.core.random_engine_client.random_engine_base_url",
+        lambda _s: None,
+    )
+
+    python_img = SimpleNamespace(id=1, illust_id=1)
+
+    async def _fake_random(**kwargs: Any) -> tuple[Any, dict[str, Any]]:
+        base = dict(kwargs.get("debug_base") or {})
+        return python_img, {**base, "picked_by": "python"}
+
+    monkeypatch.setattr("app.core.random_engine_pick.pick_by_random_key", _fake_random)
+
+    pick_ctx = SimpleNamespace(
+        debug_base={},
+        strategy_norm="random",
+        rng=None,
+        pick_kwargs={},
+        anti_repeat_enabled=False,
+        recent_exclude_image_ids=[],
+        dedup_strict=False,
+    )
+    settings = SimpleNamespace(
+        random_engine_enabled=False,
+        random_engine_timeout_ms=100,
+        random_engine_traffic_percent=100,
+    )
+
+    async def _run() -> None:
+        image, meta = await pick_with_strategy(
+            session=object(),
+            settings=settings,
+            httpx_client=object(),
+            pick_ctx=pick_ctx,
+            filters=object(),
+            skip_engine=True,
+        )
+        assert image is python_img
+        assert meta.get("engine_status") is None
+        assert observed == []
+
+    asyncio.run(_run())
+
+
 def test_pick_with_strategy_records_skipped_traffic_when_not_routed(monkeypatch) -> None:
     """Engine enabled but traffic roll / missing client → skipped_traffic metric only once."""
     from types import SimpleNamespace

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"math"
 	"testing"
 )
 
@@ -314,5 +315,20 @@ func TestClientDedupKeyShortWindow(t *testing.T) {
 	}
 	if third.Items[0].ID != firstID {
 		t.Fatalf("other key should still get first seed pick id=%d got=%d", firstID, third.Items[0].ID)
+	}
+}
+
+func TestQualityBookmarkRatePerMille(t *testing.T) {
+	// Python quality_score uses log1p((bm/vw)*1000); Go must match (not *100).
+	bm := 10
+	vw := 100
+	im := indexImage{BookmarkCount: &bm, ViewCount: &vw}
+	logit, _ := qualityLogit(im, map[string]float64{
+		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
+		"bookmark_rate": 1, "freshness": 0, "bookmark_velocity": 0,
+	}, map[string]float64{}, 21, 2)
+	want := math.Log1p((10.0/100.0)*1000.0) // log1p(100)
+	if math.Abs(logit-want) > 1e-9 {
+		t.Fatalf("bookmark_rate logit want %v got %v", want, logit)
 	}
 }

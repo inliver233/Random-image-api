@@ -74,6 +74,17 @@ def load_image_edge_config_from_settings(settings: Settings) -> ImageEdgeConfig 
     return cfg
 
 
+def image_edge_is_ready(settings: Settings | None) -> bool:
+    """True when IMAGE_EDGE is enabled and can mint signed URLs (secret + base_urls).
+
+    Public delivery must gate prefer-edge on this so default-off does not spam
+    ``edge_unavailable`` metrics on every local cascade request.
+    """
+    if settings is None:
+        return False
+    return load_image_edge_config_from_settings(settings) is not None
+
+
 def load_image_edge_config(env: Mapping[str, str]) -> ImageEdgeConfig | None:
     enabled = parse_bool_env("IMAGE_EDGE_ENABLED", default=False, env=env)
     secret = (env.get("IMAGE_EDGE_SECRET") or "").strip()

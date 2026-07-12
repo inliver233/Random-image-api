@@ -93,7 +93,8 @@ RANDOM_LATENCY_SECONDS = Histogram(
 # Labels stay small:
 #   edge_redirect | edge_unavailable | local_stream | local_i_redirect
 #   local_stream_direct | local_stream_residential | local_stream_mirror
-# edge_unavailable = prefer edge but no signed URL, then local path still counted.
+# edge_unavailable = edge *ready* (flag+secret+bases) but sign/path failed; then local
+# still counted. Default-off must NOT prefer edge → no edge_unavailable spam.
 IMAGE_DELIVERY_TOTAL = Counter(
     "new_pixiv_image_delivery_total",
     "Public image delivery outcomes by path (edge vs local cascade).",

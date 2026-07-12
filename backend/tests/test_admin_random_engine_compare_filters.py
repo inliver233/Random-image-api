@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -101,7 +102,27 @@ def test_compare_filters_match_and_delta(tmp_path: Path, monkeypatch) -> None:
     async def _fake_engine_filter_count(*_a: Any, **_k: Any) -> dict[str, Any]:
         return {"filtered": 42, "index_size": 100, "revision": "rev-test"}
 
+    async def _fake_engine_pick(*_a: Any, **_k: Any) -> dict[str, Any]:
+        return {"code": "OK", "items": [{"id": 7}]}
+
+    class _FakeCatalog:
+        backend = "fake"
+
+        async def get_image_by_id(self, session: Any, *, image_id: int) -> Any:
+            _ = session
+            assert image_id == 7
+            return SimpleNamespace(
+                id=7,
+                bookmark_count=10,
+                view_count=100,
+                comment_count=1,
+                width=100,
+                height=100,
+            )
+
     monkeypatch.setattr("app.api.admin.maintenance.engine_filter_count", _fake_engine_filter_count)
+    monkeypatch.setattr("app.api.admin.maintenance.engine_pick", _fake_engine_pick)
+    app.state.catalog_store = _FakeCatalog()
 
     with TestClient(app) as client:
         token = _login(client)
@@ -113,6 +134,7 @@ def test_compare_filters_match_and_delta(tmp_path: Path, monkeypatch) -> None:
         assert resp.status_code == 200
         body = resp.json()
         assert body["ok"] is True
+        assert body["cardinality_match"] is True
         assert body["match"] is True
         assert body["python_filtered"] == 42
         assert body["engine_filtered"] == 42
@@ -120,6 +142,9 @@ def test_compare_filters_match_and_delta(tmp_path: Path, monkeypatch) -> None:
         assert body["engine_index_size"] == 100
         assert body["engine_revision"] == "rev-test"
         assert isinstance(body.get("filters"), dict)
+        assert body["pick_probe"]["ok"] is True
+        assert body["pick_probe"]["engine_image_id"] == 7
+        assert body["pick_probe"]["in_catalog"] is True
 
 
 def test_compare_filters_reports_delta(tmp_path: Path, monkeypatch) -> None:
@@ -134,7 +159,27 @@ def test_compare_filters_reports_delta(tmp_path: Path, monkeypatch) -> None:
     async def _fake_engine_filter_count(*_a: Any, **_k: Any) -> dict[str, Any]:
         return {"filtered": 40, "index_size": 80, "revision": "rev-delta"}
 
+    async def _fake_engine_pick(*_a: Any, **_k: Any) -> dict[str, Any]:
+        # Probe succeeds but cardinality mismatch must still fail overall match.
+        return {"code": "OK", "items": [{"id": 1}]}
+
+    class _FakeCatalog:
+        backend = "fake"
+
+        async def get_image_by_id(self, session: Any, *, image_id: int) -> Any:
+            _ = session, image_id
+            return SimpleNamespace(
+                id=1,
+                bookmark_count=1,
+                view_count=10,
+                comment_count=0,
+                width=10,
+                height=10,
+            )
+
     monkeypatch.setattr("app.api.admin.maintenance.engine_filter_count", _fake_engine_filter_count)
+    monkeypatch.setattr("app.api.admin.maintenance.engine_pick", _fake_engine_pick)
+    app.state.catalog_store = _FakeCatalog()
 
     with TestClient(app) as client:
         token = _login(client)
@@ -146,6 +191,7 @@ def test_compare_filters_reports_delta(tmp_path: Path, monkeypatch) -> None:
         assert resp.status_code == 200
         body = resp.json()
         assert body["ok"] is True
+        assert body["cardinality_match"] is False
         assert body["match"] is False
         assert body["python_filtered"] == 50
         assert body["engine_filtered"] == 40
