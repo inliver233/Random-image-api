@@ -20,7 +20,7 @@ from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
 from app.core.failover import classify_pixiv_rate_limit, pixiv_rate_limit_backoff_seconds
 from app.core.metrics import TOKEN_REFRESH_FAIL_TOTAL
-from app.core.cf_api_proxy import resolve_pixiv_api_request
+from app.core.cf_api_proxy import resolve_pixiv_api_cf_candidates
 from app.core.proxy_health import proxy_endpoint_fail_values_immediate, proxy_endpoint_ok_values
 from app.core.proxy_routing import invalidate_proxy_pool_caches, select_proxy_uri_for_url
 from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
@@ -759,9 +759,10 @@ LIMIT 1;
             refresh_token = await _get_refresh_token(token_id)
 
             last_exc: BaseException | None = None
-            # Prefer CF API egress once, then residential proxy failover attempts.
-            cf_url, cf_headers, use_cf = resolve_pixiv_api_request(settings=settings, url=oauth_url)
-            max_tries = max(1, int(proxy_failover_attempts) + 1) + (1 if use_cf else 0)
+            # Prefer CF multi-base egress, then residential proxy failover attempts.
+            cf_candidates = resolve_pixiv_api_cf_candidates(settings=settings, url=oauth_url)
+            cf_count = len(cf_candidates)
+            max_tries = max(1, int(proxy_failover_attempts) + 1) + cf_count
 
             for _try in range(max_tries):
                 attempt_now_dt = datetime.now(timezone.utc)
@@ -769,8 +770,12 @@ LIMIT 1;
 
                 proxy_uri = None
                 picked_proxy = None
-                via_cf = bool(use_cf and _try == 0)
-                if not via_cf:
+                via_cf = bool(_try < cf_count)
+                cf_url = ""
+                cf_headers: dict[str, str] = {}
+                if via_cf:
+                    cf_url, cf_headers = cf_candidates[_try]
+                else:
                     picked_proxy = await select_proxy_uri_for_url(
                         engine,
                         settings,
@@ -880,10 +885,11 @@ LIMIT 1;
         headers["Authorization"] = f"Bearer {access_token}"
 
         last_exc: BaseException | None = None
-        # Prefer CF API egress once, then residential proxy failover attempts.
+        # Prefer CF multi-base egress, then residential proxy failover attempts.
         detail_base = PIXIV_ILLUST_DETAIL_URL
-        cf_url, cf_headers, use_cf = resolve_pixiv_api_request(settings=settings, url=detail_base)
-        max_tries = max(1, int(proxy_failover_attempts) + 1) + (1 if use_cf else 0)
+        cf_candidates = resolve_pixiv_api_cf_candidates(settings=settings, url=detail_base)
+        cf_count = len(cf_candidates)
+        max_tries = max(1, int(proxy_failover_attempts) + 1) + cf_count
 
         for _try in range(max_tries):
             attempt_now_dt = datetime.now(timezone.utc)
@@ -891,13 +897,14 @@ LIMIT 1;
 
             proxy_uri = None
             picked_proxy = None
-            via_cf = bool(use_cf and _try == 0)
-            request_url = cf_url if via_cf else detail_base
+            via_cf = bool(_try < cf_count)
+            request_url = detail_base
             req_headers = dict(headers)
-            if via_cf and cf_headers:
-                req_headers.update(cf_headers)
-
-            if not via_cf:
+            if via_cf:
+                request_url, cf_headers = cf_candidates[_try]
+                if cf_headers:
+                    req_headers.update(cf_headers)
+            else:
                 picked_proxy = await select_proxy_uri_for_url(
                     engine,
                     settings,

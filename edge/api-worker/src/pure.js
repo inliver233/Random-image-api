@@ -59,8 +59,9 @@ export function parseAllowedHosts(env) {
 }
 
 export function authorizeSecret(expected, got) {
+  // Fail closed: empty PROXY_SECRET must not open the allowlisted Pixiv egress.
   const e = String(expected || "").trim();
-  if (!e) return true; // open within allowlist only
+  if (!e) return false;
   return timingSafeEqual(String(got || "").trim(), e);
 }
 

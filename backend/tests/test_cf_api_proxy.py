@@ -10,6 +10,7 @@ from app.core.cf_api_proxy import (
     is_cf_api_proxy_host_allowed,
     load_cf_api_proxy_config,
     pick_cf_api_proxy_base_url,
+    resolve_pixiv_api_cf_candidates,
     resolve_pixiv_api_request,
     rewrite_url_via_cf_api_proxy,
 )
@@ -43,6 +44,18 @@ def test_load_cf_api_proxy_config_ready() -> None:
     assert cfg.ready is True
     assert cfg.base_urls == ["https://api-a.example.com", "https://api-b.example.com"]
     assert cfg.secret == "s3cret"
+
+
+def test_load_cf_api_proxy_config_not_ready_without_secret() -> None:
+    cfg = load_cf_api_proxy_config(
+        {
+            "CF_API_PROXY_ENABLED": "true",
+            "CF_API_PROXY_BASE_URLS": "https://api-a.example.com",
+            "CF_API_PROXY_SECRET": "",
+        }
+    )
+    assert cfg is not None
+    assert cfg.ready is False
 
 
 def test_host_allowlist() -> None:
@@ -121,6 +134,45 @@ def test_resolve_pixiv_api_request_disabled() -> None:
     assert used is False
     assert url == raw
     assert headers == {}
+
+
+def test_resolve_pixiv_api_request_requires_secret() -> None:
+    settings = load_settings(
+        {
+            "APP_ENV": "dev",
+            "SECRET_KEY": "x",
+            "CF_API_PROXY_ENABLED": "1",
+            "CF_API_PROXY_BASE_URLS": "https://edge.example.com",
+            "CF_API_PROXY_SECRET": "",
+        }
+    )
+    raw = "https://app-api.pixiv.net/v1/illust/detail"
+    url, headers, used = resolve_pixiv_api_request(settings=settings, url=raw)
+    assert used is False
+    assert url == raw
+    assert headers == {}
+    assert resolve_pixiv_api_cf_candidates(settings=settings, url=raw) == []
+
+
+def test_resolve_pixiv_api_cf_candidates_orders_sticky_first() -> None:
+    settings = load_settings(
+        {
+            "APP_ENV": "dev",
+            "SECRET_KEY": "x",
+            "CF_API_PROXY_ENABLED": "1",
+            "CF_API_PROXY_BASE_URLS": "https://a.example.com,https://b.example.com,https://c.example.com",
+            "CF_API_PROXY_SECRET": "sec",
+        }
+    )
+    raw = "https://app-api.pixiv.net/v1/illust/detail"
+    candidates = resolve_pixiv_api_cf_candidates(settings=settings, url=raw)
+    assert len(candidates) == 3
+    sticky, headers, used = resolve_pixiv_api_request(settings=settings, url=raw)
+    assert used is True
+    assert candidates[0][0] == sticky
+    assert all(h.get("X-Proxy-Secret") == "sec" for _, h in candidates)
+    bases = [u.split("/p/")[0] for u, _ in candidates]
+    assert len(set(bases)) == 3
 
 
 def test_settings_disables_flag_without_bases() -> None:

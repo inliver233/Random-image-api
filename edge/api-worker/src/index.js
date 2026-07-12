@@ -4,12 +4,12 @@
  * Purpose (ds2api-style + hardened):
  *   - Give hydrate / OAuth / App API diverse CF edge egress IPs
  *   - Keep residential proxies as optional fallback only
- *   - Never open-proxy: host allowlist + optional shared secret
+ *   - Never open-proxy: host allowlist + required shared secret (fail closed)
  *
  * Contract:
  *   ANY https://{worker}/p/{host}/{path}?query
  *   host ∈ ALLOWED_HOSTS (exact match, no port)
- *   Optional: header X-Proxy-Secret must match PROXY_SECRET when configured
+ *   Required: header X-Proxy-Secret must match non-empty PROXY_SECRET
  *
  * Design notes:
  *   - Strip CF / forwarding headers that leak the client IP

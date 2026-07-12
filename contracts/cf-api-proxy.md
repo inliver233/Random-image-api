@@ -42,7 +42,7 @@ Override via Worker `ALLOWED_HOSTS` CSV.
 | --- | --- |
 | `CF_API_PROXY_ENABLED` | `true` to prefer CF egress for Pixiv API |
 | `CF_API_PROXY_BASE_URLS` | CSV of worker bases (sticky hash by host+path) |
-| `CF_API_PROXY_SECRET` | Optional shared secret (sent as `X-Proxy-Secret`) |
+| `CF_API_PROXY_SECRET` | **Required** for ready (sent as `X-Proxy-Secret`; Worker `PROXY_SECRET` is fail-closed) |
 
 When disabled / not ready, hydrate keeps existing `select_proxy_uri_for_url` residential path.
 

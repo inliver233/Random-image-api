@@ -59,8 +59,10 @@ describe("parseProxyPath", () => {
 });
 
 describe("authorizeSecret + hostAllowed", () => {
-  it("open when no secret", () => {
-    assert.equal(authorizeSecret("", "anything"), true);
+  it("fail closed when no secret configured", () => {
+    assert.equal(authorizeSecret("", "anything"), false);
+    assert.equal(authorizeSecret("", ""), false);
+    assert.equal(authorizeSecret("   ", "x"), false);
   });
   it("requires match when set", () => {
     assert.equal(authorizeSecret("sekrit", "sekrit"), true);

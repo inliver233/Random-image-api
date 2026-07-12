@@ -362,7 +362,7 @@ export function MaintenancePage() {
                 {cfApi.base_urls?.length ? cfApi.base_urls.join(", ") : "（未配置）"}
               </Descriptions.Item>
               <Descriptions.Item label="共享密钥">
-                {cfApi.has_secret ? "已配置" : "未配置（可选）"}
+                {cfApi.has_secret ? "已配置" : "缺失（Worker fail-closed 必需）"}
               </Descriptions.Item>
               <Descriptions.Item label="缺失项">
                 {cfApi.missing?.length ? cfApi.missing.join(", ") : "—"}

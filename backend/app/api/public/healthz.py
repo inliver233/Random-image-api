@@ -169,9 +169,9 @@ async def healthz(request: Request) -> Any:
             },
             "cf_api_proxy": {
                 "enabled_flag": bool(getattr(settings, "cf_api_proxy_enabled", False)) if settings is not None else False,
-                "ready": cf_api_cfg is not None,
+                "ready": bool(cf_api_cfg is not None and cf_api_cfg.ready),
                 "base_url_count": len(cf_api_cfg.base_urls) if cf_api_cfg is not None else 0,
-                "has_secret": bool(cf_api_cfg.secret) if cf_api_cfg is not None else False,
+                "has_secret": bool((cf_api_cfg.secret or "").strip()) if cf_api_cfg is not None else False,
             },
             "r2_prewarm": {
                 # Parity with admin /maintenance/r2-prewarm: ready requires secret.

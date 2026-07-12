@@ -157,13 +157,15 @@ async def cf_api_proxy_status(
     raw_bases = list(getattr(settings, "cf_api_proxy_base_urls", None) or []) if settings is not None else []
     secret = str(getattr(settings, "cf_api_proxy_secret", "") or "").strip() if settings is not None else ""
     cfg = load_cf_api_proxy_config_from_settings(settings) if settings is not None else None
-    ready = cfg is not None
+    ready = bool(cfg is not None and cfg.ready)
     missing: list[str] = []
     if not flag_enabled:
         missing.append("CF_API_PROXY_ENABLED")
     if not raw_bases:
         missing.append("CF_API_PROXY_BASE_URLS")
-    # Secret is optional but recommended when Worker PROXY_SECRET is set.
+    # Worker PROXY_SECRET is fail-closed; BFF secret required for ready.
+    if not secret:
+        missing.append("CF_API_PROXY_SECRET")
     return admin_ok(
         request,
         payload={

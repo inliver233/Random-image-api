@@ -31,7 +31,8 @@ class CfApiProxyConfig:
 
     @property
     def ready(self) -> bool:
-        return bool(self.enabled and self.base_urls)
+        # Worker PROXY_SECRET is fail-closed; BFF must have a non-empty shared secret too.
+        return bool(self.enabled and self.base_urls and (self.secret or "").strip())
 
 
 def load_cf_api_proxy_config_from_settings(settings: Settings | None) -> CfApiProxyConfig | None:
@@ -82,10 +83,15 @@ def rewrite_url_via_cf_api_proxy(
     url: str,
     *,
     allowed_hosts: frozenset[str] | None = None,
+    base_url: str | None = None,
 ) -> str | None:
-    """Rewrite https://host/path?q → {base}/p/host/path?q. None if not eligible."""
+    """Rewrite https://host/path?q → {base}/p/host/path?q. None if not eligible.
+
+    Uses sticky multi-base pick unless ``base_url`` is provided (failover tries remaining bases).
+    Does not require ``cfg.ready`` secret so pure rewrite/vector tests stay usable.
+    """
     raw = (url or "").strip()
-    if not raw or not cfg.ready:
+    if not raw or not cfg.enabled or not cfg.base_urls:
         return None
     try:
         parsed = urlparse(raw)
@@ -102,7 +108,12 @@ def rewrite_url_via_cf_api_proxy(
     # Reject path traversal / absolute-URL smuggling in path segment.
     if ".." in path or path.startswith("//") or "\\" in path:
         return None
-    base = pick_cf_api_proxy_base_url(cfg, host=host, path=path).rstrip("/")
+    if base_url is not None:
+        base = str(base_url or "").strip().rstrip("/")
+        if not base:
+            return None
+    else:
+        base = pick_cf_api_proxy_base_url(cfg, host=host, path=path).rstrip("/")
     # Preserve query; drop fragment (not sent to servers anyway).
     q = f"?{parsed.query}" if parsed.query else ""
     return f"{base}/p/{host}{path}{q}"
@@ -122,6 +133,52 @@ def cf_api_proxy_headers(cfg: CfApiProxyConfig, *, extra: Mapping[str, str] | No
     return out
 
 
+def resolve_pixiv_api_cf_candidates(
+    *,
+    settings: Settings | None,
+    url: str,
+) -> list[tuple[str, dict[str, str]]]:
+    """Ordered CF rewrites for multi-base failover: sticky base first, then remaining bases.
+
+    Empty when CF API proxy is not ready (enabled + bases + secret) or URL is ineligible.
+    """
+    cfg = load_cf_api_proxy_config_from_settings(settings)
+    if cfg is None or not cfg.ready:
+        return []
+    raw = (url or "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return []
+    if (parsed.scheme or "").lower() != "https":
+        return []
+    host = (parsed.hostname or "").lower()
+    path = parsed.path or "/"
+    if not path.startswith("/"):
+        path = "/" + path
+    try:
+        sticky = pick_cf_api_proxy_base_url(cfg, host=host, path=path)
+    except ValueError:
+        return []
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for base in [sticky, *list(cfg.base_urls or [])]:
+        b = str(base or "").strip().rstrip("/")
+        if not b or b in seen:
+            continue
+        seen.add(b)
+        ordered.append(b)
+    headers = cf_api_proxy_headers(cfg)
+    out: list[tuple[str, dict[str, str]]] = []
+    for base in ordered:
+        rewritten = rewrite_url_via_cf_api_proxy(cfg, raw, base_url=base)
+        if rewritten:
+            out.append((rewritten, dict(headers)))
+    return out
+
+
 def resolve_pixiv_api_request(
     *,
     settings: Settings | None,
@@ -130,12 +187,10 @@ def resolve_pixiv_api_request(
     """Return (request_url, extra_headers, used_cf_proxy).
 
     When CF API proxy is ready and URL host is allowlisted, rewrite URL and inject secret.
-    Otherwise return original URL and empty extra headers.
+    Uses sticky primary only; prefer ``resolve_pixiv_api_cf_candidates`` for multi-base failover.
     """
-    cfg = load_cf_api_proxy_config_from_settings(settings)
-    if cfg is None:
+    candidates = resolve_pixiv_api_cf_candidates(settings=settings, url=url)
+    if not candidates:
         return url, {}, False
-    rewritten = rewrite_url_via_cf_api_proxy(cfg, url)
-    if not rewritten:
-        return url, {}, False
-    return rewritten, cf_api_proxy_headers(cfg), True
+    rewritten, headers = candidates[0]
+    return rewritten, headers, True

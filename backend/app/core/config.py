@@ -283,7 +283,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     cf_api_proxy_base_urls = parse_csv_urls(
         _get(env, "CF_API_PROXY_BASE_URLS", "") or _get(env, "CF_API_PROXY_BASE_URL", "")
     )
-    # Ready only when flag + at least one base; secret is optional but recommended.
+    # Flag stays true with bases so admin can report missing secret; ready requires secret separately.
     if not cf_api_proxy_base_urls:
         cf_api_proxy_enabled = False
 
@@ -344,6 +344,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             getattr(settings, "cf_api_proxy_base_urls", None) or []
         ):
             missing.append("CF_API_PROXY_BASE_URLS")
+        # Worker PROXY_SECRET is fail-closed; prod must not enable CF API proxy without secret.
+        if bool(getattr(settings, "cf_api_proxy_enabled", False)) and not str(
+            getattr(settings, "cf_api_proxy_secret", "") or ""
+        ).strip():
+            missing.append("CF_API_PROXY_SECRET")
         if missing:
             raise ValueError(f"Missing required env vars for prod: {', '.join(missing)}")
 
