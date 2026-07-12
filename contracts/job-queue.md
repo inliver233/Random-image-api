@@ -1,6 +1,6 @@
 # Job Queue Port
 
-Status: **Phase 4 readiness** (SQLite default; Redis/NATS not wired)
+Status: **Phase 4 readiness** (SQLite default; Redis/NATS **QUEUE-2 not implemented** — factory fail-loud)
 
 Implementation:
 

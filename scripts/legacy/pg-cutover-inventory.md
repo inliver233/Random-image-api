@@ -77,7 +77,9 @@ Unit coverage for dialect helpers: `backend/tests/test_images_upsert.py`.
 - Full dual-dialect rewrite of historical alembic revisions  
 - Production default flip away from SQLite in compose without operator env  
 - QUEUE-2 redis/nats job claim  
-- TAGS large-catalog GIN / `to_tsvector`  
+- TAGS large-catalog GIN / `to_tsvector` (SQLite **TAGS-1 page-first** already in tree; PG search polish still later)
+- QUEUE-2 redis/nats JobQueuePort (factory still fail-loud; jobs stay SQLite + purge)
+- REDIS-1 ops matrix documented in `deploy/.env.example` (rate-limit + recent-dedup redis already fail-open)
 - 62万-row migrate proof on customer data  
 - ENGINE force traffic defaults  
 
