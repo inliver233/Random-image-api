@@ -769,14 +769,66 @@ func pickFromScored(scored []scoredImg, pickMode string, limit int, rng *rand.Ra
 }
 
 
-// filterByMultiplierAllow keeps images whose AI/illust class multipliers are both > 0.
-// Mirrors Python pick_by_quality ai_type_allowed / illust_type_allowed SQL pre-filter.
+// filterByMultiplierAllow mirrors Python pick_by_quality ai_type_allowed /
+// illust_type_allowed SQL pre-filter (NOT imageMultiplier).
+//
+// Python only adds exact set members:
+//   ai: 1 | non_ai: 0 | unknown_ai: NULL only
+//   illust: 0 | manga: 1 | ugoira: 2 | unknown_illust_type: NULL only
+// So non-0/1 ai_type (or non-0/1/2 illust_type) is SQL-excluded even when the
+// unknown_* multiplier is positive. imageMultiplier still maps those values to
+// unknown_* for scoring of already-sampled candidates — that is intentional.
 func filterByMultiplierAllow(cands []indexImage, multipliers map[string]float64) []indexImage {
+	allowAI1 := weightOr(multipliers, "ai", 1.0) > 0
+	allowAI0 := weightOr(multipliers, "non_ai", 1.0) > 0
+	allowAINull := weightOr(multipliers, "unknown_ai", 1.0) > 0
+	allowIllust0 := weightOr(multipliers, "illust", 1.0) > 0
+	allowIllust1 := weightOr(multipliers, "manga", 1.0) > 0
+	allowIllust2 := weightOr(multipliers, "ugoira", 1.0) > 0
+	allowIllustNull := weightOr(multipliers, "unknown_illust_type", 1.0) > 0
+	// Python: if either allow-set is empty, yield no rows.
+	if !(allowAI1 || allowAI0 || allowAINull) || !(allowIllust0 || allowIllust1 || allowIllust2 || allowIllustNull) {
+		return nil
+	}
 	out := make([]indexImage, 0, len(cands))
 	for _, im := range cands {
-		if imageMultiplier(im, multipliers) > 0 {
-			out = append(out, im)
+		if im.AIType == nil {
+			if !allowAINull {
+				continue
+			}
+		} else if *im.AIType == 1 {
+			if !allowAI1 {
+				continue
+			}
+		} else if *im.AIType == 0 {
+			if !allowAI0 {
+				continue
+			}
+		} else {
+			// Non-0/1 is not in Python ai_type_allowed (unknown_ai only adds NULL).
+			continue
 		}
+		if im.IllustType == nil {
+			if !allowIllustNull {
+				continue
+			}
+		} else if *im.IllustType == 0 {
+			if !allowIllust0 {
+				continue
+			}
+		} else if *im.IllustType == 1 {
+			if !allowIllust1 {
+				continue
+			}
+		} else if *im.IllustType == 2 {
+			if !allowIllust2 {
+				continue
+			}
+		} else {
+			// Non-0/1/2 is not in Python illust_type_allowed.
+			continue
+		}
+		out = append(out, im)
 	}
 	return out
 }

@@ -517,3 +517,46 @@ func TestFilterOrientationNoWidthHeightFallback(t *testing.T) {
 		t.Fatalf("want only explicit orientation=1 id=2, got %+v", out)
 	}
 }
+
+func TestFilterByMultiplierAllowSQLSetParity(t *testing.T) {
+	// Python ai_type_allowed only adds NULL for unknown_ai — not ai_type=2.
+	// Python illust_type_allowed only adds NULL for unknown_illust_type — not illust_type=9.
+	ai1, ai0, aiOther := 1, 0, 2
+	illust, otherIllust := 0, 9
+	imNilAI := indexImage{ID: 1, IllustType: &illust} // AIType nil
+	imAI1 := indexImage{ID: 2, AIType: &ai1, IllustType: &illust}
+	imAI0 := indexImage{ID: 3, AIType: &ai0, IllustType: &illust}
+	imAIOther := indexImage{ID: 4, AIType: &aiOther, IllustType: &illust}
+	imIllustOther := indexImage{ID: 5, AIType: &ai0, IllustType: &otherIllust}
+	imNilIllust := indexImage{ID: 6, AIType: &ai0} // IllustType nil
+
+	// Only unknown_ai + illust: SQL would keep ai_type IS NULL AND illust_type=0.
+	mults := map[string]float64{
+		"ai": 0, "non_ai": 0, "unknown_ai": 1,
+		"illust": 1, "manga": 0, "ugoira": 0, "unknown_illust_type": 0,
+	}
+	out := filterByMultiplierAllow([]indexImage{imNilAI, imAI1, imAI0, imAIOther, imIllustOther, imNilIllust}, mults)
+	if len(out) != 1 || out[0].ID != 1 {
+		t.Fatalf("want only nil-AI illust id=1, got %+v", out)
+	}
+	// imageMultiplier still scores ai_type=2 as unknown_ai (scoring path, not sample allow-list).
+	if imageMultiplier(imAIOther, mults) <= 0 {
+		t.Fatal("scoring mult for ai_type=2 should still use unknown_ai")
+	}
+
+	// Only unknown_illust_type + non_ai: keep non_ai + illust_type IS NULL.
+	mults2 := map[string]float64{
+		"ai": 0, "non_ai": 1, "unknown_ai": 0,
+		"illust": 0, "manga": 0, "ugoira": 0, "unknown_illust_type": 1,
+	}
+	out2 := filterByMultiplierAllow([]indexImage{imNilAI, imAI1, imAI0, imAIOther, imIllustOther, imNilIllust}, mults2)
+	if len(out2) != 1 || out2[0].ID != 6 {
+		t.Fatalf("want only non_ai nil-illust id=6, got %+v", out2)
+	}
+
+	// All zero AI mults → empty (Python early return).
+	empty := filterByMultiplierAllow([]indexImage{imNilAI, imAI1}, map[string]float64{"ai": 0, "non_ai": 0, "unknown_ai": 0})
+	if len(empty) != 0 {
+		t.Fatalf("empty AI allow-set should drop all, got %d", len(empty))
+	}
+}
