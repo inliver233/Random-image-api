@@ -1,10 +1,12 @@
 ﻿import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setPublicDebugApiKey } from "../auth/publicApiKeyStorage";
 import { AuthorsPage } from "./AuthorsPage";
+import { PlaygroundPage } from "./PlaygroundPage";
 
 function makeClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -54,7 +56,9 @@ describe("AuthorsPage", () => {
     const qc = makeClient();
     render(
       <QueryClientProvider client={qc}>
-        <AuthorsPage />
+        <MemoryRouter>
+          <AuthorsPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     );
 
@@ -88,7 +92,9 @@ describe("AuthorsPage", () => {
     const qc = makeClient();
     render(
       <QueryClientProvider client={qc}>
-        <AuthorsPage />
+        <MemoryRouter>
+          <AuthorsPage />
+        </MemoryRouter>
       </QueryClientProvider>,
     );
 
@@ -100,5 +106,28 @@ describe("AuthorsPage", () => {
     expect(authorsCall).toBeTruthy();
     const headers = new Headers(authorsCall?.[1]?.headers);
     expect(headers.get("X-API-Key")).toBe("pk_test_authors");
+  });
+
+  it("navigates to playground with user_id prefill", async () => {
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/admin/authors"]}>
+          <Routes>
+            <Route path="/admin/authors" element={<AuthorsPage />} />
+            <Route path="/admin/random" element={<PlaygroundPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("9")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /按此作者随机一张/ }));
+    expect(await screen.findByText("随机接口调试")).toBeInTheDocument();
+
+    await waitFor(() => {
+      const input = screen.getByLabelText(/作者ID/) as HTMLInputElement;
+      expect(String(input.value)).toBe("9");
+    });
   });
 });

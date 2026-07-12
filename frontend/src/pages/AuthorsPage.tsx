@@ -1,6 +1,7 @@
-import { Space, Typography } from "antd";
+import { Button, Space, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
+import { useNavigate } from "react-router-dom";
 
 import { CursorTableCard } from "../admin/CursorTableCard";
 import { apiJson } from "../api/client";
@@ -20,13 +21,15 @@ type AuthorsListResponse = {
   request_id: string;
 };
 
-const columns: ColumnsType<AuthorItem> = [
+const baseColumns: ColumnsType<AuthorItem> = [
   { title: "作者ID", dataIndex: "user_id", key: "user_id" },
   { title: "作者名", dataIndex: "user_name", key: "user_name" },
   { title: "图片数量", dataIndex: "count_images", key: "count_images" },
 ];
 
 export function AuthorsPage() {
+  const navigate = useNavigate();
+
   const { query, items, nextCursor, listRequestId, loadMore } = useCursorList<AuthorItem, AuthorsListResponse>({
     queryKey: ["public", "authors", { limit: 50 }],
     getItemId: (item) => item.user_id,
@@ -39,6 +42,24 @@ export function AuthorsPage() {
       });
     },
   });
+
+  const columns: ColumnsType<AuthorItem> = [
+    ...baseColumns,
+    {
+      title: "操作",
+      key: "actions",
+      render: (_, row) => (
+        <Button
+          size="small"
+          onClick={() =>
+            navigate(`/admin/random?format=image&user_id=${encodeURIComponent(String(row.user_id))}`)
+          }
+        >
+          按此作者随机一张
+        </Button>
+      ),
+    },
+  ];
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
