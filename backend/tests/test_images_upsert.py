@@ -91,6 +91,7 @@ def test_now_expr_for_dialect_sqlite_uses_strftime_postgres_uses_to_char() -> No
 
 def test_utc_now_compiles_per_dialect() -> None:
     from sqlalchemy.dialects import postgresql, sqlite
+    from sqlalchemy.schema import CreateTable
 
     from app.db.utc_text_now import UtcNow
 
@@ -99,6 +100,13 @@ def test_utc_now_compiles_per_dialect() -> None:
     assert "strftime" in sqlite_sql
     assert "to_char" in pg_sql
     assert "UTC" in pg_sql
+
+    # Image ORM server defaults must not emit SQLite strftime on Postgres DDL.
+    pg_ddl = str(CreateTable(Image.__table__).compile(dialect=postgresql.dialect()))
+    sq_ddl = str(CreateTable(Image.__table__).compile(dialect=sqlite.dialect()))
+    assert "strftime" not in pg_ddl
+    assert "to_char" in pg_ddl
+    assert "strftime" in sq_ddl
 
 
 def test_driver_param_marker_sqlite_question_postgres_percent_s() -> None:
