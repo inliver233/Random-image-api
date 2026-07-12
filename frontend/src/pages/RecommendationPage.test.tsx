@@ -174,5 +174,20 @@ describe("RecommendationPage", () => {
     const proxyLink = screen.getByRole("link", { name: /\/i\/42\.jpg.*api_key=pk_rec_preview/ });
     expect(proxyLink.getAttribute("href") || "").toContain("/i/42.jpg");
     expect(proxyLink.getAttribute("href") || "").toContain("api_key=pk_rec_preview");
+
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: { writeText },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "复制链接" }));
+    expect(writeText).toHaveBeenCalled();
+    expect(String(writeText.mock.calls[0]?.[0] || "")).toContain("api_key=pk_rec_preview");
+
+    const openSpy = vi.fn();
+    vi.stubGlobal("open", openSpy);
+    fireEvent.click(screen.getByRole("button", { name: "新窗口打开" }));
+    expect(openSpy).toHaveBeenCalled();
+    expect(String(openSpy.mock.calls[0]?.[0] || "")).toContain("api_key=pk_rec_preview");
   });
 });

@@ -73,6 +73,22 @@ type FormValues = {
 const STRATEGY_VALUES = new Set<FormValues["random_strategy"]>(["quality", "random"]);
 const PICK_MODE_VALUES = new Set<FormValues["pick_mode"]>(["weighted", "best"]);
 
+async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const el = document.createElement("textarea");
+  el.value = text;
+  el.setAttribute("readonly", "");
+  el.style.position = "fixed";
+  el.style.left = "-9999px";
+  document.body.appendChild(el);
+  el.select();
+  document.execCommand("copy");
+  document.body.removeChild(el);
+}
+
 const DEFAULTS: Omit<FormValues, "preview_seed"> = {
   random_strategy: "quality",
   random_quality_samples: 12,
@@ -505,21 +521,49 @@ export function RecommendationPage() {
                 requestIdPlacement="secondary"
               />
               {previewUrl ? (
-                <Typography.Text type="secondary">
-                  {/* Browser-openable URL: attach ?api_key= when debug key is set. */}
-                  请求链接:{" "}
-                  {(() => {
-                    const openable = withPublicApiKeyQuery(
-                      resolvePublicApiUrl(previewUrl),
-                      form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
-                    );
-                    return (
-                      <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
-                        {openable}
-                      </Typography.Link>
-                    );
-                  })()}
-                </Typography.Text>
+                <Space direction="vertical" size="small" style={{ width: "100%" }}>
+                  <Typography.Text type="secondary">
+                    {/* Browser-openable URL: attach ?api_key= when debug key is set. */}
+                    请求链接:{" "}
+                    {(() => {
+                      const openable = withPublicApiKeyQuery(
+                        resolvePublicApiUrl(previewUrl),
+                        form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+                      );
+                      return (
+                        <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
+                          {openable}
+                        </Typography.Link>
+                      );
+                    })()}
+                  </Typography.Text>
+                  <Space wrap>
+                    <Button
+                      size="small"
+                      onClick={async () => {
+                        const openable = withPublicApiKeyQuery(
+                          resolvePublicApiUrl(previewUrl),
+                          form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+                        );
+                        await copyText(openable);
+                      }}
+                    >
+                      复制链接
+                    </Button>
+                    <Button
+                      size="small"
+                      onClick={() => {
+                        const openable = withPublicApiKeyQuery(
+                          resolvePublicApiUrl(previewUrl),
+                          form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+                        );
+                        window.open(openable, "_blank", "noopener,noreferrer");
+                      }}
+                    >
+                      新窗口打开
+                    </Button>
+                  </Space>
+                </Space>
               ) : null}
               {(() => {
                 // Preview JSON often includes urls.proxy (/i/... or edge); open with ?api_key= when required.
@@ -532,12 +576,25 @@ export function RecommendationPage() {
                   form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
                 );
                 return (
-                  <Typography.Text type="secondary">
-                    代理链接:{" "}
-                    <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
-                      {openable}
-                    </Typography.Link>
-                  </Typography.Text>
+                  <Space direction="vertical" size="small" style={{ width: "100%" }}>
+                    <Typography.Text type="secondary">
+                      代理链接:{" "}
+                      <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
+                        {openable}
+                      </Typography.Link>
+                    </Typography.Text>
+                    <Space wrap>
+                      <Button size="small" onClick={async () => copyText(openable)}>
+                        复制代理链接
+                      </Button>
+                      <Button
+                        size="small"
+                        onClick={() => window.open(openable, "_blank", "noopener,noreferrer")}
+                      >
+                        打开代理链接
+                      </Button>
+                    </Space>
+                  </Space>
                 );
               })()}
               {previewBody ? (
