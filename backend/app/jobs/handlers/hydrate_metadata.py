@@ -20,9 +20,9 @@ from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
 from app.core.failover import classify_pixiv_rate_limit, pixiv_rate_limit_backoff_seconds
 from app.core.metrics import TOKEN_REFRESH_FAIL_TOTAL
-from app.core.cf_api_proxy import resolve_pixiv_api_cf_candidates
 from app.core.proxy_health import proxy_endpoint_fail_values_immediate, proxy_endpoint_ok_values
-from app.core.proxy_routing import invalidate_proxy_pool_caches, select_proxy_uri_for_url
+from app.core.proxy_routing import invalidate_proxy_pool_caches
+from app.core.proxy_selector import iter_pixiv_api_egress
 from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
 from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.core.redact import redact_text
@@ -759,32 +759,20 @@ LIMIT 1;
             refresh_token = await _get_refresh_token(token_id)
 
             last_exc: BaseException | None = None
-            # Prefer CF multi-base egress, then residential proxy failover attempts.
-            cf_candidates = resolve_pixiv_api_cf_candidates(settings=settings, url=oauth_url)
-            cf_count = len(cf_candidates)
-            max_tries = max(1, int(proxy_failover_attempts) + 1) + cf_count
-
-            for _try in range(max_tries):
+            # CF multi-base first, then residential failover (shared ProxySelector plan).
+            async for attempt in iter_pixiv_api_egress(
+                engine,
+                settings,
+                runtime,
+                url=oauth_url,
+                token_id=int(token_id),
+                residential_failover_attempts=int(proxy_failover_attempts),
+            ):
                 attempt_now_dt = datetime.now(timezone.utc)
                 attempt_now_iso = iso_utc_ms(attempt_now_dt)
-
-                proxy_uri = None
-                picked_proxy = None
-                via_cf = bool(_try < cf_count)
-                cf_url = ""
-                cf_headers: dict[str, str] = {}
-                if via_cf:
-                    cf_url, cf_headers = cf_candidates[_try]
-                else:
-                    picked_proxy = await select_proxy_uri_for_url(
-                        engine,
-                        settings,
-                        runtime,
-                        url=oauth_url,
-                        token_id=int(token_id),
-                    )
-                    if picked_proxy is not None:
-                        proxy_uri = picked_proxy.uri
+                via_cf = bool(attempt.via_cf)
+                picked_proxy = attempt.residential
+                proxy_uri = attempt.proxy_uri
 
                 start_m = float(time.monotonic())
                 try:
@@ -796,8 +784,8 @@ LIMIT 1;
                             config=oauth_config,
                             transport=transport,
                             proxy=None,
-                            request_url=cf_url,
-                            extra_headers=cf_headers,
+                            request_url=attempt.request_url,
+                            extra_headers=attempt.extra_headers,
                         )
                     else:
                         token = await refresh_access_token(
@@ -885,38 +873,28 @@ LIMIT 1;
         headers["Authorization"] = f"Bearer {access_token}"
 
         last_exc: BaseException | None = None
-        # Prefer CF multi-base egress, then residential proxy failover attempts.
         detail_base = PIXIV_ILLUST_DETAIL_URL
-        cf_candidates = resolve_pixiv_api_cf_candidates(settings=settings, url=detail_base)
-        cf_count = len(cf_candidates)
-        max_tries = max(1, int(proxy_failover_attempts) + 1) + cf_count
-
-        for _try in range(max_tries):
+        # CF multi-base first, then residential failover (shared ProxySelector plan).
+        async for attempt in iter_pixiv_api_egress(
+            engine,
+            settings,
+            runtime,
+            url=detail_base,
+            token_id=int(token_id),
+            residential_failover_attempts=int(proxy_failover_attempts),
+        ):
             attempt_now_dt = datetime.now(timezone.utc)
             attempt_now_iso = iso_utc_ms(attempt_now_dt)
 
-            proxy_uri = None
-            picked_proxy = None
-            via_cf = bool(_try < cf_count)
-            request_url = detail_base
+            via_cf = bool(attempt.via_cf)
+            picked_proxy = attempt.residential
+            request_url = attempt.request_url
             req_headers = dict(headers)
-            if via_cf:
-                request_url, cf_headers = cf_candidates[_try]
-                if cf_headers:
-                    req_headers.update(cf_headers)
-            else:
-                picked_proxy = await select_proxy_uri_for_url(
-                    engine,
-                    settings,
-                    runtime,
-                    url=detail_base,
-                    token_id=int(token_id),
-                )
-                if picked_proxy is not None:
-                    proxy_uri = picked_proxy.uri
+            if attempt.extra_headers:
+                req_headers.update(attempt.extra_headers)
 
             # CF path is direct to worker; never pair with residential proxy.
-            use_proxy = proxy_uri if (proxy_uri and not via_cf) else None
+            use_proxy = attempt.proxy_uri
 
             start_m = float(time.monotonic())
             try:

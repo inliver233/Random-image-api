@@ -6,7 +6,8 @@ Implementation:
 
 - Worker: `edge/api-worker`
 - Python client: `backend/app/core/cf_api_proxy.py`
-- Wiring: hydrate OAuth refresh + illust detail prefer CF when ready; residential proxy pool is fallback
+- Egress plan (CF-first + residential): `backend/app/core/proxy_selector.py` → `iter_pixiv_api_egress`
+- Wiring: hydrate OAuth refresh + illust detail use the shared plan; residential proxy pool is fallback
 
 ## URL
 
@@ -46,7 +47,7 @@ Override via Worker `ALLOWED_HOSTS` CSV.
 | `CF_API_PROXY_BASE_URLS` | CSV of worker bases (sticky hash by host+path) |
 | `CF_API_PROXY_SECRET` | **Required** for ready (sent as `X-Proxy-Secret`; Worker `PROXY_SECRET` is fail-closed) |
 
-When disabled / not ready, hydrate keeps existing `select_proxy_uri_for_url` residential path.
+When disabled / not ready, `iter_pixiv_api_egress` yields residential-only attempts via `select_proxy_uri_for_url`.
 
 ## Security rules
 
