@@ -159,4 +159,27 @@ describe("ImagesPage", () => {
       expect(String(input.value)).toBe("111");
     });
   });
+
+  it("navigates to playground with user_id prefill from author", async () => {
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/admin/images"]}>
+          <Routes>
+            <Route path="/admin/images" element={<ImagesPage />} />
+            <Route path="/admin/random" element={<PlaygroundPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("111")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /按此作者随机/ }));
+    expect(await screen.findByText("随机接口调试")).toBeInTheDocument();
+
+    await waitFor(() => {
+      const input = screen.getByLabelText(/作者ID/) as HTMLInputElement;
+      expect(String(input.value)).toBe("9");
+    });
+  });
 });

@@ -67,8 +67,9 @@ export function authorizeSecret(expected, got) {
 
 /**
  * Parse isolate-local rate limit from env.
- * RATE_LIMIT_RPM=0 or empty → disabled (unlimited).
- * Defaults: 600 rpm, burst = max(rpm/10, 20) when burst unset.
+ * - empty / unset RATE_LIMIT_RPM → enabled at 600 rpm (safe default for public proxy)
+ * - RATE_LIMIT_RPM=0 or non-positive → disabled (unlimited)
+ * - burst defaults to max(rpm/10, 20) when RATE_LIMIT_BURST unset
  */
 export function parseRateLimitConfig(env) {
   const rawRpm = String(env?.RATE_LIMIT_RPM ?? "").trim();

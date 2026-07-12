@@ -252,39 +252,56 @@ export function ImagesPage() {
       {
         title: "操作",
         key: "actions",
-        width: 260,
-        render: (_, row) => (
-          <Space wrap>
-            <Button
-              size="small"
-              onClick={() =>
-                navigate(
-                  `/admin/random?format=image&illust_id=${encodeURIComponent(String(row.illust_id))}`,
-                )
-              }
-            >
-              按此作品随机
-            </Button>
-            <Button
-              size="small"
-              onClick={() => manualHydrate.mutate(row.id)}
-              loading={manualHydrate.isPending && manualHydrate.variables === row.id}
-            >
-              手动补全
-            </Button>
-            <Popconfirm
-              title={`确定删除图片 #${row.id}？`}
-              okText="删除"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-              onConfirm={() => deleteImage.mutate(row.id)}
-            >
-              <Button size="small" danger loading={deleteImage.isPending && deleteImage.variables === row.id}>
-                删除
+        width: 360,
+        render: (_, row) => {
+          const authorId = row.user?.id != null && String(row.user.id).trim() ? String(row.user.id).trim() : "";
+          const authorIdNum = authorId ? Number(authorId) : NaN;
+          const canAuthorJump = Number.isFinite(authorIdNum) && authorIdNum > 0;
+          return (
+            <Space wrap>
+              <Button
+                size="small"
+                onClick={() =>
+                  navigate(
+                    `/admin/random?format=image&illust_id=${encodeURIComponent(String(row.illust_id))}`,
+                  )
+                }
+              >
+                按此作品随机
               </Button>
-            </Popconfirm>
-          </Space>
-        ),
+              {canAuthorJump ? (
+                <Button
+                  size="small"
+                  onClick={() =>
+                    navigate(
+                      `/admin/random?format=image&user_id=${encodeURIComponent(authorId)}`,
+                    )
+                  }
+                >
+                  按此作者随机
+                </Button>
+              ) : null}
+              <Button
+                size="small"
+                onClick={() => manualHydrate.mutate(row.id)}
+                loading={manualHydrate.isPending && manualHydrate.variables === row.id}
+              >
+                手动补全
+              </Button>
+              <Popconfirm
+                title={`确定删除图片 #${row.id}？`}
+                okText="删除"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => deleteImage.mutate(row.id)}
+              >
+                <Button size="small" danger loading={deleteImage.isPending && deleteImage.variables === row.id}>
+                  删除
+                </Button>
+              </Popconfirm>
+            </Space>
+          );
+        },
       },
     ],
     [deleteImage, manualHydrate, navigate],
