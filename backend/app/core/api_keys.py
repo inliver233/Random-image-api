@@ -336,10 +336,33 @@ def build_api_key_rate_limiter(
     return ApiKeyRateLimiter(rpm=int(rpm), burst=int(burst), backend="memory")
 
 
-def extract_api_key(headers: Mapping[str, str] | None) -> str | None:
-    if not headers:
-        return None
-    return (headers.get("X-API-Key") or headers.get("x-api-key") or "").strip() or None
+def extract_api_key(
+    headers: Mapping[str, str] | None,
+    *,
+    query: Mapping[str, str] | None = None,
+) -> str | None:
+    """Resolve public API key: ``X-API-Key`` header first, then ``api_key`` query.
+
+    Query fallback exists for browser navigations (``window.open`` / ``<img>`` / redirect)
+    that cannot set custom headers when ``PUBLIC_API_KEY_REQUIRED`` is on. Prefer header
+    for programmatic clients (query may appear in access logs).
+    """
+    if headers:
+        header_key = (headers.get("X-API-Key") or headers.get("x-api-key") or "").strip()
+        if header_key:
+            return header_key
+    if query is not None:
+        # Starlette QueryParams is Mapping-like; support api_key (canonical).
+        try:
+            q = query.get("api_key")  # type: ignore[attr-defined]
+        except Exception:
+            q = None
+        if q is None and hasattr(query, "get"):
+            q = query.get("apiKey")  # type: ignore[union-attr]
+        query_key = str(q or "").strip()
+        if query_key:
+            return query_key
+    return None
 
 
 async def require_public_api_key(
@@ -347,8 +370,9 @@ async def require_public_api_key(
     limiter: ApiKeyRateLimiterPort,
     *,
     headers: Mapping[str, str] | None,
+    query: Mapping[str, str] | None = None,
 ) -> int:
-    api_key = extract_api_key(headers)
+    api_key = extract_api_key(headers, query=query)
     if not api_key:
         raise ApiError(code=ErrorCode.UNAUTHORIZED, message="Missing API key", status_code=401)
 

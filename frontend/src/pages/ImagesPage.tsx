@@ -10,6 +10,7 @@ import { QueryState } from "../admin/QueryState";
 import { missingLabel } from "../admin/missingFields";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson, resolvePublicApiUrl } from "../api/client";
+import { withPublicApiKeyQuery } from "../auth/publicApiKeyStorage";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ImageItem = {
@@ -192,7 +193,10 @@ export function ImagesPage() {
             size="small"
             onClick={() =>
               window.open(
-                resolvePublicApiUrl(row.proxy_path || `/i/${row.id}.${row.ext}`),
+                // Public /i needs X-API-Key when required; browser open uses ?api_key=.
+                withPublicApiKeyQuery(
+                  resolvePublicApiUrl(row.proxy_path || `/i/${row.id}.${row.ext}`),
+                ),
                 "_blank",
                 "noopener,noreferrer",
               )

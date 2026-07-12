@@ -102,4 +102,28 @@ describe("ImagesPage", () => {
       "noopener,noreferrer",
     );
   });
+
+  it("appends api_key query when public debug key is stored", async () => {
+    const openSpy = vi.fn();
+    vi.stubGlobal("open", openSpy);
+    vi.spyOn(client, "resolvePublicApiUrl").mockImplementation(
+      (pathOrUrl: string) => `https://api.example.com${pathOrUrl}`,
+    );
+    const { setPublicDebugApiKey } = await import("../auth/publicApiKeyStorage");
+    setPublicDebugApiKey("pk_img_open");
+
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <ImagesPage />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "#1" }));
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://api.example.com/i/1.jpg?api_key=pk_img_open",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
 });

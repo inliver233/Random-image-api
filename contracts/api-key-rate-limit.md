@@ -14,7 +14,7 @@ Implementation:
 
 | Env | Default | Role |
 | --- | --- | --- |
-| `PUBLIC_API_KEY_REQUIRED` | `false` | Enforce `X-API-Key` on public routes |
+| `PUBLIC_API_KEY_REQUIRED` | `false` | Enforce public key on public routes (`X-API-Key` header, or `api_key` query fallback for browser navigations) |
 | `PUBLIC_API_KEY_RPM` | `0` | Tokens refilled per minute (`0` = no limit) |
 | `PUBLIC_API_KEY_BURST` | `0` | Bucket capacity (falls back to rpm when unset/`0` with rpm>0) |
 | `PUBLIC_API_KEY_RATE_LIMIT_BACKEND` | `memory` | `memory` \| `redis` |
@@ -47,3 +47,4 @@ Socket connect/read timeouts on the Redis client are also short (~0.2s). Budget 
 - Invalid / missing key → `401` (`UNAUTHORIZED`) before rate limit.
 - Rate limited → `429` (`RATE_LIMITED`).
 - Token bucket: capacity=`max(1, burst or rpm)`, refill=`rpm/60` tokens/s, cost=1 per request.
+- Key extraction order: `X-API-Key` / `x-api-key` header, then `api_key` query (for `window.open` / `<img>` / redirects that cannot set headers). Prefer header for programmatic clients (query may appear in access logs).

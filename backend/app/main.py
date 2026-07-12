@@ -290,6 +290,8 @@ def create_app() -> FastAPI:
                 request.app.state.api_key_authenticator,
                 request.app.state.api_key_limiter,
                 headers=request.headers,
+                # Browser opens of /i/... cannot send X-API-Key; accept ?api_key=.
+                query=request.query_params,
             )
         except ApiError as exc:
             return json_error_response(

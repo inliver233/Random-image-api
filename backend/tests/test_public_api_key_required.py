@@ -87,3 +87,68 @@ def test_public_api_key_required_enforces_and_rate_limits(tmp_path: Path, monkey
         assert limited_body["ok"] is False
         assert limited_body["code"] == "RATE_LIMITED"
 
+
+def test_public_api_key_accepts_query_param_fallback(tmp_path: Path, monkeypatch) -> None:
+    """Browser navigations cannot send X-API-Key; ?api_key= is accepted as fallback."""
+    db_path = tmp_path / "public_api_key_query.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    api_key = "k_" + ("q" * 40)
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("PUBLIC_API_KEY_REQUIRED", "true")
+    monkeypatch.setenv("PUBLIC_API_KEY_RPM", "0")
+    monkeypatch.setenv("PUBLIC_API_KEY_BURST", "0")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        key_hash = hmac_sha256_hex(secret_key="secret_test", message=api_key)
+        hint = api_key_hint(api_key)
+
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            session.add(
+                ApiKey(
+                    name="public_query",
+                    key_hash=key_hash,
+                    hint=hint,
+                    enabled=1,
+                )
+            )
+            session.add(
+                Image(
+                    illust_id=456,
+                    page_index=0,
+                    ext="jpg",
+                    original_url="https://example.test/origin2.jpg",
+                    proxy_path="/i/1.jpg",
+                    random_key=0.4,
+                    x_restrict=0,
+                )
+            )
+            await session.commit()
+
+        await app.state.engine.dispose()
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        missing = client.get("/random?format=json&attempts=1")
+        assert missing.status_code == 401
+
+        via_query = client.get(f"/random?format=json&attempts=1&api_key={api_key}")
+        assert via_query.status_code == 200
+
+        # Header still wins / works independently.
+        via_header = client.get("/random?format=json&attempts=1", headers={"X-API-Key": api_key})
+        assert via_header.status_code == 200
+
+        bad_query = client.get("/random?format=json&attempts=1&api_key=bad")
+        assert bad_query.status_code == 401
+

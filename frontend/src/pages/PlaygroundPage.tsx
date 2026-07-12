@@ -16,6 +16,7 @@ import {
   getPublicDebugApiKey,
   publicApiKeyHeaders,
   setPublicDebugApiKey,
+  withPublicApiKeyQuery,
 } from "../auth/publicApiKeyStorage";
 
 type PlaygroundFormValues = {
@@ -280,7 +281,12 @@ export function PlaygroundPage() {
 
   const onOpen = () => {
     if (!publicUrl) return;
-    window.open(publicUrl, "_blank", "noopener,noreferrer");
+    // window.open cannot send X-API-Key; attach ?api_key= when debug key is set.
+    const openUrl = withPublicApiKeyQuery(
+      publicUrl,
+      form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+    );
+    window.open(openUrl, "_blank", "noopener,noreferrer");
   };
 
   return (
