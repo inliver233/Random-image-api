@@ -96,12 +96,13 @@ describe("RecommendationPage", () => {
           );
         }
         if (url.startsWith("/random?")) {
+          expect(url).toContain("debug=1");
           return new Response(
             JSON.stringify({
               ok: true,
               request_id: "req_preview",
               data: {
-                debug: { picked_by: "quality_weighted" },
+                debug: { picked_by: "quality_weighted", engine_status: "skipped_circuit" },
                 urls: { proxy: "/i/42.jpg" },
               },
             }),
@@ -149,6 +150,9 @@ describe("RecommendationPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /预览一次随机结果/ }));
     expect(await screen.findByText(/请求ID:\s*req_preview/)).toBeInTheDocument();
     expect(await screen.findByText(/quality_weighted/)).toBeInTheDocument();
+    // Preview always sends debug=1 so dual-run engine_status is visible.
+    expect(await screen.findByText("双跑 engine_status:")).toBeInTheDocument();
+    expect(await screen.findByText("skipped_circuit")).toBeInTheDocument();
     // Request + proxy links are browser-openable (absolute when VITE_API_BASE_URL set).
     expect(screen.getByRole("link", { name: /\/random\?/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /\/i\/42\.jpg/ })).toBeInTheDocument();

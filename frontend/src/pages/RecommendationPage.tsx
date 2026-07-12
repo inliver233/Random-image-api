@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, Typography } from "antd";
+import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, Tag, Typography } from "antd";
 import React, { useEffect, useMemo, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
@@ -131,8 +131,17 @@ function buildPreviewUrl(seed: string): string {
   const sp = new URLSearchParams();
   sp.set("format", "json");
   sp.set("attempts", "1");
+  // Surface dual-run engine_status (incl. skipped_circuit) in preview JSON / UI tag.
+  sp.set("debug", "1");
   if (seed.trim()) sp.set("seed", seed.trim());
   return `/random?${sp.toString()}`;
+}
+
+function engineStatusFromPreview(body: RandomPreviewResponse | null): string | null {
+  const data = body?.data as Record<string, unknown> | undefined;
+  const debug = data?.debug as Record<string, unknown> | undefined;
+  const status = debug?.engine_status;
+  return typeof status === "string" && status.trim() ? status.trim() : null;
 }
 
 export function RecommendationPage() {
@@ -522,6 +531,28 @@ export function RecommendationPage() {
               />
               {previewUrl ? (
                 <Space direction="vertical" size="small" style={{ width: "100%" }}>
+                  {(() => {
+                    const engineStatus = engineStatusFromPreview(previewBody);
+                    if (!engineStatus) return null;
+                    return (
+                      <Space size={[4, 4]} wrap>
+                        <Typography.Text type="secondary">双跑 engine_status:</Typography.Text>
+                        <Tag
+                          color={
+                            engineStatus === "ok"
+                              ? "green"
+                              : engineStatus === "skipped_circuit"
+                                ? "red"
+                                : engineStatus.startsWith("skipped_")
+                                  ? "default"
+                                  : "orange"
+                          }
+                        >
+                          {engineStatus}
+                        </Tag>
+                      </Space>
+                    );
+                  })()}
                   <Typography.Text type="secondary">
                     {/* Browser-openable URL: attach ?api_key= when debug key is set. */}
                     请求链接:{" "}
