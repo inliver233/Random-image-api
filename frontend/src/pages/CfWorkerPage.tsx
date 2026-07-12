@@ -20,6 +20,15 @@ import { QueryState } from "../admin/QueryState";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
 
+type BaseCooldownRow = {
+  base_url?: string;
+  cooling?: boolean;
+  fail_streak?: number;
+  cool_remaining_s?: number;
+  cooldown_base_s?: number;
+  cooldown_max_s?: number;
+};
+
 type PoolSide = {
   env_base_urls?: string[];
   runtime_base_urls?: string[];
@@ -27,6 +36,7 @@ type PoolSide = {
   members?: Array<{ kind?: string; base_url?: string; source?: string }>;
   runtime_enabled?: boolean;
   env_enabled?: boolean;
+  base_cooldown?: BaseCooldownRow[];
 };
 
 type CfWorkersPoolResponse = {
@@ -89,6 +99,22 @@ const USAGE_STEPS = [
   "补全/Token 走 api-worker；用户出图走 img-worker 反代 i.pximg.net，而非住宅",
   "多 Worker 名 = 多出口节点；注意免费额",
 ];
+
+function formatBaseCooldown(rows: BaseCooldownRow[] | undefined): string {
+  const list = Array.isArray(rows) ? rows : [];
+  const cooling = list.filter((r) => Boolean(r.cooling));
+  if (cooling.length === 0) {
+    return list.length > 0 ? "全部健康（无冷却）" : "（无成员）";
+  }
+  return cooling
+    .map((r) => {
+      const host = String(r.base_url || "").replace(/^https?:\/\//, "");
+      const rem = typeof r.cool_remaining_s === "number" ? r.cool_remaining_s.toFixed(0) : "?";
+      const streak = r.fail_streak ?? 0;
+      return `${host}: 冷却 ${rem}s / streak ${streak}`;
+    })
+    .join(" · ");
+}
 
 export function CfWorkerPage() {
   const queryClient = useQueryClient();
@@ -366,6 +392,16 @@ export function CfWorkerPage() {
                   />
                 </Space>
               </Descriptions.Item>
+              <Descriptions.Item label="API base 冷却">
+                <Cooldown.Text type="secondary" style={{ fontSize: 12 }}>
+                  {formatBaseCooldown(pool.api?.base_cooldown)}
+                </Typography.Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="出图 base 冷却">
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {formatBaseCooldown(pool.image?.base_cooldown)}
+                </Typography.Text>
+              </Descriptions.Item>
             </Descriptions>
           ) : null}
         </QueryState>
@@ -374,7 +410,7 @@ export function CfWorkerPage() {
           type="info"
           showIcon
           message="主路径说明"
-          description="用户出图：签名 URL → img-worker → i.pximg.net。后台补全/Token：api-worker allowlist。住宅/EasyProxies 仅应急；上表「进程强制住宅」为一键应急开关（进程本地、不改 env）。"
+          description="用户出图：签名 URL → img-worker → i.pximg.net。后台补全/Token：api-worker allowlist。住宅/EasyProxies 仅应急；上表「进程强制住宅」为一键应急开关（进程本地、不改 env）。base 冷却为进程本地指数退避（30s×2^(streak-1)，上限 300s），多副本不共享。"
         />
       </Card>
 

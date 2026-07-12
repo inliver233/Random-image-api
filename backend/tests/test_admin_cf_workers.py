@@ -45,6 +45,9 @@ def test_cf_workers_pool_and_register(tmp_path: Path, monkeypatch) -> None:
         assert body["ok"] is True
         assert "api" in body and "image" in body
         assert body["egress_policy"]["residential_egress_emergency_only"] is True
+        assert isinstance(body["api"].get("base_cooldown"), list)
+        assert isinstance(body["image"].get("base_cooldown"), list)
+        assert "30s" in str(body.get("note") or "") or "exponential" in str(body.get("note") or "")
 
         reg = client.post(
             "/admin/api/cf-workers/register",

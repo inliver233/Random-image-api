@@ -234,6 +234,54 @@ def is_image_edge_base_cooling(base: str, *, now: float | None = None) -> bool:
         return True
 
 
+def snapshot_image_edge_base_cooldown(
+    bases: list[str] | None = None,
+    *,
+    now: float | None = None,
+) -> list[dict[str, object]]:
+    """Process-local image-edge base demotion snapshot for admin observability (P0-5).
+
+    Aligns with ``snapshot_cf_base_cooldown`` shape. Times are remaining seconds.
+    """
+    t = time.monotonic() if now is None else float(now)
+    out: list[dict[str, object]] = []
+    try:
+        with _image_edge_base_lock:
+            if bases is None:
+                keys = sorted(
+                    set(_image_edge_base_cool_until.keys()) | set(_image_edge_base_fail_streak.keys())
+                )
+            else:
+                keys = []
+                seen: set[str] = set()
+                for raw in bases:
+                    b = normalize_image_edge_base_url(raw)
+                    if not b or b in seen:
+                        continue
+                    seen.add(b)
+                    keys.append(b)
+            for b in keys:
+                until = float(_image_edge_base_cool_until.get(b) or 0.0)
+                streak = int(_image_edge_base_fail_streak.get(b) or 0)
+                remaining = max(0.0, until - t) if until > t else 0.0
+                cooling = remaining > 0.0
+                if bases is None and not cooling and streak <= 0:
+                    continue
+                out.append(
+                    {
+                        "base_url": b,
+                        "cooling": cooling,
+                        "fail_streak": streak,
+                        "cool_remaining_s": round(remaining, 3) if cooling else 0.0,
+                        "cooldown_base_s": _IMAGE_EDGE_BASE_COOLDOWN_S,
+                        "cooldown_max_s": _IMAGE_EDGE_BASE_COOLDOWN_MAX_S,
+                    }
+                )
+    except Exception:
+        return []
+    return out
+
+
 def record_image_edge_base_outcome(
     base: str,
     *,

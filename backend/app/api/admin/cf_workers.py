@@ -42,6 +42,7 @@ from app.core.cf_pool_registry import (
     register_base_url,
     unregister_base_url,
 )
+from app.core.cf_api_proxy import snapshot_cf_base_cooldown
 from app.core.cf_worker_deploy import CfWorkerDeployError, deploy_cf_worker
 from app.core.egress_policy import (
     egress_policy_snapshot,
@@ -49,6 +50,7 @@ from app.core.egress_policy import (
     set_force_residential_emergency,
 )
 from app.core.errors import ApiError, ErrorCode
+from app.core.image_edge import snapshot_image_edge_base_cooldown
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_settings import set_runtime_setting
 
@@ -147,6 +149,7 @@ async def _persist_enable_and_secret(
     summary="CF Worker egress pool members",
     description=(
         "List API + image CF pool bases (env CSV merged with runtime-registered members). "
+        "Includes process-local base cooldown snapshot (fail_streak / cool_remaining_s; P0-5). "
         "Never returns secrets. Aligns with ds2api multi-member pool mind-set; "
         "Pixiv hardening stays on Worker (secret/HMAC)."
     ),
@@ -163,6 +166,8 @@ async def cf_workers_pool(
     env_img = _env_image_bases(settings)
     rt_api = get_api_overlay_bases()
     rt_img = get_image_overlay_bases()
+    api_merged = merge_base_url_lists(env_api, rt_api)
+    image_merged = merge_base_url_lists(env_img, rt_img)
     api_members = [
         {"kind": m.kind, "base_url": m.base_url, "source": m.source}
         for m in pool_members_from_bases(kind="api", env_bases=env_api, runtime_bases=rt_api)
@@ -172,31 +177,37 @@ async def cf_workers_pool(
         for m in pool_members_from_bases(kind="image", env_bases=env_img, runtime_bases=rt_img)
     ]
     policy = egress_policy_snapshot(settings)
+    api_cooldown = snapshot_cf_base_cooldown(api_merged)
+    image_cooldown = snapshot_image_edge_base_cooldown(image_merged)
     return admin_ok(
         request,
         payload={
             "api": {
                 "env_base_urls": merge_base_url_lists(env_api),
                 "runtime_base_urls": list(rt_api),
-                "merged_base_urls": merge_base_url_lists(env_api, rt_api),
+                "merged_base_urls": api_merged,
                 "members": api_members,
                 "runtime_enabled": bool(get_api_overlay_enabled()),
                 "env_enabled": bool(getattr(settings, "cf_api_proxy_enabled", False)) if settings else False,
+                "base_cooldown": api_cooldown,
             },
             "image": {
                 "env_base_urls": merge_base_url_lists(env_img),
                 "runtime_base_urls": list(rt_img),
-                "merged_base_urls": merge_base_url_lists(env_img, rt_img),
+                "merged_base_urls": image_merged,
                 "members": image_members,
                 "runtime_enabled": bool(get_image_overlay_enabled()),
                 "env_enabled": bool(getattr(settings, "image_edge_enabled", False)) if settings else False,
+                "base_cooldown": image_cooldown,
             },
             "egress_policy": policy,
             "note": (
                 "Deploy (default enable_business=true) auto-registers + enables runtime business "
                 "flags (OR with env CF_API_PROXY_ENABLED / IMAGE_EDGE_ENABLED). "
                 "Secrets never returned here. Residential is emergency-only when CF ready "
-                "(RESIDENTIAL_EGRESS_EMERGENCY_ONLY, default true)."
+                "(RESIDENTIAL_EGRESS_EMERGENCY_ONLY, default true). "
+                "base_cooldown is process-local exponential demotion (base 30s, cap 300s); "
+                "not shared across multi-replica."
             ),
         },
         request_id=rid,
@@ -646,7 +657,8 @@ async def cf_workers_probe(
             "image": {"results": image_results, "summary": _summary(image_results)},
             "note": (
                 "Probe never enables CF_API_PROXY_ENABLED / IMAGE_EDGE_ENABLED. "
-                "Hard failures demote process-local base cooldown (~30s)."
+                "Hard failures demote process-local base cooldown "
+                "(exponential: base 30s × 2^(streak-1), cap 300s; success clears)."
             ),
         },
         request_id=rid,

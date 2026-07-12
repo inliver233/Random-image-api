@@ -269,6 +269,21 @@ def test_cf_base_cooldown_respects_max_cap() -> None:
     assert is_cf_base_cooling(base, now=last + 121.0) is False
 
 
+def test_snapshot_cf_base_cooldown_lists_cooling_and_streak() -> None:
+    from app.core.cf_api_proxy import snapshot_cf_base_cooldown
+
+    reset_cf_base_cooldown_for_tests()
+    t0 = 9_000.0
+    record_cf_base_outcome("https://a.example.com", ok=False, cooldown_s=30.0, now=t0)
+    snap = snapshot_cf_base_cooldown(["https://a.example.com", "https://b.example.com"], now=t0 + 5.0)
+    by_base = {str(r["base_url"]): r for r in snap}
+    assert by_base["https://a.example.com"]["cooling"] is True
+    assert by_base["https://a.example.com"]["fail_streak"] == 1
+    assert float(by_base["https://a.example.com"]["cool_remaining_s"]) == 25.0
+    assert by_base["https://b.example.com"]["cooling"] is False
+    assert by_base["https://b.example.com"]["fail_streak"] == 0
+
+
 def test_should_failover_cf_attempt_gates_and_business_4xx() -> None:
     """Worker gate 401/403/429 + 5xx/transport failover; Pixiv business 4xx does not thrash."""
     assert should_failover_cf_attempt(None) is True

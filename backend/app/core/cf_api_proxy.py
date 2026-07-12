@@ -141,6 +141,53 @@ def is_cf_base_cooling(base: str, *, now: float | None = None) -> bool:
         return True
 
 
+def snapshot_cf_base_cooldown(
+    bases: list[str] | None = None,
+    *,
+    now: float | None = None,
+) -> list[dict[str, object]]:
+    """Process-local CF base demotion snapshot for admin observability (P0-5).
+
+    Returns one row per known cooling base (or per requested base when provided).
+    Never raises; times are relative remaining seconds (not wall clock).
+    """
+    t = time.monotonic() if now is None else float(now)
+    out: list[dict[str, object]] = []
+    try:
+        with _cf_base_lock:
+            if bases is None:
+                keys = sorted(set(_cf_base_cool_until.keys()) | set(_cf_base_fail_streak.keys()))
+            else:
+                keys = []
+                seen: set[str] = set()
+                for raw in bases:
+                    b = normalize_cf_proxy_base_url(raw)
+                    if not b or b in seen:
+                        continue
+                    seen.add(b)
+                    keys.append(b)
+            for b in keys:
+                until = float(_cf_base_cool_until.get(b) or 0.0)
+                streak = int(_cf_base_fail_streak.get(b) or 0)
+                remaining = max(0.0, until - t) if until > t else 0.0
+                cooling = remaining > 0.0
+                if bases is None and not cooling and streak <= 0:
+                    continue
+                out.append(
+                    {
+                        "base_url": b,
+                        "cooling": cooling,
+                        "fail_streak": streak,
+                        "cool_remaining_s": round(remaining, 3) if cooling else 0.0,
+                        "cooldown_base_s": _CF_BASE_COOLDOWN_S,
+                        "cooldown_max_s": _CF_BASE_COOLDOWN_MAX_S,
+                    }
+                )
+    except Exception:
+        return []
+    return out
+
+
 def is_cf_worker_gate_status(status_code: int | None) -> bool:
     """True for Worker-local gate statuses (auth/rate) that should failover to next CF base.
 

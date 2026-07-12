@@ -32,16 +32,26 @@ services:
       start_period: 10s
     volumes:
       - ../data:/app/data
-    # Optional dual-run: set RANDOM_ENGINE_URL=http://random-engine:8091 in deploy/.env
-    # (engine is a sibling service; BFF stays up if engine is down — pick falls back to catalog store).
+    # ENGINE-1: optional dual-run wiring — defaults point at sibling `random-engine` when
+    # RANDOM_ENGINE_URL is unset in deploy/.env. ENABLED stays false until you opt in;
+    # traffic stays 0 until snapshot + ramp (see scripts/edge/engine-traffic-cutover.md).
+    # BFF stays up if engine is down — pick falls back to catalog store.
     # Production data plane: point DATABASE_URL at Postgres (see deploy/.env.example); SQLite is dev-only.
     # When using profile postgres: set DATABASE_URL=postgresql+asyncpg://ria:ria@postgres:5432/random_image
+    environment:
+      RANDOM_ENGINE_URL: ${RANDOM_ENGINE_URL:-http://random-engine:8091}
+      RANDOM_ENGINE_SECRET: ${RANDOM_ENGINE_SECRET:-}
+      RANDOM_ENGINE_ENABLED: ${RANDOM_ENGINE_ENABLED:-false}
+      RANDOM_ENGINE_TRAFFIC_PERCENT: ${RANDOM_ENGINE_TRAFFIC_PERCENT:-0}
     depends_on:
       postgres:
         condition: service_healthy
         required: false
       redis:
         condition: service_healthy
+        required: false
+      random-engine:
+        condition: service_started
         required: false
     restart: unless-stopped
 
@@ -56,6 +66,11 @@ services:
     env_file:
       - .env
     command: ["python", "-m", "app.worker"]
+    environment:
+      RANDOM_ENGINE_URL: ${RANDOM_ENGINE_URL:-http://random-engine:8091}
+      RANDOM_ENGINE_SECRET: ${RANDOM_ENGINE_SECRET:-}
+      RANDOM_ENGINE_ENABLED: ${RANDOM_ENGINE_ENABLED:-false}
+      RANDOM_ENGINE_TRAFFIC_PERCENT: ${RANDOM_ENGINE_TRAFFIC_PERCENT:-0}
     depends_on:
       api:
         condition: service_healthy
@@ -65,15 +80,18 @@ services:
       redis:
         condition: service_healthy
         required: false
+      random-engine:
+        condition: service_started
+        required: false
     volumes:
       - ../data:/app/data
     restart: unless-stopped
 
-  # Go in-memory pick service (D7). Compose starts the process; BFF dual-run stays OFF until
-  # api/worker set RANDOM_ENGINE_URL (+ SECRET) and ENABLED — not auto-wired from this service.
+  # Go in-memory pick service (D7 / ENGINE-1). Compose starts the process and wires
+  # RANDOM_ENGINE_URL on api/worker by default; ENABLED + TRAFFIC stay off until ops ramp.
   # Push snapshot from Admin → 维护工具 before raising TRAFFIC_PERCENT.
   # Host bind is loopback-only (P0): LAN cannot reach the pick surface by default.
-  # Set RANDOM_ENGINE_SECRET in deploy/.env and pass the same value to api/worker for dual-run.
+  # Set RANDOM_ENGINE_SECRET in deploy/.env (required when ENABLED=true in prod).
   random-engine:
     build:
       context: ../services/random-engine

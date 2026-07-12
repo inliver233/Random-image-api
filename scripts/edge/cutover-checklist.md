@@ -8,7 +8,7 @@ Ops-only. **Default path (Admin FE / deploy API):** one-page deploy → auto reg
 - Public images: `edge_redirect` ≫ `local_stream_residential`
 - Residential: emergency-only when CF ready (`RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true`, default)
 - Origin for img-worker: **`i.pximg.net`** (not open whole-site proxy)
-- Multi-base: sticky pick + process-local **exponential** cooldown on failed bases (API + image pools)
+- Multi-base: sticky pick + process-local **exponential** cooldown on failed bases (API + image pools; base 30s × 2^(streak-1), cap 300s). Inspect via `GET /admin/api/cf-workers/pool` → `base_cooldown`
 - Cold catalog (mostly `x_restrict` NULL): set `default_r18_strict=false` or hydrate before expecting default `/random` (see `scripts/legacy/legacy-migrate-checklist.md`)
 
 ## Product path (recommended)
