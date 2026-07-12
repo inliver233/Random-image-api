@@ -86,8 +86,11 @@ BFF debug meta on engine hit also includes `engine_dto_count` / `engine_rehydrat
 
 Public JSON (`?debug=1`):
 
-- `GET /random` → `data.debug.engine_status` (per pick; includes `skipped_circuit` / `skipped_sticky` / …)
+- `GET /random` → `data.debug.engine_status` (per pick; includes `skipped_circuit` / `skipped_sticky` / `skipped_traffic` / …)
 - `GET /feed` → envelope-only `data.debug` (`engine_status`, `batch_count`, `topup_count`, `topup_skip_engine`); per-item debug stays omitted for `/wtf` bandwidth
+  - When dual-run is not routed for the batch (`eng_meta is None`), feed debug uses `engine_status=skipped_not_routed` (debug-only label; not a Prometheus series)
+
+Prometheus dual-run skip labels (pre-registered zeros): `skipped_traffic`, `skipped_sticky`, `skipped_circuit` on `new_pixiv_random_engine_pick_total`
 
 ### Catalog → engine events (best-effort)
 

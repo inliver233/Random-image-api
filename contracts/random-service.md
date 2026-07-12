@@ -30,6 +30,7 @@ Prometheus / debug honesty:
 | `skipped_traffic` | Engine enabled + URL set, but this request did **not** route to engine (traffic percent / no client) and `skip_engine` is false |
 | `skipped_sticky` | `skip_engine=True` (must **not** count as `skipped_traffic`) |
 | `skipped_circuit` | Dual-run process circuit open (or concurrent half-open probe blocked); pick fail-opens to Python without calling engine |
+| `skipped_not_routed` | Feed `?debug=1` only: batch dual-run not attempted (`try_engine_batch` → `eng_meta is None`); not a Prometheus label |
 
 Process circuit (BFF, not Go): 5 consecutive hard statuses (`unavailable` / `empty_index`) → open ~30s; success resets; soft miss does not trip. Snapshot shape: `{ state, consecutive_failures, open_remaining_s, failure_threshold, open_s }`.
 

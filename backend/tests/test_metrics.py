@@ -72,6 +72,9 @@ def test_metrics_exposes_random_jobs_and_proxy_metrics(tmp_path: Path, monkeypat
         assert "new_pixiv_random_engine_pick_total" in text
         assert "new_pixiv_random_engine_pick_latency_seconds" in text
         assert 'status="empty_index"' in text or 'status="empty_index"' in text.replace("'", '"')
+        # Dual-run honesty labels must be pre-registered (zero series) for scrape dashboards.
+        for skip_status in ("skipped_traffic", "skipped_sticky", "skipped_circuit"):
+            assert f'status="{skip_status}"' in text
         assert "new_pixiv_image_delivery_total" in text
         assert "new_pixiv_upstream_stream_errors_total" in text
         assert "new_pixiv_jobs_claim_total" in text
