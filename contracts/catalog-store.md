@@ -66,4 +66,4 @@ Helpers remain available for non-public paths; injected store is preferred via `
 | `/status.json` → `data.catalog.backend` | Same public label; `/status` HTML `ports:` chip includes it |
 | `GET /admin/api/maintenance/modular-ports` | `catalog.backend` |
 
-**Not included:** schema migration, dual-write, or automatic cutover. Production Postgres still requires Alembic/ops work. Image upsert SQL is dialect-aware; remaining SQLite-specific write helpers (tags links, runtime_settings, proxy pool inserts) are separate residuals.
+**Not included:** schema migration, dual-write, or automatic cutover. Production Postgres still requires Alembic/ops work. Catalog/tag/runtime_settings/proxy-pool/bindings ON CONFLICT writers use shared `insert_for_dialect`; production Postgres still needs Alembic/ops cutover.

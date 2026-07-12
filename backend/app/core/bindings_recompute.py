@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ApiError, ErrorCode
+from app.db.images_upsert import dialect_name_from_session, insert_for_dialect
 from app.db.models.pixiv_tokens import PixivToken
 from app.db.models.proxy_endpoints import ProxyEndpoint
 from app.db.models.proxy_pool_endpoints import ProxyPoolEndpoint
@@ -168,12 +168,14 @@ async def recompute_token_proxy_bindings(
             salt=salt,
         )
 
+    dialect = dialect_name_from_session(session)
+    insert = insert_for_dialect(TokenProxyBinding, dialect_name=dialect)
     for token_id in token_ids:
         primary_proxy_id = assignments.get(int(token_id))
         if primary_proxy_id is None:
             raise ApiError(code=ErrorCode.INTERNAL_ERROR, message="Binding recompute failed", status_code=500)
 
-        stmt = sqlite_insert(TokenProxyBinding).values(
+        stmt = insert.values(
             token_id=int(token_id),
             pool_id=int(pool_id),
             primary_proxy_id=int(primary_proxy_id),

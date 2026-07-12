@@ -4,7 +4,6 @@ from typing import Any
 
 import httpx
 import sqlalchemy as sa
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.bindings_recompute import recompute_token_proxy_bindings
@@ -14,6 +13,7 @@ from app.core.crypto import FieldEncryptor
 from app.core.env_parse import parse_str_env
 from app.core.proxy_uri import parse_proxy_uri
 from app.core.time import iso_utc_ms
+from app.db.images_upsert import dialect_name_from_session, insert_for_dialect
 from app.db.models.proxy_endpoints import ProxyEndpoint
 from app.db.models.proxy_pool_endpoints import ProxyPoolEndpoint
 from app.db.models.proxy_pools import ProxyPool
@@ -231,8 +231,10 @@ def build_easy_proxies_import_handler(
                         .all()
                     )
 
+                    dialect = dialect_name_from_session(session)
+                    insert = insert_for_dialect(ProxyPoolEndpoint, dialect_name=dialect)
                     for endpoint_id in endpoint_ids:
-                        stmt = sqlite_insert(ProxyPoolEndpoint).values(
+                        stmt = insert.values(
                             pool_id=int(attach_pool_id),
                             endpoint_id=int(endpoint_id),
                             enabled=1,

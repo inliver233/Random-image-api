@@ -14,6 +14,21 @@ from app.db.models.token_proxy_bindings import TokenProxyBinding
 from app.db.session import create_sessionmaker
 
 
+def test_token_proxy_binding_insert_builders_are_dialect_aware() -> None:
+    """bindings_recompute must not hardcode sqlite_insert only."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    from app.db.images_upsert import insert_for_dialect
+
+    assert type(insert_for_dialect(TokenProxyBinding, dialect_name="sqlite")) is type(
+        sqlite_insert(TokenProxyBinding)
+    )
+    assert type(insert_for_dialect(TokenProxyBinding, dialect_name="postgresql")) is type(
+        pg_insert(TokenProxyBinding)
+    )
+
+
 def test_models_token_proxy_bindings_insert_select(tmp_path: Path) -> None:
     db_path = tmp_path / "orm_token_proxy_bindings.db"
     engine = create_engine("sqlite+aiosqlite:///" + db_path.as_posix())

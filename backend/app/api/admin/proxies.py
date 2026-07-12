@@ -5,7 +5,6 @@ from typing import Any
 
 import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_cursor_query import parse_admin_int_cursor, slice_id_cursor_page
@@ -30,6 +29,7 @@ from app.core.proxy_uri import mask_proxy_uri, parse_proxy_uri
 from app.core.source_ref import sanitize_source_ref
 from app.core.request_id import get_or_create_request_id
 from app.core.time import iso_utc_ms
+from app.db.images_upsert import dialect_name_from_session, insert_for_dialect
 from app.db.models.proxy_endpoints import ProxyEndpoint
 from app.db.models.proxy_pool_endpoints import ProxyPoolEndpoint
 from app.db.models.proxy_pools import ProxyPool
@@ -930,8 +930,10 @@ async def import_easy_proxies(
                     attach_created = len([x for x in endpoint_ids if int(x) not in existing_set])
                     attach_updated = len([x for x in endpoint_ids if int(x) in existing_set])
 
+                    dialect = dialect_name_from_session(session)
+                    insert = insert_for_dialect(ProxyPoolEndpoint, dialect_name=dialect)
                     for endpoint_id in endpoint_ids:
-                        stmt = sqlite_insert(ProxyPoolEndpoint).values(
+                        stmt = insert.values(
                             pool_id=int(attach_pool_id),
                             endpoint_id=int(endpoint_id),
                             enabled=1,

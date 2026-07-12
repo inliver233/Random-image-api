@@ -35,3 +35,18 @@ def test_models_runtime_settings_insert_select(tmp_path: Path) -> None:
 
     asyncio.run(_run())
 
+
+def test_runtime_setting_upsert_insert_builders_are_dialect_aware() -> None:
+    """set_runtime_setting must not hardcode sqlite_insert only."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    from app.db.images_upsert import insert_for_dialect
+
+    assert type(insert_for_dialect(RuntimeSetting, dialect_name="sqlite")) is type(
+        sqlite_insert(RuntimeSetting)
+    )
+    assert type(insert_for_dialect(RuntimeSetting, dialect_name="postgresql")) is type(
+        pg_insert(RuntimeSetting)
+    )
+

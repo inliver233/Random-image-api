@@ -13,6 +13,21 @@ from app.db.models.proxy_pools import ProxyPool
 from app.db.session import create_sessionmaker
 
 
+def test_proxy_pool_endpoint_insert_builders_are_dialect_aware() -> None:
+    """pool attach upserts must not hardcode sqlite_insert only."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    from app.db.images_upsert import insert_for_dialect
+
+    assert type(insert_for_dialect(ProxyPoolEndpoint, dialect_name="sqlite")) is type(
+        sqlite_insert(ProxyPoolEndpoint)
+    )
+    assert type(insert_for_dialect(ProxyPoolEndpoint, dialect_name="postgresql")) is type(
+        pg_insert(ProxyPoolEndpoint)
+    )
+
+
 def test_models_proxy_pool_endpoints_insert_select(tmp_path: Path) -> None:
     db_path = tmp_path / "orm_proxy_pool_endpoints.db"
     engine = create_engine("sqlite+aiosqlite:///" + db_path.as_posix())

@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -17,6 +16,7 @@ from app.core.pximg_reverse_proxy import (
 from app.core.logging import get_logger
 from app.core.soft_json import soft_json_value
 from app.core.time import iso_utc_ms
+from app.db.images_upsert import dialect_name_from_session, insert_for_dialect
 from app.db.models.runtime_settings import RuntimeSetting
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 
@@ -220,7 +220,9 @@ async def set_runtime_setting(
 
     async def _op() -> None:
         async with Session() as session:
-            stmt = sqlite_insert(RuntimeSetting).values(
+            dialect = dialect_name_from_session(session)
+            insert = insert_for_dialect(RuntimeSetting, dialect_name=dialect)
+            stmt = insert.values(
                 key=key,
                 value_json=value_json,
                 description=description,
