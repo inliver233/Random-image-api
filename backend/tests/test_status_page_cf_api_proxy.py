@@ -110,3 +110,21 @@ def test_status_html_shows_cf_api_chip(tmp_path: Path, monkeypatch) -> None:
         assert "cf-api: ready" in text
         assert "bases 1" in text
         assert "cf_api_proxy" in text
+
+
+def test_status_html_cf_api_chip_no_secret_when_flag_bases_not_ready(tmp_path: Path, monkeypatch) -> None:
+    """HTML chip surfaces no-secret when flag+bases but not ready (no secret values)."""
+    app = _seed_app(
+        tmp_path,
+        monkeypatch,
+        enabled="true",
+        secret="",
+        bases="https://api-proxy-a.example.com",
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/status")
+        assert resp.status_code == 200
+        text = resp.text
+        assert "cf-api: not ready · flag on · bases 1 · no-secret" in text
+        assert "proxy-secret" not in text

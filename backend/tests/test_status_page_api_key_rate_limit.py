@@ -121,3 +121,21 @@ def test_status_html_shows_api_key_rl_chip(tmp_path: Path, monkeypatch) -> None:
         text = resp.text
         assert "api-key-rl: required" in text
         assert "api_key_rate_limit" in text
+
+
+def test_status_html_api_key_rl_chip_no_redis_url(tmp_path: Path, monkeypatch) -> None:
+    """HTML chip surfaces no-redis-url when redis requested without REDIS_URL."""
+    app = _seed_app(
+        tmp_path,
+        monkeypatch,
+        required="true",
+        backend="redis",
+        redis_url="",
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/status")
+        assert resp.status_code == 200
+        text = resp.text
+        assert "api-key-rl: required · redis→memory · no-redis-url" in text
+        assert "redis://" not in text

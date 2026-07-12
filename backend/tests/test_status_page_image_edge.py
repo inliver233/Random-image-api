@@ -92,3 +92,21 @@ def test_status_html_shows_image_edge_chip(tmp_path: Path, monkeypatch) -> None:
         assert "image-edge: ready" in text
         assert "bases 1" in text
         assert "image_edge" in text  # DATA payload includes the field
+
+
+def test_status_html_image_edge_chip_no_secret_when_flag_bases_not_ready(tmp_path: Path, monkeypatch) -> None:
+    """HTML chip surfaces no-secret when flag+bases but not ready (no secret values)."""
+    app = _seed_app(
+        tmp_path,
+        monkeypatch,
+        enabled="true",
+        secret="",
+        bases="https://edge-a.example.com,https://edge-b.example.com",
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/status")
+        assert resp.status_code == 200
+        text = resp.text
+        assert "image-edge: not ready · flag on · bases 2 · no-secret" in text
+        assert "edge-secret" not in text

@@ -269,24 +269,30 @@ def _build_status_html(
         eng_chip = f"dual-run: not configured · circuit {eng_state}"
 
     # Image Edge readiness chip (config only; same shape as /healthz modules.image_edge).
+    # Public JSON omits has_secret; when flag+bases but not ready, secret is the usual gap.
     edge = payload.get("image_edge") if isinstance(payload.get("image_edge"), dict) else {}
     edge_ready = bool(edge.get("ready"))
     edge_flag = bool(edge.get("enabled_flag"))
     edge_bases = _as_nonneg_stat(edge.get("base_url_count"))
     if edge_ready:
         edge_chip = f"image-edge: ready · bases {edge_bases}"
+    elif edge_flag and edge_bases > 0:
+        edge_chip = f"image-edge: not ready · flag on · bases {edge_bases} · no-secret"
     elif edge_flag:
         edge_chip = f"image-edge: not ready · flag on · bases {edge_bases}"
     else:
         edge_chip = f"image-edge: off · bases {edge_bases}"
 
     # CF API proxy readiness chip (config only; same shape as /healthz modules.cf_api_proxy).
+    # Public JSON omits has_secret; when flag+bases but not ready, secret is the usual gap.
     cf = payload.get("cf_api_proxy") if isinstance(payload.get("cf_api_proxy"), dict) else {}
     cf_ready = bool(cf.get("ready"))
     cf_flag = bool(cf.get("enabled_flag"))
     cf_bases = _as_nonneg_stat(cf.get("base_url_count"))
     if cf_ready:
         cf_chip = f"cf-api: ready · bases {cf_bases}"
+    elif cf_flag and cf_bases > 0:
+        cf_chip = f"cf-api: not ready · flag on · bases {cf_bases} · no-secret"
     elif cf_flag:
         cf_chip = f"cf-api: not ready · flag on · bases {cf_bases}"
     else:
@@ -307,18 +313,21 @@ def _build_status_html(
     else:
         r2_chip = "r2-prewarm: off"
 
-    # API-key rate-limit chip (same fields as /healthz modules.api_key_rate_limit; no Redis URL/probe).
+    # API-key rate-limit chip (same fields as /healthz modules.api_key_rate_limit; no Redis URL value).
     rl = payload.get("api_key_rate_limit") if isinstance(payload.get("api_key_rate_limit"), dict) else {}
     rl_required = bool(rl.get("required"))
     rl_backend = str(rl.get("backend") or "memory")
     rl_requested = str(rl.get("requested") or "memory")
     rl_fallback = bool(rl.get("using_memory_fallback"))
+    rl_redis_url = bool(rl.get("redis_url_configured"))
     if not rl_required:
         rl_chip = f"api-key-rl: off · {rl_backend}"
     elif rl_fallback:
         rl_chip = f"api-key-rl: required · {rl_requested}→{rl_backend}"
     else:
         rl_chip = f"api-key-rl: required · {rl_backend}"
+    if rl_requested == "redis" and not rl_redis_url:
+        rl_chip += " · no-redis-url"
 
     # Job queue chip (sqlite/memory only; redis/nats rejected at settings load).
     jq = payload.get("job_queue") if isinstance(payload.get("job_queue"), dict) else {}
