@@ -157,6 +157,7 @@ describe("DashboardPage", () => {
               recent_dedup: {
                 configured_backend: "redis",
                 active_backend: "memory",
+                redis_url_configured: false,
                 using_memory_fallback: true,
               },
               random_service: { backend: "default" },
@@ -185,11 +186,12 @@ describe("DashboardPage", () => {
             JSON.stringify({
               ok: true,
               enabled: true,
+              url: "",
               traffic_percent: 0,
               healthy: false,
               index_empty: true,
               ready_for_traffic: false,
-              cutover_warning: "traffic_percent=0 (engine not receiving picks)",
+              cutover_warning: "RANDOM_ENGINE_URL not configured",
               circuit: {
                 state: "open",
                 consecutive_failures: 5,
@@ -290,7 +292,8 @@ describe("DashboardPage", () => {
     expect(await screen.findByText("job_queue implemented")).toBeInTheDocument();
     expect((await screen.findAllByText("redis→memory fallback")).length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText(/api_key_rl=memory/)).toBeInTheDocument();
-    expect(await screen.findByText("no-redis-url")).toBeInTheDocument();
+    // api_key_rl + recent_dedup both surface no-redis-url when redis requested without URL.
+    expect((await screen.findAllByText("no-redis-url")).length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText("api_key required")).toBeInTheDocument();
     expect(await screen.findByText(/image_edge=flag-on-not-ready/)).toBeInTheDocument();
     expect(await screen.findByText("dual-secret")).toBeInTheDocument();
@@ -301,6 +304,7 @@ describe("DashboardPage", () => {
     // Mock has url_configured + missing secret → no-secret honesty suffix.
     expect(await screen.findByText(/r2_prewarm=flag-on-not-ready\s*·\s*no-secret/)).toBeInTheDocument();
     expect(await screen.findByText(/engine=enabled-not-ready/)).toBeInTheDocument();
+    expect(await screen.findByText("no-url")).toBeInTheDocument();
     expect(await screen.findByText("engine index empty")).toBeInTheDocument();
     expect(await screen.findByText(/circuit=open\s*~13s/)).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:.*req_modular/)).toBeInTheDocument();

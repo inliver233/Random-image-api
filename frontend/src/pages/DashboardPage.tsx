@@ -86,6 +86,7 @@ type ModularPortsStatusResponse = {
   recent_dedup: {
     configured_backend: string;
     active_backend: string;
+    redis_url_configured?: boolean;
     using_memory_fallback: boolean;
   };
   random_service?: { backend: string };
@@ -106,6 +107,8 @@ type ImageEdgeStatusResponse = {
 type RandomEngineStatusResponse = {
   ok: true;
   enabled: boolean;
+  /** Admin may return `url` string; empty means not configured. */
+  url?: string;
   traffic_percent?: number;
   healthy: boolean;
   index_empty?: boolean | null;
@@ -487,6 +490,10 @@ export function DashboardPage() {
                     {modularPorts.data.recent_dedup.using_memory_fallback ? (
                       <Tag color="orange">redis→memory fallback</Tag>
                     ) : null}
+                    {modularPorts.data.recent_dedup.configured_backend === "redis" &&
+                    modularPorts.data.recent_dedup.redis_url_configured === false ? (
+                      <Tag color="orange">no-redis-url</Tag>
+                    ) : null}
                     <Tag>random_service={modularPorts.data.random_service?.backend ?? "default"}</Tag>
                     <Tag>random_pick={modularPorts.data.random_pick?.backend ?? "sqlite"}</Tag>
                   </Space>
@@ -599,6 +606,10 @@ export function DashboardPage() {
                             : "off"}
                       </Tag>
                       <Tag>traffic={randomEngine.data.traffic_percent ?? 0}%</Tag>
+                      {randomEngine.data.enabled &&
+                      !(typeof randomEngine.data.url === "string" && randomEngine.data.url.trim()) ? (
+                        <Tag color="orange">no-url</Tag>
+                      ) : null}
                       {randomEngine.data.enabled && randomEngine.data.index_empty ? (
                         <Tag color="orange">engine index empty</Tag>
                       ) : null}

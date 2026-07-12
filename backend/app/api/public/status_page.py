@@ -157,9 +157,13 @@ def _recent_dedup_public_snapshot(request: Request, settings: Any) -> dict[str, 
     ).strip().lower()
     if backend not in {"memory", "redis"}:
         backend = "memory"
+    redis_url_configured = (
+        bool(str(getattr(settings, "redis_url", "") or "").strip()) if settings is not None else False
+    )
     return {
         "backend": backend,
         "requested": requested,
+        "redis_url_configured": redis_url_configured,
         "using_memory_fallback": requested == "redis" and backend == "memory",
     }
 
@@ -340,15 +344,18 @@ def _build_status_html(
         jq_chip = f"job-queue: {jq_requested}→{jq_backend}"
     jq_chip += " · implemented" if jq_implemented else " · not-implemented"
 
-    # Recent dedup chip (memory default; redis fail-open).
+    # Recent dedup chip (memory default; redis fail-open; no Redis URL value).
     rd = payload.get("recent_dedup") if isinstance(payload.get("recent_dedup"), dict) else {}
     rd_backend = str(rd.get("backend") or "memory")
     rd_requested = str(rd.get("requested") or "memory")
     rd_fallback = bool(rd.get("using_memory_fallback"))
+    rd_redis_url = bool(rd.get("redis_url_configured"))
     if rd_fallback:
         rd_chip = f"recent-dedup: {rd_requested}→{rd_backend}"
     else:
         rd_chip = f"recent-dedup: {rd_backend}"
+    if rd_requested == "redis" and not rd_redis_url:
+        rd_chip += " · no-redis-url"
 
     # Dialect / factory labels (same as /healthz modules.catalog|tags|random_*).
     cat = payload.get("catalog") if isinstance(payload.get("catalog"), dict) else {}

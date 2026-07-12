@@ -222,7 +222,7 @@ MODULE_READINESS_FLAGS: dict[str, tuple[str, ...]] = {
     "r2_prewarm": ("enabled", "ready", "url_configured", "secret_configured"),
     "api_key_rate_limit": ("required", "using_memory_fallback", "redis_url_configured"),
     "job_queue": ("implemented",),
-    "recent_dedup": ("using_memory_fallback",),
+    "recent_dedup": ("using_memory_fallback", "redis_url_configured"),
 }
 
 MODULE_BASE_URL_MODULES: tuple[str, ...] = ("image_edge", "cf_api_proxy")
@@ -458,7 +458,7 @@ def set_modular_readiness_snapshot(snapshot: dict[str, Any] | None) -> None:
               "redis_url_configured": bool,
           },
           "job_queue": {"implemented": bool},
-          "recent_dedup": {"using_memory_fallback": bool},
+          "recent_dedup": {"using_memory_fallback": bool, "redis_url_configured": bool},
         }
     """
     try:

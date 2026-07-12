@@ -103,6 +103,10 @@ def test_metrics_exposes_random_jobs_and_proxy_metrics(tmp_path: Path, monkeypat
             text,
         )
         assert re.search(
+            r'new_pixiv_module_readiness\{flag="redis_url_configured",module="recent_dedup"\}\s+0(\.0+)?\b',
+            text,
+        )
+        assert re.search(
             r'new_pixiv_module_base_url_count\{module="image_edge"\}\s+0(\.0+)?\b',
             text,
         )

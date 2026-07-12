@@ -104,6 +104,7 @@ def test_admin_modular_ports_status_defaults(tmp_path: Path, monkeypatch) -> Non
         assert "using_sqlite_fallback" not in body["job_queue"]
         assert body["recent_dedup"]["configured_backend"] == "memory"
         assert body["recent_dedup"]["active_backend"] == "memory"
+        assert body["recent_dedup"]["redis_url_configured"] is False
         assert body["recent_dedup"]["using_memory_fallback"] is False
         assert body["random_service"]["backend"] == "default"
         assert body["random_pick"]["backend"] == "sqlite"
@@ -140,6 +141,7 @@ def test_admin_modular_ports_status_recent_redis_fallback(tmp_path: Path, monkey
         assert body["recent_dedup"]["configured_backend"] == "redis"
         # No REDIS_URL → factory stays on memory (using_memory_fallback).
         assert body["recent_dedup"]["active_backend"] == "memory"
+        assert body["recent_dedup"]["redis_url_configured"] is False
         assert body["recent_dedup"]["using_memory_fallback"] is True
         assert body["job_queue"]["backend"] == "sqlite"
         assert body["job_queue"]["requested"] == "sqlite"
@@ -176,4 +178,5 @@ def test_admin_modular_ports_status_recent_redis_active(tmp_path: Path, monkeypa
         assert body["ok"] is True
         assert body["recent_dedup"]["configured_backend"] == "redis"
         assert body["recent_dedup"]["active_backend"] == "redis"
+        assert body["recent_dedup"]["redis_url_configured"] is True
         assert body["recent_dedup"]["using_memory_fallback"] is False

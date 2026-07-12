@@ -329,7 +329,7 @@ async def api_key_rate_limit_status(
         "Returns active labels for `catalog`, `tags`, `random_service`, `random_pick`, "
         "plus honesty for `job_queue` (`backend`/`requested`/`implemented` — redis/nats "
         "fail at settings load) and `recent_dedup` "
-        "(`configured_backend`/`active_backend`/`using_memory_fallback`). "
+        "(`configured_backend`/`active_backend`/`redis_url_configured`/`using_memory_fallback`). "
         "Parity with `/healthz` `modules.*` and public `/status.json` `data.*` port chips."
     ),
 )
@@ -357,6 +357,9 @@ async def modular_ports_status(
     )
     if recent_cfg not in {"memory", "redis"}:
         recent_cfg = "memory"
+    redis_url_configured = (
+        bool(str(getattr(settings, "redis_url", "") or "").strip()) if settings is not None else False
+    )
     job_requested = (
         str(getattr(settings, "job_queue_backend", "sqlite") or "sqlite").strip().lower()
         if settings is not None
@@ -390,6 +393,7 @@ async def modular_ports_status(
             "recent_dedup": {
                 "configured_backend": recent_cfg,
                 "active_backend": recent_active,
+                "redis_url_configured": redis_url_configured,
                 # True when redis requested but factory fell back (missing REDIS_URL).
                 "using_memory_fallback": recent_cfg == "redis" and recent_active == "memory",
             },

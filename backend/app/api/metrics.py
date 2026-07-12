@@ -172,6 +172,7 @@ def _modular_readiness_from_request(request: Request) -> dict[str, Any]:
             "using_memory_fallback": (
                 recent_dedup_requested == "redis" and recent_dedup_active == "memory"
             ),
+            "redis_url_configured": redis_url_configured,
         },
     }
 

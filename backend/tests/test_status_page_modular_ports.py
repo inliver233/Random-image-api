@@ -60,6 +60,7 @@ def test_status_json_includes_job_queue_and_recent_dedup_defaults(tmp_path: Path
         rd = data.get("recent_dedup") or {}
         assert rd.get("backend") == "memory"
         assert rd.get("requested") == "memory"
+        assert rd.get("redis_url_configured") is False
         assert rd.get("using_memory_fallback") is False
 
 
@@ -89,6 +90,7 @@ def test_status_json_recent_dedup_redis_without_url_fallback(tmp_path: Path, mon
         rd = (resp.json().get("data") or {}).get("recent_dedup") or {}
         assert rd.get("requested") == "redis"
         assert rd.get("backend") == "memory"
+        assert rd.get("redis_url_configured") is False
         assert rd.get("using_memory_fallback") is True
         assert "redis://" not in resp.text.lower()
 
@@ -104,3 +106,20 @@ def test_status_html_shows_modular_port_chips(tmp_path: Path, monkeypatch) -> No
         assert "recent-dedup: memory" in text
         assert "job_queue" in text
         assert "recent_dedup" in text
+
+
+def test_status_html_recent_dedup_chip_no_redis_url(tmp_path: Path, monkeypatch) -> None:
+    """HTML chip surfaces no-redis-url when redis requested without REDIS_URL."""
+    app = _seed_app(
+        tmp_path,
+        monkeypatch,
+        recent_dedup_backend="redis",
+        redis_url="",
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/status")
+        assert resp.status_code == 200
+        text = resp.text
+        assert "recent-dedup: redis→memory · no-redis-url" in text
+        assert "redis://" not in text

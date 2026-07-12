@@ -61,6 +61,7 @@ def test_healthz_ok_includes_request_id() -> None:
     assert modules["tags"]["backend"] == "sqlite"
     assert modules["recent_dedup"]["backend"] == "memory"
     assert modules["recent_dedup"]["requested"] == "memory"
+    assert modules["recent_dedup"]["redis_url_configured"] is False
     assert modules["recent_dedup"]["using_memory_fallback"] is False
 
 
@@ -146,6 +147,7 @@ def test_healthz_recent_dedup_reports_settings_fallback(tmp_path: Path, monkeypa
         rd = modules.get("recent_dedup") or {}
         assert rd.get("backend") == "memory"
         assert rd.get("requested") == "redis"
+        assert rd.get("redis_url_configured") is False
         assert rd.get("using_memory_fallback") is True
 
 

@@ -260,6 +260,7 @@ async def healthz(request: Request) -> Any:
             "recent_dedup": {
                 "backend": recent_dedup_active,
                 "requested": recent_dedup_requested,
+                "redis_url_configured": redis_url_configured,
                 "using_memory_fallback": (
                     recent_dedup_requested == "redis" and recent_dedup_active == "memory"
                 ),
