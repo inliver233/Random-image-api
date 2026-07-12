@@ -162,3 +162,69 @@ def test_upload_multipart_includes_pure_js() -> None:
     meta = json.loads(files["metadata"][1])
     assert meta["main_module"] == "api-worker.js"
     assert captured["headers"]["CF-WORKER-MAIN-MODULE-PART"] == "api-worker.js"
+
+
+def test_delete_cf_worker_script_success() -> None:
+    import asyncio
+    from typing import Any
+
+    from app.core.cf_worker_deploy import delete_cf_worker_script
+
+    captured: dict[str, Any] = {}
+
+    class _FakeResp:
+        status_code = 200
+        content = b'{"success":true}'
+
+    class _FakeClient:
+        async def delete(self, url: str, headers: dict[str, str], timeout: float = 30.0):
+            captured["url"] = url
+            captured["headers"] = headers
+            return _FakeResp()
+
+        async def aclose(self) -> None:
+            return None
+
+    async def _run() -> None:
+        result = await delete_cf_worker_script(
+            api_token="t" * 24,
+            account_id="a" * 32,
+            worker_name="ria-api-a",
+            client=_FakeClient(),  # type: ignore[arg-type]
+        )
+        assert result.deleted is True
+        assert result.already_absent is False
+        assert result.worker_name == "ria-api-a"
+
+    asyncio.run(_run())
+    assert "workers/scripts/ria-api-a" in captured["url"]
+    assert captured["headers"]["Authorization"].startswith("Bearer ")
+
+
+def test_delete_cf_worker_script_absent_404() -> None:
+    import asyncio
+
+    from app.core.cf_worker_deploy import delete_cf_worker_script
+
+    class _FakeResp:
+        status_code = 404
+        content = b'{"success":false,"errors":[{"message":"not found"}]}'
+
+    class _FakeClient:
+        async def delete(self, url: str, headers: dict[str, str], timeout: float = 30.0):
+            return _FakeResp()
+
+        async def aclose(self) -> None:
+            return None
+
+    async def _run() -> None:
+        result = await delete_cf_worker_script(
+            api_token="t" * 24,
+            account_id="a" * 32,
+            worker_name="gone-worker",
+            client=_FakeClient(),  # type: ignore[arg-type]
+        )
+        assert result.deleted is False
+        assert result.already_absent is True
+
+    asyncio.run(_run())
