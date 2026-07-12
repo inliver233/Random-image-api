@@ -40,6 +40,10 @@ def test_healthz_ok_includes_request_id() -> None:
     assert modules["r2_prewarm"]["secret_configured"] is False
     assert modules["random_engine"]["enabled"] is False
     assert modules["random_engine"]["url_configured"] is False
+    circuit = modules["random_engine"].get("circuit") or {}
+    assert isinstance(circuit, dict)
+    assert circuit.get("state") in {"closed", "open", "half_open"}
+    assert "consecutive_failures" in circuit
     assert modules["random_service"]["backend"] == "default"
     assert modules["random_pick"]["backend"] == "sqlite"
     assert modules["api_key_rate_limit"]["backend"] == "memory"
@@ -141,6 +145,37 @@ def test_healthz_recent_dedup_reports_settings_fallback(tmp_path: Path, monkeypa
         assert rd.get("backend") == "memory"
         assert rd.get("requested") == "redis"
         assert rd.get("using_memory_fallback") is True
+
+
+def test_healthz_random_engine_circuit_snapshot(monkeypatch) -> None:
+    """/healthz modules.random_engine.circuit is process-local (no outbound probe)."""
+    from app.core.random_engine_client import reset_engine_circuit_for_tests
+
+    reset_engine_circuit_for_tests()
+
+    def _fake_circuit() -> dict:
+        return {
+            "state": "open",
+            "consecutive_failures": 5,
+            "open_remaining_s": 9.5,
+            "failure_threshold": 5,
+            "open_s": 30,
+        }
+
+    monkeypatch.setattr("app.api.public.healthz.engine_circuit_snapshot", _fake_circuit)
+
+    app = FastAPI()
+    app.state.engine = create_engine("sqlite+aiosqlite:///:memory:")
+    app.include_router(healthz_router)
+
+    client = TestClient(app)
+    resp = client.get("/healthz")
+    assert resp.status_code == 200
+    circuit = (resp.json().get("modules") or {}).get("random_engine", {}).get("circuit") or {}
+    assert circuit.get("state") == "open"
+    assert circuit.get("consecutive_failures") == 5
+    assert float(circuit.get("open_remaining_s") or 0) == 9.5
+    reset_engine_circuit_for_tests()
 
 
 def test_healthz_api_key_rate_limit_reports_settings_fallback(tmp_path: Path, monkeypatch) -> None:

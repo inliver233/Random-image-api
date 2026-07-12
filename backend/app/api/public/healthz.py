@@ -14,7 +14,7 @@ from app.core.errors import ErrorCode, error_body
 from app.core.cf_api_proxy import load_cf_api_proxy_config_from_settings
 from app.core.image_edge import load_image_edge_config_from_settings
 from app.core.r2_prewarm import r2_prewarm_enabled, r2_prewarm_secret
-from app.core.random_engine_client import random_engine_base_url
+from app.core.random_engine_client import engine_circuit_snapshot, random_engine_base_url
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.runtime_settings import worker_last_seen_from_value_json
 from app.core.time import parse_iso_dt
@@ -199,6 +199,8 @@ async def healthz(request: Request) -> Any:
                 "traffic_percent": int(getattr(settings, "random_engine_traffic_percent", 100) or 0)
                 if settings is not None
                 else 0,
+                # Process dual-run circuit (local snapshot; no outbound engine probe on /healthz).
+                "circuit": engine_circuit_snapshot(),
             },
             "api_key_rate_limit": {
                 # No outbound Redis probe on /healthz. backend = active limiter label.
