@@ -537,6 +537,15 @@ def test_sqlite_catalog_store_engine_loads(tmp_path: Path) -> None:
             )
             assert [int(r.id) for r in any_status] == [int(broken.id), int(ok.id)]
 
+            # ENGINE-1: large IN lists must chunk under SQLite bind limits.
+            huge_public = [int(ok.id)] + list(range(50_000, 51_100))
+            assert len(huge_public) > 1000
+            public_huge = await store.get_images_by_ids(session, image_ids=huge_public)
+            assert [int(r.id) for r in public_huge] == [int(ok.id)]
+            huge_any = [int(broken.id)] + list(range(60_000, 61_100))
+            any_huge = await store.get_images_by_ids_any_status(session, image_ids=huge_any)
+            assert [int(r.id) for r in any_huge] == [int(broken.id)]
+
             by_illust = await store.get_images_by_illust_id(session, illust_id=10)
             assert [int(r.page_index) for r in by_illust] == [0, 1]
             assert {int(r.status) for r in by_illust} == {1, 3}

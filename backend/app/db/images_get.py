@@ -53,34 +53,6 @@ async def get_image_by_id_any_status(session: AsyncSession, *, image_id: int) ->
     return (await session.execute(select(Image).where(Image.id == int(image_id)).limit(1))).scalars().first()
 
 
-async def get_images_by_ids(session: AsyncSession, *, image_ids: list[int]) -> list[Image]:
-    """Load enabled images; return in the same order as ``image_ids`` (skip missing)."""
-    ids: list[int] = []
-    seen: set[int] = set()
-    for raw in image_ids:
-        try:
-            i = int(raw)
-        except Exception:
-            continue
-        if i <= 0 or i in seen:
-            continue
-        seen.add(i)
-        ids.append(i)
-    if not ids:
-        return []
-    rows = list(
-        (
-            await session.execute(
-                select(Image).options(PUBLIC_IMAGE_LOAD_ONLY).where(Image.id.in_(ids), Image.status == 1)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    by_id = {int(im.id): im for im in rows}
-    return [by_id[i] for i in ids if i in by_id]
-
-
 def _normalize_positive_ids(image_ids: list[int]) -> list[int]:
     ids: list[int] = []
     seen: set[int] = set()
@@ -96,17 +68,50 @@ def _normalize_positive_ids(image_ids: list[int]) -> list[int]:
     return ids
 
 
+# SQLite default bind limit ~999; keep headroom like tags_links / images_delete.
+_IMAGE_ID_IN_CHUNK = 900
+
+
+async def get_images_by_ids(session: AsyncSession, *, image_ids: list[int]) -> list[Image]:
+    """Load enabled images; return in the same order as ``image_ids`` (skip missing)."""
+    ids = _normalize_positive_ids(image_ids)
+    if not ids:
+        return []
+    by_id: dict[int, Image] = {}
+    for offset in range(0, len(ids), _IMAGE_ID_IN_CHUNK):
+        chunk = ids[offset : offset + _IMAGE_ID_IN_CHUNK]
+        rows = list(
+            (
+                await session.execute(
+                    select(Image)
+                    .options(PUBLIC_IMAGE_LOAD_ONLY)
+                    .where(Image.id.in_(chunk), Image.status == 1)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for im in rows:
+            by_id[int(im.id)] = im
+    return [by_id[i] for i in ids if i in by_id]
+
+
 async def get_images_by_ids_any_status(session: AsyncSession, *, image_ids: list[int]) -> list[Image]:
     """Load images of any status; return in the same order as ``image_ids`` (skip missing).
 
     Used by Random Engine event publish (status changes must reach the index).
     Full row load — engine payload needs fail/error columns not in PUBLIC_IMAGE_LOAD_ONLY.
+    Chunked IN for SQLite bind limits (ENGINE-1 parity with tag map).
     """
     ids = _normalize_positive_ids(image_ids)
     if not ids:
         return []
-    rows = list((await session.execute(select(Image).where(Image.id.in_(ids)))).scalars().all())
-    by_id = {int(im.id): im for im in rows}
+    by_id: dict[int, Image] = {}
+    for offset in range(0, len(ids), _IMAGE_ID_IN_CHUNK):
+        chunk = ids[offset : offset + _IMAGE_ID_IN_CHUNK]
+        rows = list((await session.execute(select(Image).where(Image.id.in_(chunk)))).scalars().all())
+        for im in rows:
+            by_id[int(im.id)] = im
     return [by_id[i] for i in ids if i in by_id]
 
 
