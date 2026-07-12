@@ -249,3 +249,12 @@ def test_admin_easy_proxies_import_clears_blacklist_on_update(tmp_path: Path, mo
         assert failure_count == 3
         assert blacklisted_until is None
         assert last_error is None
+
+
+def test_admin_easy_proxies_import_openapi_documents_dialect_attach() -> None:
+    """easy-proxies import OpenAPI must document dialect-aware attach/recompute."""
+    app = create_app()
+    op = app.openapi()["paths"]["/admin/api/proxies/easy-proxies/import"]["post"]
+    assert op.get("summary") == "Import easy-proxies endpoints"
+    desc = str(op.get("description") or "")
+    assert "dialect" in desc.lower() or "insert_for_dialect" in desc

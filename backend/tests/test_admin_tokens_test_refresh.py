@@ -194,3 +194,11 @@ def test_admin_token_test_refresh_failure_returns_502_and_updates_backoff(tmp_pa
         assert error_count == 1
         assert backoff_until is not None and backoff_until
 
+
+def test_admin_token_test_refresh_openapi_documents_cf_egress() -> None:
+    """test-refresh OpenAPI must document iter_pixiv_api_egress / CF-first plan."""
+    app = create_app()
+    op = app.openapi()["paths"]["/admin/api/tokens/{token_id}/test-refresh"]["post"]
+    assert op.get("summary") == "Test token OAuth refresh"
+    desc = str(op.get("description") or "")
+    assert "iter_pixiv_api_egress" in desc or "CF API" in desc

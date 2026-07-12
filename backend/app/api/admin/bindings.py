@@ -216,7 +216,14 @@ async def recompute_bindings(
     return await with_sqlite_busy_retry(_op)
 
 
-@router.post("/bindings/{binding_id}/override")
+@router.post(
+    "/bindings/{binding_id}/override",
+    summary="Set binding proxy override",
+    description=(
+        "TTL override of TokenProxyBinding.override_proxy_id (must be enabled + in-pool). "
+        "Affects residential egress selection until expiry; CF API proxy path is independent."
+    ),
+)
 async def set_binding_override(
     binding_id: int,
     request: Request,
@@ -273,7 +280,14 @@ async def set_binding_override(
     return await with_sqlite_busy_retry(_op)
 
 
-@router.post("/bindings/{binding_id}/clear-override")
+@router.post(
+    "/bindings/{binding_id}/clear-override",
+    summary="Clear binding proxy override",
+    description=(
+        "Clear override_proxy_id / override_expires_at so primary binding applies again "
+        "for residential egress."
+    ),
+)
 async def clear_binding_override(
     binding_id: int,
     request: Request,

@@ -408,3 +408,11 @@ def test_admin_bindings_openapi_documents_dialect_recompute() -> None:
     assert recompute_op.get("summary") == "Recompute token-proxy bindings"
     recompute_desc = str(recompute_op.get("description") or "")
     assert "dialect" in recompute_desc.lower() or "ON CONFLICT" in recompute_desc
+
+    override_op = paths["/admin/api/bindings/{binding_id}/override"]["post"]
+    assert override_op.get("summary") == "Set binding proxy override"
+    assert "override" in str(override_op.get("description") or "").lower()
+
+    clear_op = paths["/admin/api/bindings/{binding_id}/clear-override"]["post"]
+    assert clear_op.get("summary") == "Clear binding proxy override"
+    assert "primary" in str(clear_op.get("description") or "").lower()

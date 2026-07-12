@@ -235,7 +235,16 @@ async def delete_token(
     return await with_sqlite_busy_retry(_op)
 
 
-@router.post("/tokens/{token_id}/test-refresh")
+@router.post(
+    "/tokens/{token_id}/test-refresh",
+    summary="Test token OAuth refresh",
+    description=(
+        "Live Pixiv OAuth refresh probe for one stored token. Egress uses "
+        "`iter_pixiv_api_egress` (CF API proxy first when ready, then residential). "
+        "Does not enqueue jobs; returns success/failure + optional residential proxy ids. "
+        "Never returns refresh tokens. Parity with hydrate egress plan (contracts/cf-api-proxy.md)."
+    ),
+)
 async def test_refresh_token(
     token_id: int,
     request: Request,

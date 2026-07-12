@@ -318,7 +318,16 @@ async def _load_settings_json(request: Request) -> dict[str, Any]:
     return settings
 
 
-@router.get("/settings")
+@router.get(
+    "/settings",
+    summary="Get runtime settings",
+    description=(
+        "Read runtime config from RuntimeSetting rows (`fetch_runtime_settings`). "
+        "Includes proxy route mode/pools, image mirror hosts, random defaults/dedup, "
+        "security hide-origin, and rate_limit. Secrets stay in env — not this surface. "
+        "Writes use dialect-aware upserts via `set_runtime_setting`."
+    ),
+)
 async def get_settings(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
@@ -363,7 +372,16 @@ async def get_settings(
         }}, request_id=rid)
 
 
-@router.put("/settings")
+@router.put(
+    "/settings",
+    summary="Update runtime settings",
+    description=(
+        "Partial update of RuntimeSetting keys via dialect-aware `set_runtime_setting` "
+        "ON CONFLICT upserts (SQLite|Postgres). Affects proxy routing, image mirrors, "
+        "random defaults/dedup, public JSON hide-origin, and process rate_limit. "
+        "Does not flip Image Edge / CF API proxy / R2 env flags (those stay env-only, default-off)."
+    ),
+)
 async def update_settings(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),

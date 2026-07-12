@@ -91,3 +91,18 @@ def test_admin_get_settings_returns_defaults_and_runtime_overrides(tmp_path: Pat
         assert recommendation["score_weights"]["view"] == 0.5
         assert recommendation["multipliers"]["ai"] == 1.0
         assert recommendation["multipliers"]["manga"] == 1.0
+
+
+def test_admin_settings_openapi_documents_runtime_dialect() -> None:
+    """Settings OpenAPI must document RuntimeSetting + dialect-aware writes."""
+    app = create_app()
+    paths = app.openapi()["paths"]
+    get_op = paths["/admin/api/settings"]["get"]
+    assert get_op.get("summary") == "Get runtime settings"
+    assert "RuntimeSetting" in str(get_op.get("description") or "") or "runtime" in str(
+        get_op.get("description") or ""
+    ).lower()
+    put_op = paths["/admin/api/settings"]["put"]
+    assert put_op.get("summary") == "Update runtime settings"
+    put_desc = str(put_op.get("description") or "")
+    assert "dialect" in put_desc.lower() or "set_runtime_setting" in put_desc

@@ -64,6 +64,7 @@ When disabled / not ready, `iter_pixiv_api_egress` yields residential-only attem
 | `/healthz` → `modules.cf_api_proxy` | `enabled_flag`, `ready`, `base_url_count`, `has_secret` — config only, no outbound worker probe / secrets |
 | `/status.json` → `data.cf_api_proxy` | Public subset: `enabled_flag` / `ready` / `base_url_count` (no `has_secret`); `/status` HTML chip mirrors it |
 | `GET /admin/api/maintenance/cf-api-proxy` | Full readiness + `missing` list for Dashboard / Maintenance (never returns secret). OpenAPI summary: **CF API proxy readiness status** (parity note with healthz/status.json) |
+| `POST /admin/api/tokens/{id}/test-refresh` | Live OAuth probe via `iter_pixiv_api_egress` (CF-first when ready). OpenAPI summary documents egress plan |
 | `/metrics` (admin) → modular readiness | `new_pixiv_module_readiness{module="cf_api_proxy",flag="enabled\|ready"}` + `new_pixiv_module_base_url_count{module="cf_api_proxy"}` (local config only) |
 
 Deploy / probe (repo root):

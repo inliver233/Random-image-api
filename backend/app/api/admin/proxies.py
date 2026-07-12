@@ -674,7 +674,16 @@ async def cleanup_invalid_hosts(
         "warnings": warnings}, request_id=rid)
 
 
-@router.post("/proxies/easy-proxies/import")
+@router.post(
+    "/proxies/easy-proxies/import",
+    summary="Import easy-proxies endpoints",
+    description=(
+        "Fetch EasyProxies export and upsert ProxyEndpoint rows; optional pool attach uses "
+        "dialect-aware `insert_for_dialect` ON CONFLICT for ProxyPoolEndpoint. "
+        "Optional `recompute_bindings` rebuilds TokenProxyBinding for the pool. "
+        "Inline control-plane import (not a JobQueuePort job) — worker path has a separate handler."
+    ),
+)
 async def import_easy_proxies(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
