@@ -37,8 +37,15 @@ Ops-only. Deploy/register **never** flips `CF_API_PROXY_ENABLED` / `IMAGE_EDGE_E
 6. Accept: `new_pixiv_image_delivery_total{path="edge_redirect"}` dominates
 7. Rollback: `IMAGE_EDGE_ENABLED=false`
 
+## Random Engine (dual-run)
+
+See [`engine-traffic-cutover.md`](./engine-traffic-cutover.md) for traffic% ramp, metrics, and rollback.
+
+- Prod: `RANDOM_ENGINE_SECRET` **required** when `RANDOM_ENGINE_ENABLED=true` (settings load fails closed).
+- Snapshot before raising traffic; watch `empty_index` / circuit.
+
 ## Notes
 
 - Admin deploy uses **this repo’s** workers only — not ds2api open reverse proxy.
 - Never store CF API tokens in runtime_settings / logs.
-- Production should also set `RANDOM_ENGINE_SECRET` when dual-run is enabled.
+- Real multi-base CF deploy still needs a CF account (code path ready; flags stay default-off).

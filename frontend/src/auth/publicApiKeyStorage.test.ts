@@ -49,10 +49,16 @@ describe("publicApiKeyStorage", () => {
   });
 
   it("never attaches api_key to CF image-edge / pximg absolute URLs", () => {
-    const signed =
+    // Contract HMAC path: /u/{exp}/{sig}/{b64url} — must not rely on host heuristics only.
+    const contractU =
+      "https://custom-edge.example.com/u/1893456000/AbC_dEf-0123456789/aW1nLW9yaWdpbmFs";
+    expect(isExternalEdgeOrCdnUrl(contractU)).toBe(true);
+    expect(withPublicApiKeyQuery(contractU, "k1")).toBe(contractU);
+
+    const signedQuery =
       "https://img.example.com/i/img-original/img/2020/01/01/00/00/00/1_p0.jpg?exp=1&sig=abc";
-    expect(isExternalEdgeOrCdnUrl(signed)).toBe(true);
-    expect(withPublicApiKeyQuery(signed, "k1")).toBe(signed);
+    expect(isExternalEdgeOrCdnUrl(signedQuery)).toBe(true);
+    expect(withPublicApiKeyQuery(signedQuery, "k1")).toBe(signedQuery);
 
     const pximg = "https://i.pximg.net/img-original/img/2020/01/01/00/00/00/1_p0.jpg";
     expect(isExternalEdgeOrCdnUrl(pximg)).toBe(true);

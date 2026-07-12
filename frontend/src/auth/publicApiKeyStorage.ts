@@ -31,6 +31,9 @@ export function publicApiKeyHeaders(apiKey?: string | null): Record<string, stri
  * Absolute CF image-edge / foreign CDN URLs must never receive ?api_key=.
  * Edge workers authenticate via HMAC path signature, not the public API key;
  * attaching the key leaks it into CDN logs and third-party URLs.
+ *
+ * Contract path (primary): `/u/{exp}/{sig}/{b64url(path)}` — see contracts/image-edge.md.
+ * Host heuristics are secondary for custom domains / pximg / workers.dev.
  */
 export function isExternalEdgeOrCdnUrl(pathOrUrl: string): boolean {
   const raw = String(pathOrUrl || "").trim();
@@ -38,9 +41,11 @@ export function isExternalEdgeOrCdnUrl(pathOrUrl: string): boolean {
   try {
     const u = new URL(raw);
     const host = u.hostname.toLowerCase();
-    // Relative-to-API paths are handled as non-absolute above.
-    // Treat signed edge paths and common pximg hosts as external.
-    if (u.pathname.includes("/i/") && (u.searchParams.has("exp") || u.searchParams.has("sig"))) {
+    const path = u.pathname || "";
+    // Primary: HMAC image-edge URL shape (no query auth).
+    if (/^\/u\/\d+\/[A-Za-z0-9_-]+\//.test(path)) return true;
+    // Legacy / alternate signed query form (if any surface still emits it).
+    if (path.includes("/i/") && (u.searchParams.has("exp") || u.searchParams.has("sig"))) {
       return true;
     }
     if (host.endsWith(".pximg.net") || host === "i.pximg.net") return true;
