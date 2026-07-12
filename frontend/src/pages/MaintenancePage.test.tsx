@@ -191,8 +191,8 @@ describe("MaintenancePage", () => {
     await waitFor(() => {
       expect(screen.getAllByText("redis→memory fallback").length).toBeGreaterThanOrEqual(2);
     });
-    // modular ports + API key RL both show redis→memory; job queue is implemented sqlite
-    expect(screen.queryByText("nats→sqlite fallback")).not.toBeInTheDocument();
+    // modular ports + API key RL both show redis→memory; job queue is fail-loud sqlite (no nats→sqlite badge)
+    expect(screen.queryByText(/→sqlite fallback/)).not.toBeInTheDocument();
     expect(screen.getByText("implemented")).toBeInTheDocument();
     expect(screen.getByText("R2_PREWARM_SECRET|IMAGE_EDGE_SECRET")).toBeInTheDocument();
     expect(screen.getByText("缺失（R2_PREWARM_SECRET / IMAGE_EDGE_SECRET）")).toBeInTheDocument();

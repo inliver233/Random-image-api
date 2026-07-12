@@ -486,11 +486,7 @@ export function MaintenancePage() {
               <Descriptions.Item label="Job Queue">
                 <Tag
                   color={
-                    modularPortsStatus.data.job_queue.using_sqlite_fallback
-                      ? "orange"
-                      : modularPortsStatus.data.job_queue.backend === "memory"
-                        ? "blue"
-                        : undefined
+                    modularPortsStatus.data.job_queue.backend === "memory" ? "blue" : undefined
                   }
                 >
                   active={modularPortsStatus.data.job_queue.backend}
@@ -506,11 +502,6 @@ export function MaintenancePage() {
                 ) : modularPortsStatus.data.job_queue.implemented === true ? (
                   <Tag color="green" style={{ marginLeft: 8 }}>
                     implemented
-                  </Tag>
-                ) : null}
-                {modularPortsStatus.data.job_queue.using_sqlite_fallback ? (
-                  <Tag color="orange" style={{ marginLeft: 8 }}>
-                    {modularPortsStatus.data.job_queue.requested}→sqlite fallback
                   </Tag>
                 ) : null}
               </Descriptions.Item>

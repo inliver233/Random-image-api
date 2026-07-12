@@ -448,11 +448,7 @@ export function DashboardPage() {
                     <Tag>tags={modularPorts.data.tags.backend}</Tag>
                     <Tag
                       color={
-                        modularPorts.data.job_queue.using_sqlite_fallback
-                          ? "orange"
-                          : modularPorts.data.job_queue.backend === "memory"
-                            ? "blue"
-                            : undefined
+                        modularPorts.data.job_queue.backend === "memory" ? "blue" : undefined
                       }
                     >
                       job_queue={modularPorts.data.job_queue.backend}
@@ -460,11 +456,6 @@ export function DashboardPage() {
                         ? ` (req=${modularPorts.data.job_queue.requested})`
                         : ""}
                     </Tag>
-                    {modularPorts.data.job_queue.using_sqlite_fallback ? (
-                      <Tag color="orange">
-                        {modularPorts.data.job_queue.requested}→sqlite fallback
-                      </Tag>
-                    ) : null}
                     <Tag
                       color={
                         modularPorts.data.recent_dedup.active_backend === "redis"
