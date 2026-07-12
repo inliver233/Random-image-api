@@ -42,6 +42,24 @@ def now_expr_for_dialect(dialect_name: str) -> Any:
     return sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
 
 
+def dialect_name_from_engine(engine: Any) -> str:
+    """Best-effort SQLAlchemy dialect name from an AsyncEngine/Engine (sqlite default)."""
+    try:
+        name = getattr(getattr(engine, "dialect", None), "name", None)
+    except Exception:
+        return "sqlite"
+    text = str(name or "sqlite").strip().lower()
+    return text or "sqlite"
+
+
+def driver_param_marker(dialect_name: str) -> str:
+    """Positional bind marker for raw `exec_driver_sql` (sqlite `?` | postgres `%s`)."""
+    name = (dialect_name or "sqlite").strip().lower() or "sqlite"
+    if name.startswith("postgres"):
+        return "%s"
+    return "?"
+
+
 async def upsert_image_by_illust_page(
     session: AsyncSession,
     *,

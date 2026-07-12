@@ -15,7 +15,10 @@ RANDOM_TOTALS_KEY = "stats.random.total"
 
 
 async def load_persisted_random_totals(engine: AsyncEngine) -> dict[str, int]:
-    sql = "SELECT value_json FROM runtime_settings WHERE key = ?;"
+    from app.db.images_upsert import dialect_name_from_engine, driver_param_marker
+
+    marker = driver_param_marker(dialect_name_from_engine(engine))
+    sql = f"SELECT value_json FROM runtime_settings WHERE key = {marker};"
 
     async def _op() -> str | None:
         async with engine.connect() as conn:

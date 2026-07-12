@@ -18,6 +18,7 @@ from app.core.random_engine_client import engine_circuit_snapshot, random_engine
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.runtime_settings import worker_last_seen_from_value_json
 from app.core.time import parse_iso_dt
+from app.db.images_upsert import dialect_name_from_engine, driver_param_marker
 from app.db.session import with_sqlite_busy_retry
 
 router = APIRouter()
@@ -44,7 +45,8 @@ async def _check_db(engine: AsyncEngine) -> bool:
 
 
 async def _query_worker_last_seen(engine: AsyncEngine) -> tuple[str | None, str]:
-    sql = "SELECT value_json FROM runtime_settings WHERE key = ?"
+    marker = driver_param_marker(dialect_name_from_engine(engine))
+    sql = f"SELECT value_json FROM runtime_settings WHERE key = {marker}"
 
     async def _op() -> str | None:
         async with engine.connect() as conn:
