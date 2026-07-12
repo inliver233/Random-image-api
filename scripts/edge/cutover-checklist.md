@@ -102,6 +102,7 @@ Do not publish Engine beyond loopback without a secret. SQLite file lives on `./
 - Hot pick: Go Random Engine; image bytes: CF img-worker → `i.pximg.net`.
 - R2 optional non-P0 (Admin deploy never attaches R2 bindings).
 - Terminal jobs purge: Admin → 维护工具 → 任务清理, or `POST /admin/api/maintenance/jobs/cleanup`.
+- **PG cutover is not auto:** dual-dialect helpers exist (upsert/claim/pool); historical alembic still has SQLite `strftime` + FTS5 — see `scripts/legacy/pg-cutover-inventory.md` before flipping `DATABASE_URL`.
 
 ## Notes
 

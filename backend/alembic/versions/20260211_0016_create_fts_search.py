@@ -23,8 +23,20 @@ def _try_create_fts5(conn: sa.Connection, *, table_name: str, columns_sql: str) 
     return False
 
 
+def _is_sqlite(conn: sa.Connection) -> bool:
+    try:
+        name = (getattr(getattr(conn, "dialect", None), "name", None) or "").strip().lower()
+    except Exception:
+        return False
+    return name.startswith("sqlite")
+
+
 def upgrade() -> None:
     conn = op.get_bind()
+    # FTS5 + SQLite triggers are SQLite-only. On Postgres/other, skip (LIKE fallback at runtime).
+    # See scripts/legacy/pg-cutover-inventory.md — do not treat empty FTS as cutover failure.
+    if not _is_sqlite(conn):
+        return
 
     tags_ok = _try_create_fts5(conn, table_name="tags_fts", columns_sql="name, translated_name")
     if tags_ok:
@@ -121,6 +133,8 @@ END;
 
 def downgrade() -> None:
     conn = op.get_bind()
+    if not _is_sqlite(conn):
+        return
 
     conn.exec_driver_sql("DROP TRIGGER IF EXISTS images_ad_authors_fts;")
     conn.exec_driver_sql("DROP TRIGGER IF EXISTS images_au_authors_fts;")

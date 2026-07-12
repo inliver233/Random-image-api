@@ -97,6 +97,7 @@ If verify warns **≥50% `x_restrict` NULL**:
 ## Related
 
 - Production topology: README dual-mainline + `deploy/.env.example`
+- **PG scaffolding inventory (no cutover claim):** [`pg-cutover-inventory.md`](./pg-cutover-inventory.md)
 - Jobs purge: Admin → 维护工具 → 任务清理
 - Engine: `scripts/edge/engine-traffic-cutover.md`
 - CF: Admin → CF Worker
