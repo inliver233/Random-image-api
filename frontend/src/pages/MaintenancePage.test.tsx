@@ -291,6 +291,14 @@ function stubFetch(mode: FixtureMode) {
   );
 }
 
+/** Expand a collapsed Ant Design Collapse panel by its header label. */
+async function expandCollapse(label: string | RegExp) {
+  const header = await screen.findByRole("button", { name: label });
+  if (header.getAttribute("aria-expanded") !== "true") {
+    fireEvent.click(header);
+  }
+}
+
 describe("MaintenancePage", () => {
   afterEach(() => {
     cleanup();
@@ -311,6 +319,10 @@ describe("MaintenancePage", () => {
 
     expect(await screen.findByText("维护工具")).toBeInTheDocument();
 
+    await expandCollapse(/模块端口 \/ API Key 限流/);
+    await expandCollapse(/R2 Prewarm/);
+    await expandCollapse(/CF Worker 池（成员 \+ 探针）/);
+
     await waitFor(() => {
       expect(screen.getAllByText("redis→memory fallback").length).toBeGreaterThanOrEqual(2);
     });
@@ -328,7 +340,6 @@ describe("MaintenancePage", () => {
     expect(screen.getAllByText("circuit=closed").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("failures=0")).toBeInTheDocument();
     // CF pool card (empty pool + residential demotion honesty)
-    expect(screen.getByText("CF Worker 池（成员 + 探针）")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "探针全部 healthz" })).toBeInTheDocument();
     expect(screen.getAllByText("（空）").length).toBeGreaterThanOrEqual(1);
   });
@@ -343,6 +354,9 @@ describe("MaintenancePage", () => {
     );
 
     expect(await screen.findByText("维护工具")).toBeInTheDocument();
+    await expandCollapse(/模块端口 \/ API Key 限流/);
+    await expandCollapse(/R2 Prewarm/);
+    await expandCollapse(/CF Worker 池（成员 \+ 探针）/);
     await waitFor(() => {
       expect(screen.getByText("implemented")).toBeInTheDocument();
     });
@@ -354,7 +368,6 @@ describe("MaintenancePage", () => {
     // CF pool shows merged bases when ready (URLs also appear on Image Edge / CF API cards)
     expect(screen.getAllByText("https://api-proxy.example.com").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("https://img.example.com").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("CF Worker 池（成员 + 探针）")).toBeInTheDocument();
   });
 
   it("probes CF pool healthz and shows summary", async () => {
@@ -366,7 +379,7 @@ describe("MaintenancePage", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("CF Worker 池（成员 + 探针）")).toBeInTheDocument();
+    await expandCollapse(/CF Worker 池（成员 \+ 探针）/);
     const probeBtn = await screen.findByRole("button", { name: "探针全部 healthz" });
     fireEvent.click(probeBtn);
 
@@ -387,7 +400,7 @@ describe("MaintenancePage", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("CF Worker 池（成员 + 探针）")).toBeInTheDocument();
+    await expandCollapse(/CF Worker 池（成员 \+ 探针）/);
     fireEvent.click(await screen.findByRole("button", { name: "探针全部 healthz" }));
 
     await waitFor(() => {
@@ -404,7 +417,7 @@ describe("MaintenancePage", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("CF Worker 池（成员 + 探针）")).toBeInTheDocument();
+    await expandCollapse(/CF Worker 池（成员 \+ 探针）/);
     expect(screen.getByRole("button", { name: "注册进池" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "注销 runtime" })).toBeInTheDocument();
 

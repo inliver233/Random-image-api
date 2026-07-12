@@ -4,16 +4,21 @@ Ops-only progressive dual-run for Go `random-engine`. Python SQLite pick remains
 
 ## Preconditions
 
-1. Engine running (`deploy` compose `random-engine` or host `127.0.0.1:8091`).
-2. Snapshot pushed and non-empty:
-   - `POST /admin/api/maintenance/random-engine/snapshot`
+1. Engine running (`deploy` compose service `random-engine` always starts; host bind `127.0.0.1:8091`).
+2. **BFF wired** (D7 — container start ≠ dual-run on):
+   - Compose network: `RANDOM_ENGINE_URL=http://random-engine:8091` on **api** and **worker**
+   - Same `RANDOM_ENGINE_SECRET` on engine + api + worker
+   - `RANDOM_ENGINE_ENABLED=true` only after snapshot warm; start with `TRAFFIC_PERCENT=0` then ramp
+3. Snapshot pushed and non-empty:
+   - Admin → 维护工具 → Random Engine → 推送全量快照
+   - or `POST /admin/api/maintenance/random-engine/snapshot`
    - `GET /admin/api/maintenance/random-engine` → `index_empty=false`, `ready_for_traffic` ok
-3. Optional filter parity:
+4. Optional filter parity:
    - `POST /admin/api/maintenance/random-engine/compare-filters`
-4. **Secrets**
+5. **Secrets**
    - Prefer `RANDOM_ENGINE_SECRET` on engine + BFF (same value).
    - **Prod:** if `RANDOM_ENGINE_ENABLED=true`, `RANDOM_ENGINE_SECRET` is **required** at settings load.
-5. Circuit closed: `modules.random_engine.circuit.state=closed` on `/healthz` / admin.
+6. Circuit closed: `modules.random_engine.circuit.state=closed` on `/healthz` / admin.
 
 ## Flags (default-off cutover)
 

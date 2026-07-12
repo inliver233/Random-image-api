@@ -69,9 +69,10 @@ services:
       - ../data:/app/data
     restart: unless-stopped
 
-  # Go in-memory pick service (default OFF on BFF via RANDOM_ENGINE_ENABLED).
-  # Compose always starts a healthy empty index; push snapshot from Admin → 维护工具.
-  # Host bind is loopback-only (P0): LAN cannot reach the unauthenticated pick surface by default.
+  # Go in-memory pick service (D7). Compose starts the process; BFF dual-run stays OFF until
+  # api/worker set RANDOM_ENGINE_URL (+ SECRET) and ENABLED — not auto-wired from this service.
+  # Push snapshot from Admin → 维护工具 before raising TRAFFIC_PERCENT.
+  # Host bind is loopback-only (P0): LAN cannot reach the pick surface by default.
   # Set RANDOM_ENGINE_SECRET in deploy/.env and pass the same value to api/worker for dual-run.
   random-engine:
     build:

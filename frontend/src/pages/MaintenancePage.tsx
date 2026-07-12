@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  Collapse,
   Descriptions,
   Form,
   Input,
@@ -588,45 +589,74 @@ export function MaintenancePage() {
         维护工具
       </Typography.Title>
 
-      <Card title="CF 状态（高级 · 只读）">
-        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          日常部署与启用请打开侧栏{" "}
-          <Typography.Link href="/admin/cf-worker">CF Worker</Typography.Link>
-          。本卡仅排障：出图 / API 出口 ready 摘要（不展示密钥）。
-        </Typography.Paragraph>
-        <Space wrap style={{ marginBottom: 12 }}>
-          {edge ? (
-            <Tag color={edge.ready ? "green" : edge.enabled_flag ? "orange" : undefined}>
-              出图={edge.ready ? "ready" : edge.enabled_flag ? "flag-on" : "off"} · bases=
-              {edge.base_url_count ?? edge.base_urls?.length ?? 0}
-            </Tag>
-          ) : null}
-          {cfApi ? (
-            <Tag color={cfApi.ready ? "green" : cfApi.enabled_flag ? "orange" : undefined}>
-              API出口={cfApi.ready ? "ready" : cfApi.enabled_flag ? "flag-on" : "off"} · bases=
-              {cfApi.base_url_count ?? cfApi.base_urls?.length ?? 0}
-            </Tag>
-          ) : null}
-          <Button
-            size="small"
-            onClick={() => {
-              void imageEdgeStatus.refetch();
-              void cfApiProxyStatus.refetch();
-            }}
-            loading={imageEdgeStatus.isFetching || cfApiProxyStatus.isFetching}
-          >
-            刷新
-          </Button>
-          <Button size="small" type="link" href="/admin/cf-worker">
-            打开 CF Worker
-          </Button>
-        </Space>
-      </Card>
+      <Alert
+        type="info"
+        showIcon
+        style={{ marginBottom: 8 }}
+        message={
+          <span>
+            日常 CF 部署/启用/一键应急住宅：侧栏{" "}
+            <Typography.Link href="/admin/cf-worker">CF Worker</Typography.Link>
+            。下方为高级排障（默认折叠）。
+          </span>
+        }
+      />
 
-      <Card title="CF Worker 池（成员 + 探针 · 高级）">
+      <Collapse
+        style={{ marginBottom: 16 }}
+        items={[
+          {
+            key: "cf-status",
+            label: "CF 状态（高级 · 只读）",
+            children: (
+              <>
+                <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+                  出图 / API 出口 ready 摘要（不展示密钥）。
+                </Typography.Paragraph>
+                <Space wrap style={{ marginBottom: 12 }}>
+                  {edge ? (
+                    <Tag color={edge.ready ? "green" : edge.enabled_flag ? "orange" : undefined}>
+                      出图={edge.ready ? "ready" : edge.enabled_flag ? "flag-on" : "off"} · bases=
+                      {edge.base_url_count ?? edge.base_urls?.length ?? 0}
+                    </Tag>
+                  ) : null}
+                  {cfApi ? (
+                    <Tag color={cfApi.ready ? "green" : cfApi.enabled_flag ? "orange" : undefined}>
+                      API出口={cfApi.ready ? "ready" : cfApi.enabled_flag ? "flag-on" : "off"} · bases=
+                      {cfApi.base_url_count ?? cfApi.base_urls?.length ?? 0}
+                    </Tag>
+                  ) : null}
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      void imageEdgeStatus.refetch();
+                      void cfApiProxyStatus.refetch();
+                    }}
+                    loading={imageEdgeStatus.isFetching || cfApiProxyStatus.isFetching}
+                  >
+                    刷新
+                  </Button>
+                  <Button size="small" type="link" href="/admin/cf-worker">
+                    打开 CF Worker
+                  </Button>
+                </Space>
+              </>
+            ),
+          },
+        ]}
+      />
+
+      <Collapse
+        style={{ marginBottom: 16 }}
+        items={[
+          {
+            key: "cf-pool",
+            label: "CF Worker 池（成员 + 探针）",
+            children: (
+              <>
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
           日常部署请用侧栏 <Typography.Text strong>CF Worker</Typography.Text> 页（一点部署 + 默认启用业务）。
-          本卡为高级：env/runtime 成员、探针 GET{" "}
+          本折叠为高级：env/runtime 成员、探针 GET{" "}
           <Typography.Text code>{"{base}/healthz"}</Typography.Text>
           （失败进程内指数冷却，成功清零）。Deploy 默认会 runtime 启用业务（OR 环境变量 flag）。
         </Typography.Paragraph>
@@ -809,12 +839,23 @@ export function MaintenancePage() {
             探针全部 healthz
           </Button>
         </Space>
-      </Card>
+              </>
+            ),
+          },
+        ]}
+      />
 
-      <Card title="R2 Prewarm（可选 · 图片对象缓存 · 非必须）">
+      <Collapse
+        style={{ marginBottom: 16 }}
+        items={[
+          {
+            key: "r2",
+            label: "R2 Prewarm（可选 · 非必须）",
+            children: (
+              <>
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
           <Typography.Text strong>非出图主路径</Typography.Text>
-          ：主路径是 img-worker → i.pximg.net。本卡为可选 Mode B2 钩子（对象缓存预热）。hydrate/import/heal
+          ：主路径是 img-worker → i.pximg.net。本折叠为可选 Mode B2 钩子（对象缓存预热）。hydrate/import/heal
           写库后 BFF 将 catalog image_ids 映射为 pximg paths，best-effort POST{" "}
           <Typography.Text code>{'{ "paths": [...] }'}</Typography.Text> +{" "}
           <Typography.Text code>X-Prewarm-Secret</Typography.Text> 到{" "}
@@ -851,143 +892,162 @@ export function MaintenancePage() {
         <Button onClick={() => void r2PrewarmStatus.refetch()} loading={r2PrewarmStatus.isFetching}>
           刷新状态
         </Button>
-      </Card>
+              </>
+            ),
+          },
+        ]}
+      />
 
-      <Card title="API Key 限流">
-        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          公开接口 X-API-Key 限流后端：默认 process-local memory；可选 Redis
-          （PUBLIC_API_KEY_RATE_LIMIT_BACKEND=redis + REDIS_URL）。Redis 不可用时 fail-open 到
-          memory，不挡主路径。不展示 Redis URL。
-        </Typography.Paragraph>
+      <Collapse
+        style={{ marginBottom: 16 }}
+        items={[
+          {
+            key: "ports",
+            label: "模块端口 / API Key 限流（只读）",
+            children: (
+              <>
+                <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+                  Catalog / TagStore / JobQueue / RecentDedup / RandomService / RandomPick 与公开
+                  X-API-Key 限流后端。active=实际；requested/configured=意图。JOB_QUEUE_BACKEND=memory
+                  为 SQLite jobs 表别名。redis/nats 队列未实现（配置则启动失败）。RecentDedup /
+                  API Key RL 支持 Redis + REDIS_URL（失败 fail-open memory）。Catalog/TagStore/RandomPick
+                  由 DATABASE_URL 方言派生。不展示密钥或连接串。
+                </Typography.Paragraph>
 
-        <QueryState query={apiKeyRlStatus}>
-          {apiKeyRlStatus.data ? (
-            <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
-              <Descriptions.Item label="强制 API Key">
-                {apiKeyRlStatus.data.required ? <Tag color="blue">REQUIRED</Tag> : <Tag>OFF</Tag>}
-              </Descriptions.Item>
-              <Descriptions.Item label="RPM / Burst">
-                {apiKeyRlStatus.data.rpm} / {apiKeyRlStatus.data.burst}
-              </Descriptions.Item>
-              <Descriptions.Item label="配置后端">
-                {apiKeyRlStatus.data.configured_backend}
-              </Descriptions.Item>
-              <Descriptions.Item label="实际后端">
-                {apiKeyRlStatus.data.active_backend === "redis" ? (
-                  <Tag color="green">redis</Tag>
-                ) : (
-                  <Tag>memory</Tag>
-                )}
-                {apiKeyRlStatus.data.using_memory_fallback ? (
-                  <Tag color="orange" style={{ marginLeft: 8 }}>
-                    redis→memory fallback
-                  </Tag>
-                ) : null}
-              </Descriptions.Item>
-              <Descriptions.Item label="REDIS_URL">
-                {apiKeyRlStatus.data.redis_url_configured ? "已配置" : "未配置"}
-              </Descriptions.Item>
-            </Descriptions>
-          ) : null}
-        </QueryState>
+                <QueryState query={modularPortsStatus}>
+                  {modularPortsStatus.data ? (
+                    <Descriptions size="small" column={1} bordered style={{ maxWidth: 720, marginBottom: 16 }}>
+                      <Descriptions.Item label="Catalog">
+                        <Tag>active={modularPortsStatus.data.catalog.backend}</Tag>
+                        <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                          source=DATABASE_URL
+                        </Typography.Text>
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Tag Store">
+                        <Tag>active={modularPortsStatus.data.tags.backend}</Tag>
+                        <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                          source=DATABASE_URL
+                        </Typography.Text>
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Job Queue">
+                        <Tag
+                          color={
+                            modularPortsStatus.data.job_queue.backend === "memory" ? "blue" : undefined
+                          }
+                        >
+                          active={modularPortsStatus.data.job_queue.backend}
+                          {modularPortsStatus.data.job_queue.backend === "memory"
+                            ? " (SQLite storage)"
+                            : ""}
+                        </Tag>
+                        <Tag style={{ marginLeft: 8 }}>
+                          requested={modularPortsStatus.data.job_queue.requested}
+                        </Tag>
+                        {modularPortsStatus.data.job_queue.implemented === false ? (
+                          <Tag color="orange" style={{ marginLeft: 8 }}>
+                            not implemented
+                          </Tag>
+                        ) : modularPortsStatus.data.job_queue.implemented === true ? (
+                          <Tag color="green" style={{ marginLeft: 8 }}>
+                            implemented
+                          </Tag>
+                        ) : null}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Recent Dedup">
+                        <Tag
+                          color={
+                            modularPortsStatus.data.recent_dedup.active_backend === "redis"
+                              ? "green"
+                              : modularPortsStatus.data.recent_dedup.using_memory_fallback
+                                ? "orange"
+                                : undefined
+                          }
+                        >
+                          active={modularPortsStatus.data.recent_dedup.active_backend}
+                        </Tag>
+                        <Tag style={{ marginLeft: 8 }}>
+                          requested={modularPortsStatus.data.recent_dedup.configured_backend}
+                        </Tag>
+                        {modularPortsStatus.data.recent_dedup.using_memory_fallback ? (
+                          <Tag color="orange" style={{ marginLeft: 8 }}>
+                            redis→memory fallback
+                          </Tag>
+                        ) : null}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Random Service">
+                        <Tag>active={modularPortsStatus.data.random_service?.backend ?? "default"}</Tag>
+                        <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                          factory=default
+                        </Typography.Text>
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Random Pick">
+                        <Tag>active={modularPortsStatus.data.random_pick?.backend ?? "sqlite"}</Tag>
+                        <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
+                          source=DATABASE_URL
+                        </Typography.Text>
+                      </Descriptions.Item>
+                    </Descriptions>
+                  ) : null}
+                </QueryState>
 
-        <Button onClick={() => void apiKeyRlStatus.refetch()} loading={apiKeyRlStatus.isFetching}>
-          刷新状态
-        </Button>
-      </Card>
+                <QueryState query={apiKeyRlStatus}>
+                  {apiKeyRlStatus.data ? (
+                    <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
+                      <Descriptions.Item label="强制 API Key">
+                        {apiKeyRlStatus.data.required ? <Tag color="blue">REQUIRED</Tag> : <Tag>OFF</Tag>}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="RPM / Burst">
+                        {apiKeyRlStatus.data.rpm} / {apiKeyRlStatus.data.burst}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="配置后端">
+                        {apiKeyRlStatus.data.configured_backend}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="实际后端">
+                        {apiKeyRlStatus.data.active_backend === "redis" ? (
+                          <Tag color="green">redis</Tag>
+                        ) : (
+                          <Tag>memory</Tag>
+                        )}
+                        {apiKeyRlStatus.data.using_memory_fallback ? (
+                          <Tag color="orange" style={{ marginLeft: 8 }}>
+                            redis→memory fallback
+                          </Tag>
+                        ) : null}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="REDIS_URL">
+                        {apiKeyRlStatus.data.redis_url_configured ? "已配置" : "未配置"}
+                      </Descriptions.Item>
+                    </Descriptions>
+                  ) : null}
+                </QueryState>
 
-      <Card title="模块端口（Phase 4）">
-        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          Catalog / TagStore / JobQueue / RecentDedup / RandomService / RandomPick 端口只读状态。每行展示
-          active（实际）与 requested/configured（配置意图）。JOB_QUEUE_BACKEND=memory 为 SQLite jobs
-          表的别名标签（仍持久化）。redis/nats 队列未实现 — 配置会直接启动失败（不再静默回落）。RecentDedup 支持
-          RECENT_DEDUP_BACKEND=redis + REDIS_URL（失败回落 memory）。Catalog/TagStore/RandomPick 由
-          DATABASE_URL 方言派生。不展示密钥或连接串。
-        </Typography.Paragraph>
-
-        <QueryState query={modularPortsStatus}>
-          {modularPortsStatus.data ? (
-            <Descriptions size="small" column={1} bordered style={{ maxWidth: 720, marginBottom: 16 }}>
-              <Descriptions.Item label="Catalog">
-                <Tag>active={modularPortsStatus.data.catalog.backend}</Tag>
-                <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
-                  source=DATABASE_URL
-                </Typography.Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Tag Store">
-                <Tag>active={modularPortsStatus.data.tags.backend}</Tag>
-                <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
-                  source=DATABASE_URL
-                </Typography.Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Job Queue">
-                <Tag
-                  color={
-                    modularPortsStatus.data.job_queue.backend === "memory" ? "blue" : undefined
-                  }
-                >
-                  active={modularPortsStatus.data.job_queue.backend}
-                  {modularPortsStatus.data.job_queue.backend === "memory" ? " (SQLite storage)" : ""}
-                </Tag>
-                <Tag style={{ marginLeft: 8 }}>
-                  requested={modularPortsStatus.data.job_queue.requested}
-                </Tag>
-                {modularPortsStatus.data.job_queue.implemented === false ? (
-                  <Tag color="orange" style={{ marginLeft: 8 }}>
-                    not implemented
-                  </Tag>
-                ) : modularPortsStatus.data.job_queue.implemented === true ? (
-                  <Tag color="green" style={{ marginLeft: 8 }}>
-                    implemented
-                  </Tag>
-                ) : null}
-              </Descriptions.Item>
-              <Descriptions.Item label="Recent Dedup">
-                <Tag
-                  color={
-                    modularPortsStatus.data.recent_dedup.active_backend === "redis"
-                      ? "green"
-                      : modularPortsStatus.data.recent_dedup.using_memory_fallback
-                        ? "orange"
-                        : undefined
-                  }
-                >
-                  active={modularPortsStatus.data.recent_dedup.active_backend}
-                </Tag>
-                <Tag style={{ marginLeft: 8 }}>
-                  requested={modularPortsStatus.data.recent_dedup.configured_backend}
-                </Tag>
-                {modularPortsStatus.data.recent_dedup.using_memory_fallback ? (
-                  <Tag color="orange" style={{ marginLeft: 8 }}>
-                    redis→memory fallback
-                  </Tag>
-                ) : null}
-              </Descriptions.Item>
-              <Descriptions.Item label="Random Service">
-                <Tag>active={modularPortsStatus.data.random_service?.backend ?? "default"}</Tag>
-                <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
-                  factory=default
-                </Typography.Text>
-              </Descriptions.Item>
-              <Descriptions.Item label="Random Pick">
-                <Tag>active={modularPortsStatus.data.random_pick?.backend ?? "sqlite"}</Tag>
-                <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
-                  source=DATABASE_URL
-                </Typography.Text>
-              </Descriptions.Item>
-            </Descriptions>
-          ) : null}
-        </QueryState>
-
-        <Button onClick={() => void modularPortsStatus.refetch()} loading={modularPortsStatus.isFetching}>
-          刷新状态
-        </Button>
-      </Card>
+                <Space wrap>
+                  <Button
+                    onClick={() => {
+                      void modularPortsStatus.refetch();
+                      void apiKeyRlStatus.refetch();
+                    }}
+                    loading={modularPortsStatus.isFetching || apiKeyRlStatus.isFetching}
+                  >
+                    刷新状态
+                  </Button>
+                </Space>
+              </>
+            ),
+          },
+        ]}
+      />
 
       <Card title="Random Engine（Go 双跑）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          只读状态 + 全量快照推送。RANDOM_ENGINE_ENABLED 默认关；一旦开启，RANDOM_ENGINE_TRAFFIC_PERCENT
-          默认 100（全量 dual-run，除非显式调低）。未配置 URL 时推送会失败。
+          选图热路径（D7）：compose 默认起 <Typography.Text code>random-engine</Typography.Text>
+          （:8091），BFF 默认 <Typography.Text code>RANDOM_ENGINE_ENABLED=false</Typography.Text>
+          。生产接线：API/worker 设{" "}
+          <Typography.Text code>RANDOM_ENGINE_URL=http://random-engine:8091</Typography.Text> + 同值{" "}
+          <Typography.Text code>RANDOM_ENGINE_SECRET</Typography.Text>，推送快照后按{" "}
+          <Typography.Text code>scripts/edge/engine-traffic-cutover.md</Typography.Text> 升{" "}
+          <Typography.Text code>TRAFFIC_PERCENT</Typography.Text>
+          。CF 部署与 Engine flag 独立。未配置 URL 时推送失败；切流前索引须非空。
         </Typography.Paragraph>
 
         <QueryState query={engineStatus}>

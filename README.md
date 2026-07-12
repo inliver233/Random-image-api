@@ -126,12 +126,13 @@ docker compose -f deploy/docker-compose.yml --profile postgres --profile redis u
 # Redis 不可用时 fail-open 到进程 memory，不挡主路径。JOB_QUEUE redis/nats 仍未实现。
 ```
 
-4. 访问
-- API：`http://localhost:23222`
+4. 访问（D5 端口）
+- API / Admin：`http://localhost:23222`（容器内 8000）
 - 文档页：`http://localhost:23222/docs`
 - 状态页：`http://localhost:23222/status`
 - Swagger：`http://localhost:23222/api/docs`
 - 管理后台：`http://localhost:23222/admin`（CF Worker / 维护工具）
+- Random Engine（compose）：主机 `127.0.0.1:8091`；BFF 需另设 `RANDOM_ENGINE_URL=http://random-engine:8091` 才接线（见 `scripts/edge/engine-traffic-cutover.md`）
 
 ## 首次使用建议流程
 

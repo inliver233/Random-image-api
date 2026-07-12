@@ -51,12 +51,26 @@ Ops-only. **Default path (Admin FE / deploy API):** one-page deploy → auto reg
 6. Accept: `new_pixiv_image_delivery_total{path="edge_redirect"}` dominates
 7. Rollback: disable flags / clear runtime enable
 
-## Random Engine (dual-run)
+## Random Engine (dual-run · D7)
 
 See [`engine-traffic-cutover.md`](./engine-traffic-cutover.md) for traffic% ramp, metrics, and rollback.
 
+- Compose starts `random-engine`; **api/worker still need** `RANDOM_ENGINE_URL` (+ secret) — not auto-wired.
 - Prod: `RANDOM_ENGINE_SECRET` **required** when `RANDOM_ENGINE_ENABLED=true` (settings load fails closed).
 - Snapshot before raising traffic; watch `empty_index` / circuit.
+- CF Admin deploy does **not** flip Engine flags.
+
+## Ports & host map (D5 · twelve-factor)
+
+| Surface | Host default | In-container / notes |
+| --- | --- | --- |
+| Public BFF / Admin | `23222` → `8000` | `uvicorn` on api service |
+| Random Engine | `127.0.0.1:8091` → `8091` | loopback-only host bind; BFF uses `http://random-engine:8091` |
+| Postgres (profile) | `5432` (if published) | `postgresql+asyncpg://ria:ria@postgres:5432/random_image` |
+| Redis (profile) | `6379` (if published) | `redis://redis:6379/0` for RL/dedup |
+| CF Workers | workers.dev / custom | not compose ports; secret via deploy/env overlay |
+
+Do not publish Engine beyond loopback without a secret. SQLite file lives on `./data` volume (dev-only).
 
 ## Production data plane (mainline B)
 

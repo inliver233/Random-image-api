@@ -322,6 +322,21 @@ export function DashboardPage() {
         />
       ) : null}
 
+      {tokenEnabledCount === 0 && imageEnabledCount > 0 ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="无启用 Token：元数据补全 / OAuth 会熔断（D4）"
+          description="图库已有启用图片但无启用 refresh_token。hydrate 与 Pixiv OAuth 无法走主路径。请添加并启用 Token，或从 legacy 导入（scripts/legacy）。"
+          action={
+            <Button size="small" onClick={() => navigate("/admin/tokens")}>
+              打开令牌
+            </Button>
+          }
+        />
+      ) : null}
+
       <Row gutter={[16, 16]}>
         <Col xs={24} md={12} xl={6}>
           <Card title="工作线程 / 队列">
@@ -356,6 +371,11 @@ export function DashboardPage() {
               <Space direction="vertical">
                 <Typography.Text>总数: {tokenCount}</Typography.Text>
                 <Typography.Text>启用: {tokenEnabledCount}</Typography.Text>
+                {tokenEnabledCount === 0 && imageEnabledCount > 0 ? (
+                  <Typography.Text type="warning">
+                    无启用 Token：元数据补全/OAuth 会熔断（D4）。请添加 refresh_token 或从 legacy 导入。
+                  </Typography.Text>
+                ) : null}
                 <Button size="small" onClick={() => navigate("/admin/tokens")}>
                   打开令牌列表
                 </Button>
