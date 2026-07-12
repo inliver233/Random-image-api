@@ -192,6 +192,8 @@ def _init_labelsets() -> None:
         "db_miss",
         "fallback",
         "skipped_traffic",
+        "skipped_sticky",
+        "skipped_circuit",
     ):
         RANDOM_ENGINE_PICK_TOTAL.labels(status=status).inc(0)
         RANDOM_ENGINE_PICK_LATENCY_SECONDS.labels(status=status).observe(0.0)

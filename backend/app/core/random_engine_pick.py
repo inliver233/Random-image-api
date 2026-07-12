@@ -523,7 +523,12 @@ async def pick_with_strategy(
     ``skip_engine`` forces the Python path (used by /feed top-up after one engine
     batch and by /random stream retries after the first dual-run attempt).
     """
-    from app.core.random_engine_client import random_engine_base_url, should_route_pick_to_engine
+    from app.core.random_engine_client import (
+        engine_circuit_allow,
+        engine_circuit_record,
+        random_engine_base_url,
+        should_route_pick_to_engine,
+    )
     from app.db.random_pick_port import resolve_random_pick
 
     store = resolve_catalog_store(catalog)
@@ -531,12 +536,24 @@ async def pick_with_strategy(
     debug_base = dict(pick_ctx.debug_base)
     engine_url = random_engine_base_url(settings) if settings is not None else None
     # Traffic roll uses process RNG only — never pick_ctx.rng (seed must stay deterministic).
-    if (
+    route_engine = (
         not skip_engine
         and engine_url
         and httpx_client is not None
         and should_route_pick_to_engine(settings)
-    ):
+    )
+    if route_engine and not engine_circuit_allow():
+        # Process circuit open (or concurrent half-open) — skip engine RTT.
+        try:
+            observe_random_engine_pick(status="skipped_circuit")
+        except Exception:
+            pass
+        debug_base = {
+            **debug_base,
+            "engine_status": "skipped_circuit",
+            "picked_by": "python",
+        }
+    elif route_engine:
         exclude_set = merge_engine_exclude_ids(pick_ctx=pick_ctx, exclude_image_ids=exclude_image_ids)
 
         payload = pick_ctx.build_engine_payload(
@@ -557,6 +574,7 @@ async def pick_with_strategy(
         rtt = (eng_meta or {}).get("engine_rtt_s")
         if image is not None:
             try:
+                engine_circuit_record("ok")
                 observe_random_engine_pick(status="ok", duration_s=rtt if isinstance(rtt, (int, float)) else None)
             except Exception:
                 pass
@@ -564,6 +582,7 @@ async def pick_with_strategy(
         # Keep engine miss meta so dual-run ops can see why Python took over.
         engine_status = str((eng_meta or {}).get("engine_status") or "fallback")
         try:
+            engine_circuit_record(engine_status)
             observe_random_engine_pick(
                 status=engine_status,
                 duration_s=rtt if isinstance(rtt, (int, float)) else None,

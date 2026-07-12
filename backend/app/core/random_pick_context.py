@@ -192,7 +192,12 @@ class RandomPickContext:
     ) -> tuple[list[Any], dict[str, Any] | None]:
         """One-shot engine batch for /feed. Returns ([], None) when dual-run is off."""
         from app.core.metrics import observe_random_engine_pick
-        from app.core.random_engine_client import random_engine_base_url, should_route_pick_to_engine
+        from app.core.random_engine_client import (
+            engine_circuit_allow,
+            engine_circuit_record,
+            random_engine_base_url,
+            should_route_pick_to_engine,
+        )
         from app.core.random_engine_pick import merge_engine_exclude_ids, try_pick_many_via_engine
 
         if settings is None or httpx_client is None:
@@ -201,6 +206,18 @@ class RandomPickContext:
         # Traffic roll is independent of pick seed (self.rng).
         if not engine_url or not should_route_pick_to_engine(settings):
             return [], None
+        if not engine_circuit_allow():
+            try:
+                observe_random_engine_pick(status="skipped_circuit")
+            except Exception:
+                pass
+            return [], {
+                "engine": True,
+                "engine_url": engine_url,
+                "engine_status": "skipped_circuit",
+                "picked_by": "python",
+                "batch": True,
+            }
 
         exclude_set = merge_engine_exclude_ids(pick_ctx=self, exclude_image_ids=exclude_image_ids)
 
@@ -222,6 +239,7 @@ class RandomPickContext:
         engine_status = str((eng_meta or {}).get("engine_status") or "fallback")
         rtt = (eng_meta or {}).get("engine_rtt_s")
         try:
+            engine_circuit_record(engine_status)
             observe_random_engine_pick(
                 status=engine_status,
                 duration_s=rtt if isinstance(rtt, (int, float)) else None,

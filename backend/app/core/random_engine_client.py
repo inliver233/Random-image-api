@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
+import time
 from typing import Any
 
 import httpx
@@ -9,6 +11,97 @@ import httpx
 from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
+
+# Process-local dual-run circuit: stop paying engine RTT after consecutive hard failures.
+# Hard failures = transport/5xx (unavailable) or empty/not-ready index. Filter no_match does not trip.
+_CIRCUIT_FAILURE_THRESHOLD = 5
+_CIRCUIT_OPEN_S = 30.0
+_CIRCUIT_HARD_STATUSES = frozenset({"unavailable", "empty_index"})
+
+_circuit_lock = threading.Lock()
+_circuit_consecutive_failures = 0
+_circuit_open_until = 0.0
+_circuit_half_open = False
+
+
+def reset_engine_circuit_for_tests() -> None:
+    """Reset process circuit state (unit tests only)."""
+    global _circuit_consecutive_failures, _circuit_open_until, _circuit_half_open
+    with _circuit_lock:
+        _circuit_consecutive_failures = 0
+        _circuit_open_until = 0.0
+        _circuit_half_open = False
+
+
+def engine_circuit_snapshot(*, now: float | None = None) -> dict[str, Any]:
+    """Read-only circuit state for tests/ops (no side effects; does not arm half-open)."""
+    t = time.monotonic() if now is None else float(now)
+    with _circuit_lock:
+        open_until = float(_circuit_open_until)
+        failures = int(_circuit_consecutive_failures)
+        half = bool(_circuit_half_open)
+    if open_until > t:
+        state = "open"
+    elif half:
+        state = "half_open"
+    else:
+        state = "closed"
+    return {
+        "state": state,
+        "consecutive_failures": failures,
+        "open_remaining_s": max(0.0, open_until - t),
+        "failure_threshold": _CIRCUIT_FAILURE_THRESHOLD,
+        "open_s": _CIRCUIT_OPEN_S,
+    }
+
+
+def engine_circuit_allow(*, now: float | None = None) -> bool:
+    """True if dual-run may attempt the engine (closed, or one half-open probe)."""
+    global _circuit_half_open, _circuit_open_until
+    t = time.monotonic() if now is None else float(now)
+    with _circuit_lock:
+        if _circuit_open_until > t:
+            return False
+        if _circuit_open_until > 0.0 and _circuit_open_until <= t:
+            # Cool-down expired → allow a single half-open probe.
+            _circuit_half_open = True
+            _circuit_open_until = 0.0
+            return True
+        if _circuit_half_open:
+            # Another concurrent request while probe in flight — stay on Python.
+            return False
+        return True
+
+
+def engine_circuit_record(status: str, *, now: float | None = None) -> None:
+    """Record a dual-run engine outcome. Hard failures open the circuit after threshold."""
+    global _circuit_consecutive_failures, _circuit_open_until, _circuit_half_open
+    label = (status or "").strip().lower() or "fallback"
+    t = time.monotonic() if now is None else float(now)
+    hard = label in _CIRCUIT_HARD_STATUSES
+    success = label == "ok"
+    with _circuit_lock:
+        if success:
+            _circuit_consecutive_failures = 0
+            _circuit_open_until = 0.0
+            _circuit_half_open = False
+            return
+        if not hard:
+            # Soft miss (no_match / not_ok / db_miss / …): clear half-open without tripping.
+            if _circuit_half_open:
+                _circuit_half_open = False
+            return
+        _circuit_consecutive_failures = int(_circuit_consecutive_failures) + 1
+        _circuit_half_open = False
+        if _circuit_consecutive_failures >= _CIRCUIT_FAILURE_THRESHOLD:
+            _circuit_open_until = t + float(_CIRCUIT_OPEN_S)
+            logger.warning(
+                "random-engine circuit open for %.0fs after %s consecutive %s",
+                _CIRCUIT_OPEN_S,
+                _circuit_consecutive_failures,
+                label,
+            )
+            _circuit_consecutive_failures = 0
 
 
 def random_engine_base_url(settings: Settings | Any) -> str | None:
@@ -33,6 +126,8 @@ def should_route_pick_to_engine(settings: Settings | Any, *, rng: Any | None = N
     """Whether this pick should attempt the Go engine (flag + URL + traffic %).
 
     Catalog event publish is independent (URL-only) so the index can warm first.
+    Process circuit is checked separately via ``engine_circuit_allow`` so open
+    circuits are not mis-labeled as traffic skips.
     """
     if not bool(getattr(settings, "random_engine_enabled", False)):
         return False
