@@ -29,7 +29,11 @@ from app.core.api_keys import (
     require_public_api_key,
 )
 from app.core.errors import ApiError, ErrorCode, json_error_response
-from app.core.http_client import build_default_async_transport, build_shared_async_client
+from app.core.http_client import (
+    aclose_proxy_client_pool,
+    build_default_async_transport,
+    build_shared_async_client,
+)
 from app.core.logging import configure_logging, get_logger
 from app.core.metrics import observe_random_result
 from app.core.random_engine_sync import maybe_warm_engine_snapshot_on_startup
@@ -171,6 +175,11 @@ def create_app() -> FastAPI:
                     await httpx_client.aclose()
                 except Exception:
                     pass
+
+            try:
+                await aclose_proxy_client_pool()
+            except Exception:
+                pass
 
             limiter = getattr(app.state, "api_key_limiter", None)
             if limiter is not None:

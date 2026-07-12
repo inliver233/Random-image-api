@@ -6,6 +6,7 @@ import httpx
 from starlette.responses import StreamingResponse
 
 from app.core.errors import ApiError, ErrorCode
+from app.core.http_client import acquire_proxy_client
 from app.core.metrics import UPSTREAM_STREAM_ERRORS_TOTAL
 
 PIXIV_REFERER = "https://www.pixiv.net/"
@@ -25,7 +26,7 @@ async def stream_url(
     """Stream an upstream URL as a Starlette StreamingResponse.
 
     Connection reuse rules:
-    - If ``proxy`` is set: must use a dedicated client (httpx binds proxy at client level).
+    - If ``proxy`` is set: process proxy client pool (httpx binds proxy at client level).
     - Else if shared ``client`` is provided: reuse it (do NOT close on completion).
     - Else if ``transport`` is provided: build a short-lived client on that transport.
     - Else: cold client (legacy path).
@@ -36,11 +37,16 @@ async def stream_url(
     if shared_client:
         assert client is not None
         active_client = client
+    elif proxy:
+        active_client, owns_client = await acquire_proxy_client(
+            proxy,
+            timeout_s=timeout_s,
+            transport=transport,
+        )
     else:
         owns_client = True
         active_client = httpx.AsyncClient(
             transport=transport,
-            proxy=proxy,
             follow_redirects=True,
             timeout=httpx.Timeout(timeout_s, connect=10.0),
         )

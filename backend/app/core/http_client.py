@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 import httpx
 
 # Shared connection limits for non-proxy upstream fetches (mirrors / direct pximg).
-# Proxy URIs still need per-request clients (httpx binds proxy at client level).
+# Proxy URIs need a dedicated client (httpx binds proxy at client construction).
 _DEFAULT_LIMITS = httpx.Limits(
     max_connections=100,
     max_keepalive_connections=40,
+    keepalive_expiry=30.0,
+)
+
+_PROXY_LIMITS = httpx.Limits(
+    max_connections=40,
+    max_keepalive_connections=16,
     keepalive_expiry=30.0,
 )
 
@@ -22,3 +31,124 @@ def build_shared_async_client(*, transport: httpx.AsyncBaseTransport | None = No
         timeout=httpx.Timeout(30.0, connect=10.0),
         limits=_DEFAULT_LIMITS,
     )
+
+
+class ProxyClientPool:
+    """Process-local pool of httpx clients keyed by proxy URI (keepalive reuse).
+
+    httpx binds ``proxy=`` at client construction, so residential paths cannot share
+    the non-proxy app.state.httpx_client. This pool reuses one client per proxy URI
+    and evicts LRU when full.
+    """
+
+    def __init__(self, *, max_clients: int = 32) -> None:
+        self._max = max(1, int(max_clients))
+        self._lock = asyncio.Lock()
+        self._clients: dict[str, httpx.AsyncClient] = {}
+        self._lru: list[str] = []
+
+    @property
+    def size(self) -> int:
+        return len(self._clients)
+
+    async def get(
+        self,
+        proxy_uri: str,
+        *,
+        timeout_s: float = 30.0,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> httpx.AsyncClient:
+        key = (proxy_uri or "").strip()
+        if not key:
+            raise ValueError("proxy_uri is required")
+        async with self._lock:
+            existing = self._clients.get(key)
+            if existing is not None:
+                try:
+                    self._lru.remove(key)
+                except ValueError:
+                    pass
+                self._lru.append(key)
+                return existing
+
+            while len(self._clients) >= self._max and self._lru:
+                old_key = self._lru.pop(0)
+                old = self._clients.pop(old_key, None)
+                if old is not None:
+                    try:
+                        await old.aclose()
+                    except Exception:
+                        pass
+
+            client = httpx.AsyncClient(
+                transport=transport,
+                proxy=key,
+                follow_redirects=True,
+                timeout=httpx.Timeout(float(timeout_s), connect=min(10.0, float(timeout_s))),
+                limits=_PROXY_LIMITS,
+            )
+            self._clients[key] = client
+            self._lru.append(key)
+            return client
+
+    async def aclose(self) -> None:
+        async with self._lock:
+            clients = list(self._clients.values())
+            self._clients.clear()
+            self._lru.clear()
+        for client in clients:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+
+
+_proxy_pool: ProxyClientPool | None = None
+
+
+def get_proxy_client_pool() -> ProxyClientPool:
+    """Lazy process singleton (created on first residential proxy use)."""
+    global _proxy_pool
+    if _proxy_pool is None:
+        _proxy_pool = ProxyClientPool()
+    return _proxy_pool
+
+
+async def aclose_proxy_client_pool() -> None:
+    """Shutdown hook — close all pooled proxy clients."""
+    global _proxy_pool
+    pool = _proxy_pool
+    _proxy_pool = None
+    if pool is not None:
+        await pool.aclose()
+
+
+def reset_proxy_client_pool_for_tests() -> None:
+    """Drop pool reference without awaiting close (tests that never opened clients)."""
+    global _proxy_pool
+    _proxy_pool = None
+
+
+async def acquire_proxy_client(
+    proxy_uri: str | None,
+    *,
+    timeout_s: float = 30.0,
+    transport: httpx.AsyncBaseTransport | None = None,
+    pool: ProxyClientPool | None = None,
+) -> tuple[httpx.AsyncClient, bool]:
+    """Return (client, owns_client). Pooled clients must not be closed by the caller."""
+    uri = (proxy_uri or "").strip()
+    if not uri:
+        # Non-proxy cold client — caller owns.
+        return (
+            httpx.AsyncClient(
+                transport=transport,
+                follow_redirects=True,
+                timeout=httpx.Timeout(float(timeout_s), connect=min(10.0, float(timeout_s))),
+                limits=_DEFAULT_LIMITS,
+            ),
+            True,
+        )
+    active_pool = pool if pool is not None else get_proxy_client_pool()
+    client = await active_pool.get(uri, timeout_s=timeout_s, transport=transport)
+    return client, False

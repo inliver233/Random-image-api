@@ -915,25 +915,28 @@ LIMIT 1;
                 if picked_proxy is not None:
                     proxy_uri = picked_proxy.uri
 
-            client_kwargs: dict[str, Any] = {
-                "timeout": httpx.Timeout(30.0, connect=10.0),
-                "follow_redirects": True,
-            }
-            if transport is not None:
-                client_kwargs["transport"] = transport
             # CF path is direct to worker; never pair with residential proxy.
-            if proxy_uri and not via_cf:
-                client_kwargs["proxy"] = proxy_uri
+            use_proxy = proxy_uri if (proxy_uri and not via_cf) else None
 
             start_m = float(time.monotonic())
             try:
                 await _pixiv_throttle(runtime, token_id=int(token_id))
-                async with httpx.AsyncClient(**client_kwargs) as client:
+                from app.core.http_client import acquire_proxy_client
+
+                client, owns_client = await acquire_proxy_client(
+                    use_proxy,
+                    timeout_s=30.0,
+                    transport=transport,  # type: ignore[arg-type]
+                )
+                try:
                     resp = await client.get(
                         request_url,
                         params={"illust_id": int(illust_id), "filter": "for_android"},
                         headers=req_headers,
                     )
+                finally:
+                    if owns_client:
+                        await client.aclose()
             except httpx.RequestError as exc:
                 latency_ms = (float(time.monotonic()) - start_m) * 1000.0
                 if picked_proxy is not None:
