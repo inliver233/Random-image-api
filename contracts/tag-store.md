@@ -1,12 +1,13 @@
 # Tag Store Port
 
-Status: **Phase 4 readiness** (SQLite default; Postgres dialect label only)
+Status: **Phase 4 readiness** (SQLite default; Postgres dialect label + dialect-aware tag/link inserts)
 
 Implementation:
 
 - Protocol: `TagStore` in `backend/app/db/tag_store.py`
 - Default: `SqliteTagStore` → `tags_get` / `tags_list` / `tags_links`
-- Postgres label: `PostgresTagStore` (same helpers today)
+- Postgres label: `PostgresTagStore` (same helpers; write path uses dialect-aware inserts)
+- Tag/link inserts (`tags_links.py`): `ensure_tags_by_names` + `link_image_tags` use `insert_for_dialect` (shared with catalog image upserts) so ON CONFLICT is SQLite|PostgreSQL-safe
 - Dialect map: `tag_backend_from_database_url` → `db.dialect.backend_from_database_url`
 - Wire-up: `app.state.tag_store = build_tag_store(database_url=...)` in `main.py`
 - Worker: `build_default_dispatcher` injects one store into import/hydrate handlers

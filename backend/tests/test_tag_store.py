@@ -27,6 +27,18 @@ def test_tag_backend_from_database_url() -> None:
     assert tag_backend_from_database_url("") == "sqlite"
 
 
+def test_tag_and_image_tag_insert_builders_are_dialect_aware() -> None:
+    """ensure_tags_by_names / link_image_tags must not hardcode sqlite_insert only."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    from app.db.images_upsert import insert_for_dialect
+
+    assert type(insert_for_dialect(Tag, dialect_name="sqlite")) is type(sqlite_insert(Tag))
+    assert type(insert_for_dialect(Tag, dialect_name="postgresql")) is type(pg_insert(Tag))
+    assert type(insert_for_dialect(ImageTag, dialect_name="postgresql")) is type(pg_insert(ImageTag))
+
+
 def test_build_tag_store_dialects() -> None:
     s = build_tag_store(database_url="sqlite+aiosqlite:///:memory:")
     assert isinstance(s, SqliteTagStore)

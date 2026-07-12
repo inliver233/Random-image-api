@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.images_upsert import dialect_name_from_session, insert_for_dialect
 from app.db.models.image_tags import ImageTag
 from app.db.models.tags import Tag
 
@@ -96,7 +96,9 @@ async def ensure_tags_by_names(
     if not clean:
         return {}
 
-    stmt = sqlite_insert(Tag).values([{"name": n, "translated_name": None} for n in clean])
+    dialect = dialect_name_from_session(session)
+    insert = insert_for_dialect(Tag, dialect_name=dialect)
+    stmt = insert.values([{"name": n, "translated_name": None} for n in clean])
     stmt = stmt.on_conflict_do_nothing(index_elements=["name"])
     await session.execute(stmt)
 
@@ -162,9 +164,11 @@ async def link_image_tags(
         values.append({"image_id": key[0], "tag_id": key[1]})
     if not values:
         return 0
+    dialect = dialect_name_from_session(session)
+    insert = insert_for_dialect(ImageTag, dialect_name=dialect)
     for offset in range(0, len(values), 5000):
         sub = values[offset : offset + 5000]
-        stmt = sqlite_insert(ImageTag).values(sub).on_conflict_do_nothing(index_elements=["image_id", "tag_id"])
+        stmt = insert.values(sub).on_conflict_do_nothing(index_elements=["image_id", "tag_id"])
         await session.execute(stmt)
     return len(values)
 
