@@ -10,7 +10,16 @@ from app.db.session import resolve_sessionmaker
 router = APIRouter()
 
 
-@router.get("/{illust_id}-{page}.{ext}")
+@router.get(
+    "/{illust_id}-{page}.{ext}",
+    summary="Legacy multi-page image delivery",
+    description=(
+        "Compatibility route for `/{illust_id}-{page}.{ext}` (1-based page). "
+        "Prefer `/i/{image_id}.{ext}` for new clients. Same delivery cascade as `/i` "
+        "(Image Edge redirect when ready, else local stream). "
+        "When `PUBLIC_API_KEY_REQUIRED`, send `X-API-Key` or `?api_key=`."
+    ),
+)
 async def legacy_multi(
     request: Request,
     illust_id: int,
@@ -48,7 +57,15 @@ async def legacy_multi(
     )
 
 
-@router.get("/{illust_id}.{ext}")
+@router.get(
+    "/{illust_id}.{ext}",
+    summary="Legacy single-page image delivery",
+    description=(
+        "Compatibility route for `/{illust_id}.{ext}` (page 0 / first page). "
+        "Prefer `/i/{image_id}.{ext}` for new clients. Same delivery cascade as `/i`. "
+        "When `PUBLIC_API_KEY_REQUIRED`, send `X-API-Key` or `?api_key=`."
+    ),
+)
 async def legacy_single(
     request: Request,
     illust_id: int,

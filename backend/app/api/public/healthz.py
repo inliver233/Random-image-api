@@ -93,7 +93,16 @@ async def _query_queue_status_counts(engine: AsyncEngine) -> tuple[dict[str, int
     return counts, "ok"
 
 
-@router.get("/healthz")
+@router.get(
+    "/healthz",
+    summary="Process health and module readiness",
+    description=(
+        "Liveness/readiness probe: DB, worker heartbeat, job queue counts, plus local modular "
+        "config snapshots under `modules.*` (image edge, CF API proxy, R2 prewarm, dual-run "
+        "engine circuit, API-key rate limit, job queue, recent dedup, catalog/tags dialects). "
+        "No outbound probes and no secrets. Middleware-exempt when `PUBLIC_API_KEY_REQUIRED`."
+    ),
+)
 async def healthz(request: Request) -> Any:
     rid = get_or_create_request_id(request)
     set_request_id_on_state(request, rid)

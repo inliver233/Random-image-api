@@ -240,6 +240,9 @@ def test_openapi_documents_public_api_key_security_schemes(tmp_path: Path, monke
             ("/images/{image_id}", "Get one catalog image"),
             ("/i/{image_id}.{ext}", "Deliver image bytes or edge redirect"),
             ("/version", "Build version metadata"),
+            ("/healthz", "Process health and module readiness"),
+            ("/{illust_id}-{page}.{ext}", "Legacy multi-page image delivery"),
+            ("/{illust_id}.{ext}", "Legacy single-page image delivery"),
         ):
             op = (paths.get(path) or {}).get("get") or {}
             assert op.get("summary") == expected_summary, path

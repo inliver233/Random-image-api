@@ -43,7 +43,9 @@ def test_docs_html_documents_debug_engine_status() -> None:
     assert 'href="https://example.test/authors"' in html
     assert 'href="https://example.test/images"' in html
     assert 'href="https://example.test/version"' in html
+    assert 'href="https://example.test/healthz"' in html
     assert "/i/" in html or "/i/{" in html
+    assert "legacy" in html.lower() or "{illust_id}" in html
 
 
 def test_docs_html_public_key_required_banner() -> None:
@@ -61,3 +63,4 @@ def test_docs_html_public_key_required_banner() -> None:
     assert "data.random_pick.backend" in html
     assert "/images" in html
     assert "/version" in html
+    assert "/healthz" in html
