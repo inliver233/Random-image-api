@@ -100,7 +100,10 @@ describe("RecommendationPage", () => {
             JSON.stringify({
               ok: true,
               request_id: "req_preview",
-              data: { debug: { picked_by: "quality_weighted" } },
+              data: {
+                debug: { picked_by: "quality_weighted" },
+                urls: { proxy: "/i/42.jpg" },
+              },
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
@@ -146,8 +149,9 @@ describe("RecommendationPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /预览一次随机结果/ }));
     expect(await screen.findByText(/请求ID:\s*req_preview/)).toBeInTheDocument();
     expect(await screen.findByText(/quality_weighted/)).toBeInTheDocument();
-    // Display uses resolvePublicApiUrl (absolute when VITE_API_BASE_URL set; relative otherwise).
-    expect(screen.getByText((content) => content.includes("请求链接:") && content.includes("/random?"))).toBeInTheDocument();
+    // Request + proxy links are browser-openable (absolute when VITE_API_BASE_URL set).
+    expect(screen.getByRole("link", { name: /\/random\?/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /\/i\/42\.jpg/ })).toBeInTheDocument();
   });
 
   it("appends api_key on preview link when debug key is set", async () => {
@@ -165,10 +169,10 @@ describe("RecommendationPage", () => {
     expect(await screen.findByText(/请求ID:\s*req_settings/)).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: /预览一次随机结果/ }));
     expect(await screen.findByText(/请求ID:\s*req_preview/)).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        (content) => content.includes("请求链接:") && content.includes("api_key=pk_rec_preview"),
-      ),
-    ).toBeInTheDocument();
+    const reqLink = screen.getByRole("link", { name: /\/random\?.*api_key=pk_rec_preview/ });
+    expect(reqLink.getAttribute("href") || "").toContain("api_key=pk_rec_preview");
+    const proxyLink = screen.getByRole("link", { name: /\/i\/42\.jpg.*api_key=pk_rec_preview/ });
+    expect(proxyLink.getAttribute("href") || "").toContain("/i/42.jpg");
+    expect(proxyLink.getAttribute("href") || "").toContain("api_key=pk_rec_preview");
   });
 });

@@ -508,12 +508,38 @@ export function RecommendationPage() {
                 <Typography.Text type="secondary">
                   {/* Browser-openable URL: attach ?api_key= when debug key is set. */}
                   请求链接:{" "}
-                  {withPublicApiKeyQuery(
-                    resolvePublicApiUrl(previewUrl),
-                    form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
-                  )}
+                  {(() => {
+                    const openable = withPublicApiKeyQuery(
+                      resolvePublicApiUrl(previewUrl),
+                      form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+                    );
+                    return (
+                      <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
+                        {openable}
+                      </Typography.Link>
+                    );
+                  })()}
                 </Typography.Text>
               ) : null}
+              {(() => {
+                // Preview JSON often includes urls.proxy (/i/... or edge); open with ?api_key= when required.
+                const data = previewBody?.data as Record<string, unknown> | undefined;
+                const urls = data?.urls as Record<string, unknown> | undefined;
+                const proxy = String(urls?.proxy || "").trim();
+                if (!proxy) return null;
+                const openable = withPublicApiKeyQuery(
+                  resolvePublicApiUrl(proxy),
+                  form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+                );
+                return (
+                  <Typography.Text type="secondary">
+                    代理链接:{" "}
+                    <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
+                      {openable}
+                    </Typography.Link>
+                  </Typography.Text>
+                );
+              })()}
               {previewBody ? (
                 <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                   {JSON.stringify(previewBody, null, 2)}
