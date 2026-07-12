@@ -8,6 +8,11 @@ import { QueryState } from "../admin/QueryState";
 import { asBool, asFloat, asInt, asObject } from "../admin/softCoerce";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
+import {
+  getPublicDebugApiKey,
+  publicApiKeyHeaders,
+  setPublicDebugApiKey,
+} from "../auth/publicApiKeyStorage";
 
 type SettingsResponse = {
   ok: true;
@@ -60,6 +65,8 @@ type FormValues = {
   dedup_author_penalty: number;
 
   preview_seed: string;
+  /** Optional public X-API-Key when PUBLIC_API_KEY_REQUIRED=true (sessionStorage). */
+  x_api_key: string;
 };
 
 const STRATEGY_VALUES = new Set<FormValues["random_strategy"]>(["quality", "random"]);
@@ -163,7 +170,8 @@ export function RecommendationPage() {
       dedup_strict: asBool(dedup.strict, DEFAULTS.dedup_strict),
       dedup_image_penalty: asFloat(dedup.image_penalty, DEFAULTS.dedup_image_penalty),
       dedup_author_penalty: asFloat(dedup.author_penalty, DEFAULTS.dedup_author_penalty),
-      preview_seed: "",
+      preview_seed: form.getFieldValue("preview_seed") || "",
+      x_api_key: form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
     });
   }, [form, query.data]);
 
@@ -244,9 +252,12 @@ export function RecommendationPage() {
 
   const preview = useMutation({
     mutationFn: async (values: FormValues) => {
+      setPublicDebugApiKey(values.x_api_key || "");
       const url = buildPreviewUrl(values.preview_seed);
       setPreviewUrl(url);
-      const data = await apiJson<RandomPreviewResponse>(url);
+      const data = await apiJson<RandomPreviewResponse>(url, {
+        headers: publicApiKeyHeaders(values.x_api_key),
+      });
       return { url, data };
     },
     onMutate: () => {
@@ -265,7 +276,11 @@ export function RecommendationPage() {
   });
 
   const onResetDefaults = () => {
-    form.setFieldsValue({ ...DEFAULTS, preview_seed: form.getFieldValue("preview_seed") || "" });
+    form.setFieldsValue({
+      ...DEFAULTS,
+      preview_seed: form.getFieldValue("preview_seed") || "",
+      x_api_key: form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+    });
   };
 
   const onAiHalf = () => {
@@ -467,6 +482,13 @@ export function RecommendationPage() {
               <Space wrap align="end">
                 <Form.Item label="种子（可选）" name="preview_seed">
                   <Input placeholder="例如: demo-seed-1" style={{ width: 280 }} />
+                </Form.Item>
+                <Form.Item
+                  label="调试 API Key（可选）"
+                  name="x_api_key"
+                  extra="PUBLIC_API_KEY_REQUIRED 开启时预览 /random 需要 X-API-Key；存 sessionStorage。"
+                >
+                  <Input.Password placeholder="留空=不发送" autoComplete="off" style={{ width: 280 }} />
                 </Form.Item>
                 <Button onClick={() => preview.mutate(form.getFieldsValue(true))} loading={preview.isPending}>
                   预览一次随机结果

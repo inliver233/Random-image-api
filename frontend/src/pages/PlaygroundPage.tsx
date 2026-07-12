@@ -5,9 +5,16 @@ import { useLocation } from "react-router-dom";
 
 import { ApiError, type ApiErrorBody, apiFetch, apiJson, formatApiErrorMessage } from "../api/client";
 import { requestIdFromError } from "../admin/errors";
+import {
+  getPublicDebugApiKey,
+  publicApiKeyHeaders,
+  setPublicDebugApiKey,
+} from "../auth/publicApiKeyStorage";
 
 type PlaygroundFormValues = {
   format: "image" | "json" | "redirect";
+  /** Optional public X-API-Key when PUBLIC_API_KEY_REQUIRED=true (sessionStorage). */
+  x_api_key: string;
   attempts: number | null;
   seed: string;
   strategy: "default" | "quality" | "random";
@@ -146,16 +153,30 @@ function hintsFromError(err: unknown): { appliedFilters: Record<string, unknown>
   return appliedFilters || suggestions.length > 0 ? { appliedFilters, suggestions } : null;
 }
 
+/** Rebuild /random query for redirect→json fallback without broken ?& fragments. */
+export function rewriteRedirectFallbackUrl(url: string): string {
+  const qIndex = String(url || "").indexOf("?");
+  const path = qIndex >= 0 ? url.slice(0, qIndex) : url;
+  const qs = qIndex >= 0 ? url.slice(qIndex + 1) : "";
+  const sp = new URLSearchParams(qs);
+  sp.delete("redirect");
+  sp.set("format", "json");
+  const next = sp.toString();
+  return next ? `${path}?${next}` : path;
+}
+
 async function fetchPlayground(values: PlaygroundFormValues): Promise<PlaygroundResult> {
+  setPublicDebugApiKey(values.x_api_key || "");
+  const headers = publicApiKeyHeaders(values.x_api_key);
   const url = buildRandomUrl(values);
 
   if (values.format === "json") {
-    const payload = await apiJson<RandomJsonResponse>(url);
+    const payload = await apiJson<RandomJsonResponse>(url, { headers });
     return { kind: "json", url, request_id: payload.request_id, payload };
   }
 
   if (values.format === "image") {
-    const resp = await apiFetch(url, { method: "GET" });
+    const resp = await apiFetch(url, { method: "GET", headers });
     const reqId = resp.headers.get("x-request-id") || resp.headers.get("x-request_id") || null;
     if (!resp.ok) throw await parseApiErrorFromResponse(resp);
 
@@ -164,7 +185,7 @@ async function fetchPlayground(values: PlaygroundFormValues): Promise<Playground
       throw new Error("当前浏览器不支持 URL.createObjectURL");
     }
     const src = URL.createObjectURL(blob);
-    const headers = pickHeaders(resp.headers, [
+    const hdrs = pickHeaders(resp.headers, [
       "content-type",
       "cache-control",
       "content-disposition",
@@ -172,16 +193,16 @@ async function fetchPlayground(values: PlaygroundFormValues): Promise<Playground
       "x-request-id",
     ]);
 
-    return { kind: "image", url, request_id: reqId, src, headers };
+    return { kind: "image", url, request_id: reqId, src, headers: hdrs };
   }
 
-  const resp = await apiFetch(url, { method: "GET", redirect: "manual" });
+  const resp = await apiFetch(url, { method: "GET", redirect: "manual", headers });
   const reqId = resp.headers.get("x-request-id") || resp.headers.get("x-request_id") || null;
   const location = resp.headers.get("location");
   if (location) return { kind: "redirect", url, request_id: reqId, location, note: null };
 
-  const fallbackUrl = url.replace(/[?&]redirect=1(&|$)/, "$1");
-  const payload = await apiJson<RandomJsonResponse>(fallbackUrl.replace(/([?&])format=image(&|$)/, "$1format=json$2"));
+  const fallbackUrl = rewriteRedirectFallbackUrl(url);
+  const payload = await apiJson<RandomJsonResponse>(fallbackUrl, { headers });
   const proxy = payload.data?.urls?.proxy || null;
   return {
     kind: "redirect",
@@ -243,7 +264,9 @@ export function PlaygroundPage() {
 
   const onCopyCurl = async () => {
     if (!url) return;
-    await copyText(`curl -i ${JSON.stringify(url)}`);
+    const key = String(form.getFieldValue("x_api_key") || getPublicDebugApiKey() || "").trim();
+    const headerPart = key ? ` -H ${JSON.stringify(`X-API-Key: ${key}`)}` : "";
+    await copyText(`curl -i${headerPart} ${JSON.stringify(url)}`);
   };
 
   const onOpen = () => {
@@ -265,6 +288,7 @@ export function PlaygroundPage() {
               layout="vertical"
               initialValues={{
                 format: "json",
+                x_api_key: getPublicDebugApiKey(),
                 attempts: null,
                 seed: "",
                 strategy: "default",
@@ -436,6 +460,14 @@ export function PlaygroundPage() {
               </Form.Item>
               <Form.Item label="创建时间终点（ISO）" name="created_to">
                 <Input placeholder="2024-12-31T23:59:59Z" />
+              </Form.Item>
+
+              <Form.Item
+                label="调试 API Key（可选）"
+                name="x_api_key"
+                extra="当服务端开启 PUBLIC_API_KEY_REQUIRED 时，公开 /random 需要 X-API-Key；保存在本标签页 sessionStorage，不会写入服务器。"
+              >
+                <Input.Password placeholder="留空=不发送 X-API-Key" autoComplete="off" />
               </Form.Item>
 
               <Button type="primary" htmlType="submit" loading={m.isPending} style={{ width: "100%" }}>

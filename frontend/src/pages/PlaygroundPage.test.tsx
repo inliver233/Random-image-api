@@ -14,6 +14,11 @@ describe("PlaygroundPage", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    try {
+      sessionStorage.clear();
+    } catch {
+      // ignore
+    }
   });
 
   beforeEach(() => {
@@ -67,6 +72,44 @@ describe("PlaygroundPage", () => {
     expect(await screen.findByText("随机接口调试")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "开始请求" }));
     expect(await screen.findByText(/请求ID:\s*req_play/)).toBeInTheDocument();
+  });
+
+  it("sends X-API-Key header when debug key is set", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/random") && url.includes("format=json")) {
+        const headers = new Headers(init?.headers || {});
+        expect(headers.get("X-API-Key")).toBe("debug-public-key-1234567890");
+        return new Response(
+          JSON.stringify({ ok: true, request_id: "req_play_key", data: { urls: { proxy: "/i/1.jpg" } } }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: false, code: "NOT_FOUND", message: "not found", request_id: "req_x", details: {} }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/admin/random"]}>
+          <Routes>
+            <Route path="/admin/random" element={<PlaygroundPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("随机接口调试")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("留空=不发送 X-API-Key"), {
+      target: { value: "debug-public-key-1234567890" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "开始请求" }));
+    expect(await screen.findByText(/请求ID:\s*req_play_key/)).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it("shows NO_MATCH hints in image mode and keeps message Chinese", async () => {
