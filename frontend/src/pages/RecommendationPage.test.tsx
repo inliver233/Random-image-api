@@ -13,9 +13,19 @@ describe("RecommendationPage", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    try {
+      sessionStorage.clear();
+    } catch {
+      // ignore
+    }
   });
 
   beforeEach(() => {
+    try {
+      sessionStorage.clear();
+    } catch {
+      // ignore
+    }
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -138,5 +148,27 @@ describe("RecommendationPage", () => {
     expect(await screen.findByText(/quality_weighted/)).toBeInTheDocument();
     // Display uses resolvePublicApiUrl (absolute when VITE_API_BASE_URL set; relative otherwise).
     expect(screen.getByText((content) => content.includes("请求链接:") && content.includes("/random?"))).toBeInTheDocument();
+  });
+
+  it("appends api_key on preview link when debug key is set", async () => {
+    const { setPublicDebugApiKey } = await import("../auth/publicApiKeyStorage");
+    setPublicDebugApiKey("pk_rec_preview");
+
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <RecommendationPage />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("推荐策略")).toBeInTheDocument();
+    expect(await screen.findByText(/请求ID:\s*req_settings/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /预览一次随机结果/ }));
+    expect(await screen.findByText(/请求ID:\s*req_preview/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        (content) => content.includes("请求链接:") && content.includes("api_key=pk_rec_preview"),
+      ),
+    ).toBeInTheDocument();
   });
 });

@@ -12,6 +12,7 @@ import {
   getPublicDebugApiKey,
   publicApiKeyHeaders,
   setPublicDebugApiKey,
+  withPublicApiKeyQuery,
 } from "../auth/publicApiKeyStorage";
 
 type SettingsResponse = {
@@ -505,7 +506,12 @@ export function RecommendationPage() {
               />
               {previewUrl ? (
                 <Typography.Text type="secondary">
-                  请求链接: {resolvePublicApiUrl(previewUrl)}
+                  {/* Browser-openable URL: attach ?api_key= when debug key is set. */}
+                  请求链接:{" "}
+                  {withPublicApiKeyQuery(
+                    resolvePublicApiUrl(previewUrl),
+                    form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+                  )}
                 </Typography.Text>
               ) : null}
               {previewBody ? (
