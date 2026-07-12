@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from app.core.errors import ApiError
 from app.core.image_edge import resolve_image_edge_redirect_url
@@ -33,7 +33,15 @@ from app.db.tag_store import resolve_tag_store
 router = APIRouter()
 
 
-@router.get("/random")
+@router.get(
+    "/random",
+    summary="Pick one random image",
+    description=(
+        "Public single pick. JSON formats omit `data.debug` unless `debug=1` "
+        "(surfaces dual-run `engine_status` such as `ok`, `skipped_circuit`, "
+        "`skipped_sticky`, `skipped_traffic`). Image/redirect modes ignore debug."
+    ),
+)
 async def random_image(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -41,7 +49,16 @@ async def random_image(
     format: str = "image",
     redirect: int = 0,
     attempts: int | None = None,
+    debug: int | None = Query(
+        default=None,
+        description=(
+            "When 1/true/on, include dual-run debug on JSON/simple_json responses "
+            "(`data.debug.engine_status`). Default off. Parsed via query only."
+        ),
+    ),
 ) -> Any:
+    # OpenAPI documents `debug`; runtime truthiness uses parse_public_debug_flag(query_params).
+    _ = debug
     filters = q.parse_filters(
         format=format,
         redirect=redirect,

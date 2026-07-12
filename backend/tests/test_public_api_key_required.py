@@ -218,6 +218,20 @@ def test_openapi_documents_public_api_key_security_schemes(tmp_path: Path, monke
         security = body.get("security") or []
         assert {"ApiKeyHeader": []} in security
         assert {"ApiKeyQuery": []} in security
+        # Dual-run honesty: ?debug=1 is documented on public pick endpoints.
+        paths = body.get("paths") or {}
+        random_get = (paths.get("/random") or {}).get("get") or {}
+        feed_get = (paths.get("/feed") or {}).get("get") or {}
+        random_params = {str(p.get("name")): p for p in (random_get.get("parameters") or []) if isinstance(p, dict)}
+        feed_params = {str(p.get("name")): p for p in (feed_get.get("parameters") or []) if isinstance(p, dict)}
+        assert "debug" in random_params
+        assert random_params["debug"].get("in") == "query"
+        assert "engine_status" in str(random_params["debug"].get("description") or "")
+        assert "debug" in feed_params
+        assert feed_params["debug"].get("in") == "query"
+        assert "engine_status" in str(feed_params["debug"].get("description") or "")
+        assert "engine_status" in str(random_get.get("description") or "")
+        assert "engine_status" in str(feed_get.get("description") or "")
 
 
 def test_favicon_exempt_when_public_api_key_required(tmp_path: Path, monkeypatch) -> None:

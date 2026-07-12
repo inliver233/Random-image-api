@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from app.core.errors import ApiError, ErrorCode
 from app.core.imgproxy import load_imgproxy_config_from_settings
@@ -30,17 +30,34 @@ _FEED_LIMIT_MAX = 32
 _FEED_LIMIT_DEFAULT = 12
 
 
-@router.get("/feed")
+@router.get(
+    "/feed",
+    summary="Batch pick for public browsers",
+    description=(
+        "Batch pick for /wtf. Items stay lean (no per-item debug). "
+        "With `debug=1`, envelope-only `data.debug` exposes dual-run batch honesty "
+        "(`engine_status`, `batch_count`, `topup_count`, `topup_skip_engine`)."
+    ),
+)
 async def feed_images(
     request: Request,
     background_tasks: BackgroundTasks,
     q: PublicRandomQuery = Depends(),
     limit: int = _FEED_LIMIT_DEFAULT,
+    debug: int | None = Query(
+        default=None,
+        description=(
+            "When 1/true/on, attach envelope dual-run debug (`data.debug.engine_status` etc.). "
+            "Default off; items never carry per-item debug."
+        ),
+    ),
 ) -> Any:
     """Batch pick for public browsers (/wtf). Same filters as /random; returns simple_json items.
 
     Partial results are OK when the catalog is smaller than ``limit``. Zero matches → NO_MATCH.
     """
+    # OpenAPI documents `debug`; runtime truthiness uses parse_public_debug_flag(query_params).
+    _ = debug
     try:
         limit_i = int(limit)
     except Exception as exc:
