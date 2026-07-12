@@ -8,7 +8,7 @@ from app.core.request_id import get_or_create_request_id, set_request_id_header,
 router = APIRouter()
 
 
-def _build_wtf_html(*, base_url: str) -> str:
+def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> str:
     base = (base_url or "").rstrip("/")
     if not base:
         base = ""
@@ -22,6 +22,8 @@ def _build_wtf_html(*, base_url: str) -> str:
     docs_url = u("/docs")
     status_url = u("/status")
     random_url = u("/random")
+    # Injected into client JS so /feed + /i can attach ?api_key= when required.
+    public_api_key_required_js = "true" if public_api_key_required else "false"
 
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -650,6 +652,10 @@ def _build_wtf_html(*, base_url: str) -> str:
           <button class="btn" type="button" id="clearTags">清空标签</button>
           <button class="btn" type="button" id="copyLink">复制当前链接</button>
           <span class="muted">提示：<code>@male</code>/<code>@female</code> 为 /wtf 端展开的“概要标签”。</span>
+          <label class="muted" id="apiKeyWrap" style="display:none; gap:6px; align-items:center;">
+            API Key
+            <input id="apiKeyInput" type="password" autocomplete="off" placeholder="PUBLIC_API_KEY_REQUIRED" style="min-width:180px;" />
+          </label>
         </div>
       </details>
     </div>
@@ -674,6 +680,9 @@ def _build_wtf_html(*, base_url: str) -> str:
     const toggle = document.getElementById("toggle");
     const viewSeg = document.getElementById("viewSeg");
     const viewButtons = Array.from(viewSeg.querySelectorAll("button[data-view]"));
+    // Server-injected: PUBLIC_API_KEY_REQUIRED (page itself is exempt; /feed and /i are not).
+    const PUBLIC_API_KEY_REQUIRED = {public_api_key_required_js};
+    const PUBLIC_API_KEY_STORAGE = "wtf_public_api_key";
 
     const r18Sel = document.getElementById("r18Sel");
     const oriSel = document.getElementById("oriSel");
@@ -893,6 +902,10 @@ def _build_wtf_html(*, base_url: str) -> str:
     baseParams.delete("format");
     baseParams.delete("redirect");
     baseParams.delete("t");
+    // Keep api_key out of filter state; managed via sessionStorage + withApiKey helpers.
+    const bootApiKey = String(qs.get("api_key") || qs.get("apiKey") || "").trim();
+    baseParams.delete("api_key");
+    baseParams.delete("apiKey");
     baseParams.delete(WTF_GENDER_KEY);
     baseParams.delete(WTF_MCOLS_KEY);
     baseParams.delete(WTF_MGAP_KEY);
@@ -1189,6 +1202,57 @@ def _build_wtf_html(*, base_url: str) -> str:
       return p;
     }}
 
+    function getPublicApiKey() {{
+      try {{
+        const el = document.getElementById("apiKeyInput");
+        if (el && String(el.value || "").trim()) return String(el.value || "").trim();
+      }} catch (e) {{}}
+      try {{
+        return String(sessionStorage.getItem(PUBLIC_API_KEY_STORAGE) || "").trim();
+      }} catch (e) {{
+        return "";
+      }}
+    }}
+
+    function setPublicApiKey(value) {{
+      const next = String(value || "").trim();
+      try {{
+        if (!next) sessionStorage.removeItem(PUBLIC_API_KEY_STORAGE);
+        else sessionStorage.setItem(PUBLIC_API_KEY_STORAGE, next);
+      }} catch (e) {{}}
+    }}
+
+    function withApiKeyOnParams(p) {{
+      if (!PUBLIC_API_KEY_REQUIRED) return p;
+      const key = getPublicApiKey();
+      if (key && !p.get("api_key")) p.set("api_key", key);
+      return p;
+    }}
+
+    function withApiKeyOnUrl(pathOrUrl) {{
+      const raw = String(pathOrUrl || "").trim();
+      if (!raw || !PUBLIC_API_KEY_REQUIRED) return raw;
+      const key = getPublicApiKey();
+      if (!key) return raw;
+      try {{
+        if (/^https?:\\/\\//i.test(raw)) {{
+          // Absolute edge URLs do not need the BFF public key.
+          return raw;
+        }}
+        const hashIdx = raw.indexOf("#");
+        const beforeHash = hashIdx >= 0 ? raw.slice(0, hashIdx) : raw;
+        const hash = hashIdx >= 0 ? raw.slice(hashIdx) : "";
+        const qIdx = beforeHash.indexOf("?");
+        const path = qIdx >= 0 ? beforeHash.slice(0, qIdx) : beforeHash;
+        const sp = new URLSearchParams(qIdx >= 0 ? beforeHash.slice(qIdx + 1) : "");
+        if (!sp.get("api_key")) sp.set("api_key", key);
+        const qs = sp.toString();
+        return path + (qs ? ("?" + qs) : "") + hash;
+      }} catch (e) {{
+        return raw;
+      }}
+    }}
+
     function buildFeedUrl(limit) {{
       const p = buildRandomParamsForRequest();
       // Strip single-pick-only knobs that /feed does not use.
@@ -1200,6 +1264,7 @@ def _build_wtf_html(*, base_url: str) -> str:
       n = Math.max(1, Math.min(32, Math.floor(n)));
       p.set("limit", String(n));
       p.set("t", String(Date.now()) + "_" + String(seq++));
+      withApiKeyOnParams(p);
       return "/feed?" + p.toString();
     }}
 
@@ -1213,6 +1278,10 @@ def _build_wtf_html(*, base_url: str) -> str:
         if (pc === "1") qp.set("pixiv_cat", "1");
         const mh = String(baseParams.get("pximg_mirror_host") || "").trim();
         if (mh) qp.set("pximg_mirror_host", mh);
+      }}
+      if (PUBLIC_API_KEY_REQUIRED) {{
+        const key = getPublicApiKey();
+        if (key && !qp.get("api_key")) qp.set("api_key", key);
       }}
       const s = qp.toString();
       return s ? ("?" + s) : "";
@@ -1246,14 +1315,14 @@ def _build_wtf_html(*, base_url: str) -> str:
       if (isAbsoluteHttpUrl(proxy)) {{
         return {{
           primary: proxy,
-          fallback: isRelativeProxyPath(local) ? forceLocalQuery(local, q) : "",
+          fallback: isRelativeProxyPath(local) ? withApiKeyOnUrl(forceLocalQuery(local, q)) : "",
         }};
       }}
       if (isRelativeProxyPath(proxy)) {{
-        return {{ primary: proxy + q, fallback: "" }};
+        return {{ primary: withApiKeyOnUrl(proxy + q), fallback: "" }};
       }}
       if (isRelativeProxyPath(local)) {{
-        return {{ primary: local + q, fallback: "" }};
+        return {{ primary: withApiKeyOnUrl(local + q), fallback: "" }};
       }}
       return null;
     }}
@@ -1411,6 +1480,7 @@ def _build_wtf_html(*, base_url: str) -> str:
         syncParamsFromControls({{ reset: true }});
       }});
       if (copyLinkBtn) copyLinkBtn.addEventListener("click", async () => {{
+        // Prefer shareable URL without secrets; key stays in sessionStorage for this tab.
         const text = String(window.location.href || "");
         try {{
           if (navigator.clipboard && navigator.clipboard.writeText) {{
@@ -1422,6 +1492,28 @@ def _build_wtf_html(*, base_url: str) -> str:
         }} catch (e) {{}}
         try {{ window.prompt("复制链接：", text); }} catch (e) {{}}
       }});
+
+      // Bootstrap public API key (query → sessionStorage) and show input when required.
+      try {{
+        const wrap = document.getElementById("apiKeyWrap");
+        const input = document.getElementById("apiKeyInput");
+        if (PUBLIC_API_KEY_REQUIRED && wrap) wrap.style.display = "inline-flex";
+        if (bootApiKey) setPublicApiKey(bootApiKey);
+        if (input) {{
+          const existing = getPublicApiKey();
+          if (existing) input.value = existing;
+          input.addEventListener("change", () => {{
+            setPublicApiKey(String(input.value || "").trim());
+          }});
+          input.addEventListener("keydown", (e) => {{
+            if (!e) return;
+            if (e.key === "Enter") {{
+              setPublicApiKey(String(input.value || "").trim());
+              syncParamsFromControls({{ reset: true }});
+            }}
+          }});
+        }}
+      }} catch (e) {{}}
 
       const quickToggle = (ta, tag) => {{
         if (!ta) return;
@@ -1893,7 +1985,12 @@ def _build_wtf_html(*, base_url: str) -> str:
 async def wtf_page(request: Request) -> HTMLResponse:
     rid = get_or_create_request_id(request)
     set_request_id_on_state(request, rid)
-    html = _build_wtf_html(base_url=str(getattr(request, "base_url", "") or "").rstrip("/"))
+    settings = getattr(request.app.state, "settings", None)
+    public_api_key_required = bool(getattr(settings, "public_api_key_required", False))
+    html = _build_wtf_html(
+        base_url=str(getattr(request, "base_url", "") or "").rstrip("/"),
+        public_api_key_required=public_api_key_required,
+    )
     resp = HTMLResponse(content=html, status_code=200, headers={"Cache-Control": "no-store"})
     set_request_id_header(resp, rid)
     return resp

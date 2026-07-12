@@ -3,7 +3,8 @@ import { Button, Layout, Menu, Popover, Space, Typography } from "antd";
 import React, { useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
-import { apiJson } from "../api/client";
+import { apiJson, resolvePublicApiUrl } from "../api/client";
+import { withPublicApiKeyQuery } from "../auth/publicApiKeyStorage";
 import { clearAdminToken, getAdminToken } from "../auth/tokenStorage";
 
 type NavItem = { key: string; label: string; external?: boolean; href?: string };
@@ -124,7 +125,11 @@ export function AdminLayout() {
             const key = String(e.key || "");
             const item = NAV_ITEMS.find((x) => x.key === key);
             if (item?.external && item.href) {
-              window.location.assign(String(item.href));
+              // Public pages live on the API origin (split FE/API deploys).
+              // Append api_key when present so /wtf can bootstrap sessionStorage.
+              window.location.assign(
+                withPublicApiKeyQuery(resolvePublicApiUrl(String(item.href))),
+              );
               return;
             }
             navigate(key);

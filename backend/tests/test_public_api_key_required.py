@@ -152,3 +152,36 @@ def test_public_api_key_accepts_query_param_fallback(tmp_path: Path, monkeypatch
         bad_query = client.get("/random?format=json&attempts=1&api_key=bad")
         assert bad_query.status_code == 401
 
+
+def test_wtf_page_injects_public_api_key_required_flag(tmp_path: Path, monkeypatch) -> None:
+    """/wtf HTML is exempt, but client JS must know when /feed and /i need api_key."""
+    db_path = tmp_path / "wtf_public_api_key.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("PUBLIC_API_KEY_REQUIRED", "true")
+    monkeypatch.setenv("PUBLIC_API_KEY_RPM", "0")
+    monkeypatch.setenv("PUBLIC_API_KEY_BURST", "0")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await app.state.engine.dispose()
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        # Page itself stays exempt from middleware key check.
+        resp = client.get("/wtf")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "const PUBLIC_API_KEY_REQUIRED = true;" in body
+        assert "function withApiKeyOnParams" in body
+        assert "function withApiKeyOnUrl" in body
+        assert 'id="apiKeyWrap"' in body
+        assert "wtf_public_api_key" in body
+
