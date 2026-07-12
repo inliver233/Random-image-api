@@ -84,14 +84,21 @@ def build_engine_quality_params(
     multipliers: Mapping[str, Any],
     freshness_half_life_days: float,
     velocity_smooth_days: float,
+    time_boost_enabled: bool = True,
 ) -> dict[str, Any] | None:
     if strategy_norm != "quality":
         return None
+    weights = dict(score_weights)
+    # Python score_image_with_time_boosts zeros freshness/velocity when time boost is off
+    # (seeded picks). Engine has no separate flag — zero those weights instead.
+    if not time_boost_enabled:
+        weights["freshness"] = 0.0
+        weights["bookmark_velocity"] = 0.0
     return {
         "samples": int(quality_samples_i),
         "pick_mode": pick_mode_raw,
         "temperature": float(temperature),
-        "weights": dict(score_weights),
+        "weights": weights,
         "multipliers": dict(multipliers),
         "freshness_half_life_days": float(freshness_half_life_days),
         "velocity_smooth_days": float(velocity_smooth_days),
@@ -171,6 +178,7 @@ def compose_engine_pick_payload(
     limit: int = 1,
     debug: bool = False,
     client_dedup_key: str | None = None,
+    time_boost_enabled: bool = True,
 ) -> dict[str, Any]:
     """Compose full /v1/pick body (filters + quality + seed) for single or batch picks."""
     engine_filters = build_engine_filters(
@@ -204,6 +212,7 @@ def compose_engine_pick_payload(
         multipliers=multipliers,
         freshness_half_life_days=float(freshness_half_life_days),
         velocity_smooth_days=float(velocity_smooth_days),
+        time_boost_enabled=bool(time_boost_enabled),
     )
     return build_engine_pick_payload(
         filters=engine_filters,

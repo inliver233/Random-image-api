@@ -584,10 +584,12 @@ func handlePick(w http.ResponseWriter, r *http.Request, st *engineState) {
 
 		scored := make([]scoredImg, 0, len(pool))
 		for _, im := range pool {
-			logit, dbg := qualityLogit(im, weights, multipliers, halfLife, velSmooth)
+			// Temperature scales score only; log(mult) is added after (Python parity).
+			logit, dbg := qualityLogit(im, weights, multipliers, halfLife, velSmooth, temp)
 			scored = append(scored, scoredImg{im: im, logit: logit, dbg: dbg})
 		}
-		chosen := pickFromScored(scored, pickMode, temp, req.Limit, rng)
+		// Logits already include /temperature; softmax must not divide again.
+		chosen := pickFromScored(scored, pickMode, req.Limit, rng)
 		picked = make([]indexImage, 0, len(chosen))
 		for _, c := range chosen {
 			picked = append(picked, c.im)
@@ -699,7 +701,7 @@ type scoredImg struct {
 	dbg   map[string]any
 }
 
-func pickFromScored(scored []scoredImg, pickMode string, temperature float64, limit int, rng *rand.Rand) []scoredImg {
+func pickFromScored(scored []scoredImg, pickMode string, limit int, rng *rand.Rand) []scoredImg {
 	if len(scored) == 0 {
 		return nil
 	}
@@ -713,9 +715,7 @@ func pickFromScored(scored []scoredImg, pickMode string, temperature float64, li
 		sort.Slice(scored, func(i, j int) bool { return scored[i].logit > scored[j].logit })
 		return scored[:limit]
 	}
-	if temperature <= 0 {
-		temperature = 1
-	}
+	// Softmax over already temperature-scaled logits (Python: exp(logit - max)).
 	out := make([]scoredImg, 0, limit)
 	remain := append([]scoredImg(nil), scored...)
 	for len(out) < limit && len(remain) > 0 {
@@ -728,7 +728,7 @@ func pickFromScored(scored []scoredImg, pickMode string, temperature float64, li
 		weights := make([]float64, len(remain))
 		sum := 0.0
 		for i, s := range remain {
-			w := math.Exp((s.logit - maxL) / temperature)
+			w := math.Exp(s.logit - maxL)
 			weights[i] = w
 			sum += w
 		}
@@ -754,7 +754,7 @@ func pickFromScored(scored []scoredImg, pickMode string, temperature float64, li
 	return out
 }
 
-func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLifeDays, velSmooth float64) (float64, map[string]any) {
+func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLifeDays, velSmooth, temperature float64) (float64, map[string]any) {
 	wBookmark := weightOr(weights, "bookmark", 4.0)
 	wView := weightOr(weights, "view", 0.5)
 	wComment := weightOr(weights, "comment", 2.0)
@@ -787,7 +787,8 @@ func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLi
 		vel = bm / den
 	}
 
-	logit := wBookmark*math.Log1p(bm) +
+	// Python score_image_with_time_boosts total (base + freshness_contrib + velocity_contrib).
+	score := wBookmark*math.Log1p(bm) +
 		wView*math.Log1p(vw) +
 		wComment*math.Log1p(cm) +
 		wPixels*math.Log1p(pixels/1_000_000.0) +
@@ -820,15 +821,21 @@ func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLi
 	if mult <= 0 {
 		mult = 1e-9
 	}
-	logit += math.Log(mult)
+	if temperature <= 0 {
+		temperature = 1
+	}
+	// Python: logit = score / temperature + log(multiplier)
+	logit := score/temperature + math.Log(mult)
 
 	dbg := map[string]any{
-		"logit":      logit,
-		"bookmark":   bm,
-		"view":       vw,
-		"freshness":  fresh,
-		"velocity":   vel,
-		"multiplier": mult,
+		"logit":       logit,
+		"score":       score,
+		"temperature": temperature,
+		"bookmark":    bm,
+		"view":        vw,
+		"freshness":   fresh,
+		"velocity":    vel,
+		"multiplier":  mult,
 	}
 	return logit, dbg
 }

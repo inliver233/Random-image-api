@@ -177,6 +177,7 @@ class RandomPickContext:
             limit=int(limit),
             debug=bool(debug),
             client_dedup_key=dedup_key,
+            time_boost_enabled=bool(self.time_boost_enabled),
         )
 
     async def try_engine_batch(

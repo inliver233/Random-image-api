@@ -326,9 +326,27 @@ func TestQualityBookmarkRatePerMille(t *testing.T) {
 	logit, _ := qualityLogit(im, map[string]float64{
 		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
 		"bookmark_rate": 1, "freshness": 0, "bookmark_velocity": 0,
-	}, map[string]float64{}, 21, 2)
+	}, map[string]float64{}, 21, 2, 1)
 	want := math.Log1p((10.0/100.0)*1000.0) // log1p(100)
 	if math.Abs(logit-want) > 1e-9 {
 		t.Fatalf("bookmark_rate logit want %v got %v", want, logit)
+	}
+}
+
+func TestQualityTemperatureScalesScoreNotMultiplier(t *testing.T) {
+	// Python: logit = score/T + log(mult). At T=2, mult=2 → score/2 + log(2).
+	ai := 1 // AI multiplier path when multipliers["ai"]=2
+	bm, vw := 10, 100
+	im := indexImage{BookmarkCount: &bm, ViewCount: &vw, AIType: &ai}
+	weights := map[string]float64{
+		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
+		"bookmark_rate": 1, "freshness": 0, "bookmark_velocity": 0,
+	}
+	mults := map[string]float64{"ai": 2, "non_ai": 1, "unknown_ai": 1}
+	logit, dbg := qualityLogit(im, weights, mults, 21, 2, 2)
+	score := math.Log1p(100.0) // only bookmark_rate term
+	want := score/2.0 + math.Log(2.0)
+	if math.Abs(logit-want) > 1e-9 {
+		t.Fatalf("logit want %v got %v dbg=%v", want, logit, dbg)
 	}
 }

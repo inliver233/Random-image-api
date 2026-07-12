@@ -96,15 +96,28 @@ type RandomEngineSnapshotResponse = {
   request_id: string;
 };
 
+type RandomEnginePickProbe = {
+  seed?: string;
+  strategy?: string;
+  engine_status?: string | null;
+  engine_image_id?: number | null;
+  in_catalog?: boolean | null;
+  python_quality_score?: number | null;
+  ok?: boolean;
+  detail?: string | null;
+};
+
 type RandomEngineCompareResponse = {
   ok: true;
   match: boolean;
+  cardinality_match?: boolean;
   python_filtered: number;
   engine_filtered: number;
   delta: number;
   engine_index_size: number;
   engine_revision: string;
   r18_strict: number;
+  pick_probe?: RandomEnginePickProbe | null;
   request_id: string;
 };
 
@@ -274,10 +287,19 @@ export function MaintenancePage() {
     },
     onSuccess: (data) => {
       setCompareResult(data);
-      const msg = data.match
-        ? `过滤基数一致 python=${data.python_filtered} engine=${data.engine_filtered}`
-        : `过滤基数不一致 delta=${data.delta}（python=${data.python_filtered} engine=${data.engine_filtered}）`;
-      engineAlerts.setSuccess(msg, data.request_id);
+      const card =
+        data.cardinality_match ?? data.delta === 0
+          ? `基数一致 python=${data.python_filtered} engine=${data.engine_filtered}`
+          : `基数不一致 delta=${data.delta}（python=${data.python_filtered} engine=${data.engine_filtered}）`;
+      const probe = data.pick_probe;
+      const probePart =
+        probe == null
+          ? ""
+          : probe.ok
+            ? `；pick_probe ok id=${probe.engine_image_id ?? "—"}`
+            : `；pick_probe 失败 detail=${probe.detail ?? "unknown"}`;
+      const overall = data.match ? "总体一致" : "总体不一致";
+      engineAlerts.setSuccess(`${overall}：${card}${probePart}`, data.request_id);
       void queryClient.invalidateQueries({ queryKey: ["admin", "maintenance", "random-engine"] });
     },
     onError: (err) => {
@@ -696,14 +718,21 @@ export function MaintenancePage() {
             loading={compareFilters.isPending}
             disabled={!engineUrlConfigured}
           >
-            对比过滤基数（默认 r18=0）
+            对比过滤（基数 + pick 探针，默认 r18=0）
           </Button>
         </Space>
 
         {compareResult ? (
           <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginTop: 16 }}>
-            <Descriptions.Item label="match">
+            <Descriptions.Item label="match（基数∧探针）">
               {compareResult.match ? <Tag color="green">一致</Tag> : <Tag color="red">不一致</Tag>}
+            </Descriptions.Item>
+            <Descriptions.Item label="cardinality_match">
+              {(compareResult.cardinality_match ?? compareResult.delta === 0) ? (
+                <Tag color="green">基数一致</Tag>
+              ) : (
+                <Tag color="red">基数不一致</Tag>
+              )}
             </Descriptions.Item>
             <Descriptions.Item label="Python filtered">{compareResult.python_filtered}</Descriptions.Item>
             <Descriptions.Item label="Engine filtered">{compareResult.engine_filtered}</Descriptions.Item>
@@ -711,6 +740,35 @@ export function MaintenancePage() {
             <Descriptions.Item label="Engine index">{compareResult.engine_index_size}</Descriptions.Item>
             <Descriptions.Item label="Engine revision">{compareResult.engine_revision || "—"}</Descriptions.Item>
             <Descriptions.Item label="r18_strict">{compareResult.r18_strict}</Descriptions.Item>
+            <Descriptions.Item label="pick_probe">
+              {compareResult.pick_probe ? (
+                <Space size={[4, 4]} wrap>
+                  {compareResult.pick_probe.ok ? (
+                    <Tag color="green">ok</Tag>
+                  ) : (
+                    <Tag color="red">fail</Tag>
+                  )}
+                  <Tag>
+                    status={compareResult.pick_probe.engine_status ?? "—"}
+                  </Tag>
+                  <Tag>id={compareResult.pick_probe.engine_image_id ?? "—"}</Tag>
+                  <Tag>
+                    in_catalog=
+                    {compareResult.pick_probe.in_catalog == null
+                      ? "—"
+                      : String(compareResult.pick_probe.in_catalog)}
+                  </Tag>
+                  {compareResult.pick_probe.detail ? (
+                    <Tag>{compareResult.pick_probe.detail}</Tag>
+                  ) : null}
+                  {typeof compareResult.pick_probe.python_quality_score === "number" ? (
+                    <Tag>py_quality={compareResult.pick_probe.python_quality_score.toFixed(4)}</Tag>
+                  ) : null}
+                </Space>
+              ) : (
+                "—"
+              )}
+            </Descriptions.Item>
           </Descriptions>
         ) : null}
 

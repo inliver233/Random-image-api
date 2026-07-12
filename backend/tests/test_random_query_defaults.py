@@ -203,13 +203,29 @@ def test_build_engine_filters_and_quality() -> None:
         quality_samples_i=8,
         pick_mode_raw="weighted",
         temperature=1.0,
-        score_weights={"bookmark": 1.0},
+        score_weights={"bookmark": 1.0, "freshness": 1.0, "bookmark_velocity": 1.2},
         multipliers={},
         freshness_half_life_days=30.0,
         velocity_smooth_days=7.0,
     )
     assert q is not None
     assert q["samples"] == 8
+    assert q["weights"]["freshness"] == 1.0
+    q_off = build_engine_quality_params(
+        strategy_norm="quality",
+        quality_samples_i=8,
+        pick_mode_raw="weighted",
+        temperature=1.0,
+        score_weights={"bookmark": 1.0, "freshness": 1.0, "bookmark_velocity": 1.2},
+        multipliers={},
+        freshness_half_life_days=30.0,
+        velocity_smooth_days=7.0,
+        time_boost_enabled=False,
+    )
+    assert q_off is not None
+    assert q_off["weights"]["freshness"] == 0.0
+    assert q_off["weights"]["bookmark_velocity"] == 0.0
+    assert q_off["weights"]["bookmark"] == 1.0
 
 
 class _Img:

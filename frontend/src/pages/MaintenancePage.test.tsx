@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -124,6 +124,30 @@ function fixtureFor(url: string, mode: FixtureMode): Response {
       request_id: "req_ports",
     });
   }
+  if (url.includes("/admin/api/maintenance/random-engine/compare-filters")) {
+    return json({
+      ok: true,
+      match: true,
+      cardinality_match: true,
+      python_filtered: 42,
+      engine_filtered: 42,
+      delta: 0,
+      engine_index_size: 100,
+      engine_revision: "rev-compare",
+      r18_strict: 1,
+      pick_probe: {
+        seed: "compare-filters-probe-v1",
+        strategy: "random",
+        engine_status: "OK",
+        engine_image_id: 7,
+        in_catalog: true,
+        python_quality_score: 1.2345,
+        ok: true,
+        detail: "engine_id_in_catalog",
+      },
+      request_id: "req_compare",
+    });
+  }
   if (url.includes("/admin/api/maintenance/random-engine")) {
     if (mode === "fallback") {
       return json({
@@ -236,5 +260,30 @@ describe("MaintenancePage", () => {
     // R2 ready tag (multiple "ready" tags exist across cards)
     expect(screen.getAllByText("ready").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("双跑切流风险")).not.toBeInTheDocument();
+  });
+
+  it("surfaces pick_probe on compare-filters success", async () => {
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <MaintenancePage />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("维护工具")).toBeInTheDocument();
+    const compareBtn = await screen.findByRole("button", {
+      name: "对比过滤（基数 + pick 探针，默认 r18=0）",
+    });
+    expect(compareBtn).not.toBeDisabled();
+    fireEvent.click(compareBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("总体一致：基数一致 python=42 engine=42；pick_probe ok id=7")).toBeInTheDocument();
+    });
+    expect(screen.getByText("match（基数∧探针）")).toBeInTheDocument();
+    expect(screen.getByText("基数一致")).toBeInTheDocument();
+    expect(screen.getByText("id=7")).toBeInTheDocument();
+    expect(screen.getByText("engine_id_in_catalog")).toBeInTheDocument();
+    expect(screen.getByText("py_quality=1.2345")).toBeInTheDocument();
   });
 });
