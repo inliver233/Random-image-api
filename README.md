@@ -94,7 +94,7 @@
 
 Admin → **CF Worker** 一页部署默认：register + secret + 启用业务语义（runtime overlay，无需手改 env 重启）。
 
-旧生产接管（F3）：`scripts/data/legacy-migrate-checklist.md` + `scripts/data/migrate_legacy_catalog.py`（SQLite 拷贝 / CSV / PG 流 / token 加密导入）。冷库 `x_restrict` 多为 NULL 时先关 `default_r18_strict` 或 hydrate。
+旧生产接管（F3）：`scripts/legacy/legacy-migrate-checklist.md` + `scripts/legacy/migrate_legacy_catalog.py`（SQLite 拷贝 / CSV / PG 流 / token 加密导入）。冷库 `x_restrict` 多为 NULL 时先关 `default_r18_strict` 或 hydrate。
 
 1. 准备环境变量
 

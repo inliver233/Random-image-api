@@ -9,7 +9,7 @@ Ops-only. **Default path (Admin FE / deploy API):** one-page deploy → auto reg
 - Residential: emergency-only when CF ready (`RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true`, default)
 - Origin for img-worker: **`i.pximg.net`** (not open whole-site proxy)
 - Multi-base: sticky pick + process-local **exponential** cooldown on failed bases (API + image pools)
-- Cold catalog (mostly `x_restrict` NULL): set `default_r18_strict=false` or hydrate before expecting default `/random` (see `scripts/data/legacy-migrate-checklist.md`)
+- Cold catalog (mostly `x_restrict` NULL): set `default_r18_strict=false` or hydrate before expecting default `/random` (see `scripts/legacy/legacy-migrate-checklist.md`)
 
 ## Product path (recommended)
 
