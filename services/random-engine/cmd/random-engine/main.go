@@ -883,12 +883,15 @@ func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLi
 	wFresh := weightOr(weights, "freshness", 1.0)
 	wVel := weightOr(weights, "bookmark_velocity", 1.2)
 
-	bm := float64(intOr(im.BookmarkCount, 0))
-	vw := float64(intOr(im.ViewCount, 0))
-	cm := float64(intOr(im.CommentCount, 0))
+	// Align Python as_nonneg_int for counters / dims used in quality_score.
+	bm := float64(nonnegInt(im.BookmarkCount))
+	vw := float64(nonnegInt(im.ViewCount))
+	cm := float64(nonnegInt(im.CommentCount))
 	pixels := 0.0
-	if im.Width != nil && im.Height != nil {
-		pixels = float64(*im.Width) * float64(*im.Height)
+	w := nonnegInt(im.Width)
+	h := nonnegInt(im.Height)
+	if w > 0 && h > 0 {
+		pixels = float64(w) * float64(h)
 	}
 	rate := 0.0
 	if vw > 0 {
@@ -1517,6 +1520,14 @@ func weightOr(m map[string]float64, k string, def float64) float64 {
 func intOr(p *int, def int) int {
 	if p == nil {
 		return def
+	}
+	return *p
+}
+
+// nonnegInt mirrors Python as_nonneg_int: nil / non-positive → 0.
+func nonnegInt(p *int) int {
+	if p == nil || *p <= 0 {
+		return 0
 	}
 	return *p
 }

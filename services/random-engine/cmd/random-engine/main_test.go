@@ -569,3 +569,49 @@ func TestFilterByMultiplierAllowSQLSetParity(t *testing.T) {
 		t.Fatalf("empty AI allow-set should drop all, got %d", len(empty))
 	}
 }
+
+func TestQualityScoreNonnegCountersAndPixels(t *testing.T) {
+	// Python as_nonneg_int: negative counters → 0; pixels only when width>0 && height>0.
+	neg, zero, posW, posH := -5, 0, 100, 200
+	im := indexImage{
+		BookmarkCount: &neg,
+		ViewCount:     &posW, // positive so rate path not the only concern
+		CommentCount:  &neg,
+		Width:         &neg,
+		Height:        &posH,
+	}
+	weights := map[string]float64{
+		"bookmark": 1, "view": 0, "comment": 1, "pixels": 1,
+		"bookmark_rate": 0, "freshness": 0, "bookmark_velocity": 0,
+	}
+	logit, _, ok := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, nil, nil, 0, 0)
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	// bm=0, cm=0, pixels=0 → score 0
+	if math.Abs(logit) > 1e-9 {
+		t.Fatalf("negative counters/dims should score 0, got %v", logit)
+	}
+
+	im.Width = &posW
+	im.Height = &zero
+	logit2, _, _ := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, nil, nil, 0, 0)
+	if math.Abs(logit2) > 1e-9 {
+		t.Fatalf("height<=0 should yield pixels=0, got %v", logit2)
+	}
+
+	im.Height = &posH
+	bm := 10
+	im.BookmarkCount = &bm
+	im.ViewCount = &posW
+	im.CommentCount = &zero
+	weightsPx := map[string]float64{
+		"bookmark": 0, "view": 0, "comment": 0, "pixels": 1,
+		"bookmark_rate": 0, "freshness": 0, "bookmark_velocity": 0,
+	}
+	logit3, _, _ := qualityLogit(im, weightsPx, map[string]float64{}, 21, 2, 1, nil, nil, 0, 0)
+	want := math.Log1p(float64(posW*posH) / 1_000_000.0)
+	if math.Abs(logit3-want) > 1e-9 {
+		t.Fatalf("pixels want %v got %v", want, logit3)
+	}
+}
