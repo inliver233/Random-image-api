@@ -216,11 +216,71 @@ def test_metrics_exposes_modular_readiness_when_edge_ready(tmp_path: Path, monke
             text,
         )
         assert re.search(
+            r'new_pixiv_module_readiness\{flag="secret_configured",module="r2_prewarm"\}\s+1(\.0+)?\b',
+            text,
+        )
+        assert re.search(
             r'new_pixiv_module_readiness\{flag="required",module="api_key_rate_limit"\}\s+1(\.0+)?\b',
             text,
         )
         assert re.search(
             r'new_pixiv_module_readiness\{flag="using_memory_fallback",module="api_key_rate_limit"\}\s+1(\.0+)?\b',
+            text,
+        )
+
+
+def test_metrics_base_url_count_raw_when_edge_not_ready(tmp_path: Path, monkeypatch) -> None:
+    """Configured bases still count on scrape when secret missing (not ready)."""
+    db_path = tmp_path / "metrics_edge_bases.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("IMAGE_EDGE_ENABLED", "true")
+    monkeypatch.setenv("IMAGE_EDGE_BASE_URLS", "https://img-a.example,https://img-b.example")
+    monkeypatch.delenv("IMAGE_EDGE_SECRET", raising=False)
+    monkeypatch.setenv("R2_PREWARM_ENABLED", "true")
+    monkeypatch.setenv("R2_PREWARM_URL", "https://prewarm.example/hook")
+    monkeypatch.delenv("R2_PREWARM_SECRET", raising=False)
+    monkeypatch.delenv("PREWARM_SECRET", raising=False)
+
+    app = create_app()
+
+    async def _migrate() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_migrate())
+
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        resp = client.get("/metrics", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+        text = resp.text
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="enabled",module="image_edge"\}\s+1(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="ready",module="image_edge"\}\s+0(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_base_url_count\{module="image_edge"\}\s+2(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="url_configured",module="r2_prewarm"\}\s+1(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="secret_configured",module="r2_prewarm"\}\s+0(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="ready",module="r2_prewarm"\}\s+0(\.0+)?\b',
             text,
         )
 

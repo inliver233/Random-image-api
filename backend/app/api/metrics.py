@@ -122,16 +122,19 @@ def _modular_readiness_from_request(request: Request) -> dict[str, Any]:
     if recent_dedup_active not in {"memory", "redis"}:
         recent_dedup_active = "memory"
 
+    # base_url_count uses configured raw bases when not ready (parity with /healthz + admin/status).
+    edge_raw_bases = list(getattr(settings, "image_edge_base_urls", None) or []) if settings is not None else []
+    cf_raw_bases = list(getattr(settings, "cf_api_proxy_base_urls", None) or []) if settings is not None else []
     return {
         "image_edge": {
             "enabled": bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False,
             "ready": edge_cfg is not None,
-            "base_url_count": len(edge_cfg.base_urls) if edge_cfg is not None else 0,
+            "base_url_count": len(edge_cfg.base_urls) if edge_cfg is not None else len(edge_raw_bases),
         },
         "cf_api_proxy": {
             "enabled": bool(getattr(settings, "cf_api_proxy_enabled", False)) if settings is not None else False,
             "ready": bool(cf_api_cfg is not None and cf_api_cfg.ready),
-            "base_url_count": len(cf_api_cfg.base_urls) if cf_api_cfg is not None else 0,
+            "base_url_count": len(cf_api_cfg.base_urls) if cf_api_cfg is not None else len(cf_raw_bases),
         },
         "r2_prewarm": {
             "enabled": bool(getattr(settings, "r2_prewarm_enabled", False)) if settings is not None else False,
@@ -145,6 +148,7 @@ def _modular_readiness_from_request(request: Request) -> dict[str, Any]:
                 if settings is not None
                 else False
             ),
+            "secret_configured": bool(r2_prewarm_secret(settings)) if settings is not None else False,
         },
         "api_key_rate_limit": {
             "required": bool(getattr(settings, "public_api_key_required", False)) if settings is not None else False,

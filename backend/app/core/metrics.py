@@ -219,7 +219,7 @@ CIRCUIT_STATES: tuple[str, ...] = ("closed", "open", "half_open")
 MODULE_READINESS_FLAGS: dict[str, tuple[str, ...]] = {
     "image_edge": ("enabled", "ready"),
     "cf_api_proxy": ("enabled", "ready"),
-    "r2_prewarm": ("enabled", "ready", "url_configured"),
+    "r2_prewarm": ("enabled", "ready", "url_configured", "secret_configured"),
     "api_key_rate_limit": ("required", "using_memory_fallback", "redis_url_configured"),
     "job_queue": ("implemented",),
     "recent_dedup": ("using_memory_fallback",),
@@ -436,7 +436,12 @@ def set_modular_readiness_snapshot(snapshot: dict[str, Any] | None) -> None:
         {
           "image_edge": {"enabled": bool, "ready": bool, "base_url_count": int},
           "cf_api_proxy": {"enabled": bool, "ready": bool, "base_url_count": int},
-          "r2_prewarm": {"enabled": bool, "ready": bool, "url_configured": bool},
+          "r2_prewarm": {
+              "enabled": bool,
+              "ready": bool,
+              "url_configured": bool,
+              "secret_configured": bool,
+          },
           "api_key_rate_limit": {
               "required": bool,
               "using_memory_fallback": bool,

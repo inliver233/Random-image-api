@@ -179,17 +179,31 @@ async def healthz(request: Request) -> Any:
         ).strip().lower()
         if recent_dedup_active not in {"memory", "redis"}:
             recent_dedup_active = "memory"
+        # base_url_count uses configured raw bases when not ready (parity with admin/status).
+        edge_raw_bases = (
+            list(getattr(settings, "image_edge_base_urls", None) or []) if settings is not None else []
+        )
+        cf_raw_bases = (
+            list(getattr(settings, "cf_api_proxy_base_urls", None) or []) if settings is not None else []
+        )
+        edge_has_secret = (
+            bool(str(getattr(settings, "image_edge_secret", "") or "").strip()) if settings is not None else False
+        )
+        cf_has_secret = (
+            bool(str(getattr(settings, "cf_api_proxy_secret", "") or "").strip()) if settings is not None else False
+        )
         modules = {
             "image_edge": {
                 "enabled_flag": bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False,
                 "ready": edge_cfg is not None,
-                "base_url_count": len(edge_cfg.base_urls) if edge_cfg is not None else 0,
+                "base_url_count": len(edge_cfg.base_urls) if edge_cfg is not None else len(edge_raw_bases),
+                "has_secret": edge_has_secret,
             },
             "cf_api_proxy": {
                 "enabled_flag": bool(getattr(settings, "cf_api_proxy_enabled", False)) if settings is not None else False,
                 "ready": bool(cf_api_cfg is not None and cf_api_cfg.ready),
-                "base_url_count": len(cf_api_cfg.base_urls) if cf_api_cfg is not None else 0,
-                "has_secret": bool((cf_api_cfg.secret or "").strip()) if cf_api_cfg is not None else False,
+                "base_url_count": len(cf_api_cfg.base_urls) if cf_api_cfg is not None else len(cf_raw_bases),
+                "has_secret": cf_has_secret,
             },
             "r2_prewarm": {
                 # Parity with admin /maintenance/r2-prewarm: ready requires secret.
