@@ -7,7 +7,7 @@ import { PendingAlert } from "../admin/PendingAlert";
 import { QueryState } from "../admin/QueryState";
 import { asBool, asFloat, asInt, asObject } from "../admin/softCoerce";
 import { useActionAlerts } from "../admin/useActionAlerts";
-import { apiJson } from "../api/client";
+import { apiJson, resolvePublicApiUrl } from "../api/client";
 import {
   getPublicDebugApiKey,
   publicApiKeyHeaders,
@@ -503,7 +503,11 @@ export function RecommendationPage() {
                 errorRequestId={previewAlerts.errorRequestId}
                 requestIdPlacement="secondary"
               />
-              {previewUrl ? <Typography.Text type="secondary">请求链接: {previewUrl}</Typography.Text> : null}
+              {previewUrl ? (
+                <Typography.Text type="secondary">
+                  请求链接: {resolvePublicApiUrl(previewUrl)}
+                </Typography.Text>
+              ) : null}
               {previewBody ? (
                 <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                   {JSON.stringify(previewBody, null, 2)}

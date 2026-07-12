@@ -136,5 +136,7 @@ describe("RecommendationPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /预览一次随机结果/ }));
     expect(await screen.findByText(/请求ID:\s*req_preview/)).toBeInTheDocument();
     expect(await screen.findByText(/quality_weighted/)).toBeInTheDocument();
+    // Display uses resolvePublicApiUrl (absolute when VITE_API_BASE_URL set; relative otherwise).
+    expect(screen.getByText((content) => content.includes("请求链接:") && content.includes("/random?"))).toBeInTheDocument();
   });
 });
