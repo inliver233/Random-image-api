@@ -138,6 +138,13 @@ function fixtureFor(url: string, mode: FixtureMode): Response {
         index_empty: true,
         ready_for_traffic: false,
         cutover_warning: "engine index empty — push snapshot before cutover",
+        circuit: {
+          state: "closed",
+          consecutive_failures: 0,
+          open_remaining_s: 0,
+          failure_threshold: 5,
+          open_s: 30,
+        },
         request_id: "req_engine",
       });
     }
@@ -153,6 +160,13 @@ function fixtureFor(url: string, mode: FixtureMode): Response {
       index_empty: null,
       ready_for_traffic: false,
       cutover_warning: null,
+      circuit: {
+        state: "closed",
+        consecutive_failures: 0,
+        open_remaining_s: 0,
+        failure_threshold: 5,
+        open_s: 30,
+      },
       request_id: "req_engine",
     });
   }
@@ -199,6 +213,9 @@ describe("MaintenancePage", () => {
     expect(screen.getByText("双跑切流风险")).toBeInTheDocument();
     expect(screen.getByText("Engine 索引为空 — 切流前请先推送快照")).toBeInTheDocument();
     expect(screen.getByText("empty")).toBeInTheDocument();
+    // Dual-run circuit honesty (row + readiness tags both show circuit=closed)
+    expect(screen.getAllByText("circuit=closed").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("failures=0")).toBeInTheDocument();
   });
 
   it("renders ready modular ports and R2 when fully configured", async () => {

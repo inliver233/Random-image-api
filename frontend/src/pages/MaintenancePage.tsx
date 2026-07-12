@@ -16,6 +16,7 @@ const RANDOM_ENGINE_MESSAGE_ZH: Record<string, string> = {
   "random-engine filter-count failed": "Random Engine 过滤计数失败",
   "engine unreachable while dual-run traffic enabled": "双跑已开启但 Engine 不可达",
   "engine index empty — push snapshot before cutover": "Engine 索引为空 — 切流前请先推送快照",
+  "dual-run circuit open": "双跑熔断开启",
   "traffic_percent=0 (engine not receiving picks)": "traffic_percent=0（Engine 未接收选图流量）",
 };
 
@@ -23,7 +24,16 @@ function localizeRandomEngineMessage(raw: string | null | undefined): string | n
   if (!raw) return null;
   const text = String(raw).trim();
   if (!text) return null;
-  return RANDOM_ENGINE_MESSAGE_ZH[text] ?? text;
+  if (RANDOM_ENGINE_MESSAGE_ZH[text]) return RANDOM_ENGINE_MESSAGE_ZH[text];
+  // Dynamic ops string: dual-run circuit open (~Ns); picks fail-open to Python
+  const circuitOpen = text.match(/^dual-run circuit open \(~([\d.]+)s\); picks fail-open to Python$/i);
+  if (circuitOpen) {
+    return `双跑熔断开启（约 ${circuitOpen[1]}s）；选图 fail-open 回 Python`;
+  }
+  if (text.startsWith("dual-run circuit open")) {
+    return `双跑熔断开启${text.slice("dual-run circuit open".length)}`;
+  }
+  return text;
 }
 
 /** Prefer raw body.message so ZH map can match before generic code translation. */
@@ -68,6 +78,14 @@ type RandomEngineStatusResponse = {
   index_empty?: boolean | null;
   ready_for_traffic?: boolean;
   cutover_warning?: string | null;
+  /** Process dual-run circuit (closed / half_open / open). */
+  circuit?: {
+    state?: string;
+    consecutive_failures?: number;
+    open_remaining_s?: number;
+    failure_threshold?: number;
+    open_s?: number;
+  } | null;
   request_id: string;
 };
 
@@ -290,6 +308,16 @@ export function MaintenancePage() {
   const cutoverWarning = localizeRandomEngineMessage(
     typeof engine?.cutover_warning === "string" ? engine.cutover_warning : null,
   );
+  const circuitState =
+    engine?.circuit && typeof engine.circuit.state === "string" ? String(engine.circuit.state) : null;
+  const circuitFailures =
+    engine?.circuit && typeof engine.circuit.consecutive_failures === "number"
+      ? engine.circuit.consecutive_failures
+      : null;
+  const circuitOpenRemaining =
+    engine?.circuit && typeof engine.circuit.open_remaining_s === "number"
+      ? engine.circuit.open_remaining_s
+      : null;
   const revision =
     health && typeof (health as { snapshot_revision?: unknown }).snapshot_revision === "string"
       ? String((health as { snapshot_revision: string }).snapshot_revision)
@@ -601,6 +629,25 @@ export function MaintenancePage() {
                     <Tag color="orange">not ready</Tag>
                   )}
                 </Descriptions.Item>
+                <Descriptions.Item label="双跑熔断">
+                  {circuitState ? (
+                    <Space size={[4, 4]} wrap>
+                      <Tag
+                        color={
+                          circuitState === "open" ? "red" : circuitState === "half_open" ? "orange" : "green"
+                        }
+                      >
+                        circuit={circuitState}
+                      </Tag>
+                      {circuitFailures != null ? <Tag>failures={circuitFailures}</Tag> : null}
+                      {circuitState === "open" && circuitOpenRemaining != null ? (
+                        <Tag color="orange">open_remaining≈{Math.ceil(circuitOpenRemaining)}s</Tag>
+                      ) : null}
+                    </Space>
+                  ) : (
+                    "—"
+                  )}
+                </Descriptions.Item>
                 <Descriptions.Item label="就绪检查">
                   <Space size={[4, 4]} wrap>
                     <Tag color={engine.enabled ? "green" : undefined}>enabled={String(Boolean(engine.enabled))}</Tag>
@@ -610,6 +657,19 @@ export function MaintenancePage() {
                     <Tag color={engine.healthy ? "green" : undefined}>healthy={String(Boolean(engine.healthy))}</Tag>
                     <Tag color={indexEmpty === false ? "green" : undefined}>
                       index_nonempty={String(indexEmpty === false)}
+                    </Tag>
+                    <Tag
+                      color={
+                        circuitState === "closed"
+                          ? "green"
+                          : circuitState === "open"
+                            ? "red"
+                            : circuitState
+                              ? "orange"
+                              : undefined
+                      }
+                    >
+                      circuit={circuitState ?? "unknown"}
                     </Tag>
                   </Space>
                 </Descriptions.Item>

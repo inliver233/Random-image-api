@@ -189,6 +189,13 @@ describe("DashboardPage", () => {
               index_empty: true,
               ready_for_traffic: false,
               cutover_warning: "traffic_percent=0 (engine not receiving picks)",
+              circuit: {
+                state: "open",
+                consecutive_failures: 5,
+                open_remaining_s: 12.4,
+                failure_threshold: 5,
+                open_s: 30,
+              },
               request_id: "req_engine",
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
@@ -287,6 +294,7 @@ describe("DashboardPage", () => {
     expect(await screen.findByText(/r2_prewarm=flag-on-not-ready/)).toBeInTheDocument();
     expect(await screen.findByText(/engine=enabled-not-ready/)).toBeInTheDocument();
     expect(await screen.findByText("engine index empty")).toBeInTheDocument();
+    expect(await screen.findByText(/circuit=open\s*~13s/)).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:.*req_modular/)).toBeInTheDocument();
   });
 

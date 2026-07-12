@@ -81,3 +81,61 @@ def test_admin_random_engine_status_empty_index_warning(tmp_path: Path, monkeypa
         assert body["index_empty"] is True
         assert body["ready_for_traffic"] is False
         assert "empty" in str(body.get("cutover_warning") or "").lower()
+        # Dual-run circuit snapshot is always present for ops honesty.
+        assert isinstance(body.get("circuit"), dict)
+        assert body["circuit"].get("state") in {"closed", "open", "half_open"}
+        assert "consecutive_failures" in body["circuit"]
+
+
+def test_admin_random_engine_status_circuit_open_warning(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "admin_engine_circuit.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
+    monkeypatch.setenv("RANDOM_ENGINE_ENABLED", "1")
+    monkeypatch.setenv("RANDOM_ENGINE_URL", "http://127.0.0.1:18091")
+    monkeypatch.setenv("RANDOM_ENGINE_TRAFFIC_PERCENT", "100")
+
+    async def _fake_health(*_a: Any, **_k: Any) -> dict[str, Any]:
+        return {"ok": True, "service": "random-engine", "index_size": 12, "snapshot_revision": "rev1"}
+
+    def _fake_circuit() -> dict[str, Any]:
+        # Isolate from process-global circuit mutations during app lifespan.
+        return {
+            "state": "open",
+            "consecutive_failures": 5,
+            "open_remaining_s": 18.0,
+            "failure_threshold": 5,
+            "open_s": 30,
+        }
+
+    monkeypatch.setattr("app.api.admin.maintenance.engine_health", _fake_health)
+    monkeypatch.setattr("app.api.admin.maintenance.engine_circuit_snapshot", _fake_circuit)
+
+    app = create_app()
+    with TestClient(app) as client:
+        token = client.post(
+            "/admin/api/login",
+            headers={"X-Request-Id": "req_test"},
+            json={"username": "admin", "password": "pass_test"},
+        ).json()["token"]
+        resp = client.get(
+            "/admin/api/maintenance/random-engine",
+            headers={"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["healthy"] is True
+        assert body["index_empty"] is False
+        assert body["ready_for_traffic"] is True
+        assert body["circuit"]["state"] == "open"
+        assert body["circuit"]["consecutive_failures"] == 5
+        assert float(body["circuit"]["open_remaining_s"]) == 18.0
+        warn = str(body.get("cutover_warning") or "")
+        assert "circuit open" in warn.lower()
+        assert "fail-open" in warn.lower()

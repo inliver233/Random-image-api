@@ -13,7 +13,12 @@ from app.core.cf_api_proxy import load_cf_api_proxy_config_from_settings
 from app.core.image_edge import load_image_edge_config_from_settings
 from app.core.r2_prewarm import r2_prewarm_enabled, r2_prewarm_secret, r2_prewarm_url
 from app.core.random_defaults import resolve_fail_cooldown_ms, resolve_r18_strict
-from app.core.random_engine_client import engine_filter_count, engine_health, random_engine_base_url
+from app.core.random_engine_client import (
+    engine_circuit_snapshot,
+    engine_filter_count,
+    engine_health,
+    random_engine_base_url,
+)
 from app.core.random_engine_pick import build_engine_filters
 from app.core.random_engine_sync import push_engine_snapshot
 from app.core.random_request import parse_random_filters
@@ -374,6 +379,8 @@ async def random_engine_status(
     if traffic_percent > 100:
         traffic_percent = 100
     timeout_ms = int(getattr(settings, "random_engine_timeout_ms", 800) or 800) if settings is not None else 800
+    # Process dual-run circuit (fail-open to Python pick when open).
+    circuit = engine_circuit_snapshot()
     payload: dict[str, Any] = {
         "enabled": enabled,
         "url": base or "",
@@ -385,6 +392,7 @@ async def random_engine_status(
         "index_empty": None,
         "ready_for_traffic": False,
         "cutover_warning": None,
+        "circuit": circuit,
     }
     if not base:
         if enabled:
@@ -418,6 +426,10 @@ async def random_engine_status(
             payload["cutover_warning"] = "engine unreachable while dual-run traffic enabled"
         elif index_size is not None and index_size <= 0:
             payload["cutover_warning"] = "engine index empty — push snapshot before cutover"
+        elif str(circuit.get("state") or "") == "open":
+            payload["cutover_warning"] = (
+                f"dual-run circuit open (~{float(circuit.get('open_remaining_s') or 0):.0f}s); picks fail-open to Python"
+            )
     elif enabled and traffic_percent <= 0:
         payload["cutover_warning"] = "traffic_percent=0 (engine not receiving picks)"
     return admin_ok(request, payload=payload, request_id=rid)

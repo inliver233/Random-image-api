@@ -110,6 +110,12 @@ type RandomEngineStatusResponse = {
   index_empty?: boolean | null;
   ready_for_traffic?: boolean;
   cutover_warning?: string | null;
+  /** Process dual-run circuit (closed / half_open / open). */
+  circuit?: {
+    state?: string;
+    consecutive_failures?: number;
+    open_remaining_s?: number;
+  } | null;
   request_id: string;
 };
 
@@ -568,6 +574,23 @@ export function DashboardPage() {
                       <Tag>traffic={randomEngine.data.traffic_percent ?? 0}%</Tag>
                       {randomEngine.data.enabled && randomEngine.data.index_empty ? (
                         <Tag color="orange">engine index empty</Tag>
+                      ) : null}
+                      {randomEngine.data.circuit?.state ? (
+                        <Tag
+                          color={
+                            randomEngine.data.circuit.state === "open"
+                              ? "red"
+                              : randomEngine.data.circuit.state === "half_open"
+                                ? "orange"
+                                : undefined
+                          }
+                        >
+                          circuit={randomEngine.data.circuit.state}
+                          {randomEngine.data.circuit.state === "open" &&
+                          typeof randomEngine.data.circuit.open_remaining_s === "number"
+                            ? ` ~${Math.ceil(randomEngine.data.circuit.open_remaining_s)}s`
+                            : ""}
+                        </Tag>
                       ) : null}
                       {randomEngine.data.cutover_warning ? (
                         <Tag color="orange">cutover: {randomEngine.data.cutover_warning}</Tag>
