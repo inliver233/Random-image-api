@@ -144,6 +144,12 @@ class RandomPickContext:
         if dedup_key is None and bool(self.anti_repeat_enabled):
             dedup_key = "bff-anti-repeat"
 
+        # Soft penalties only when anti-repeat is on (matches Python pick_by_quality).
+        soft_imgs = self.recent_image_ids if bool(self.anti_repeat_enabled) else None
+        soft_auths = self.recent_author_ids if bool(self.anti_repeat_enabled) else None
+        img_pen = float(self.dedup_image_penalty) if bool(self.anti_repeat_enabled) else 0.0
+        auth_pen = float(self.dedup_author_penalty) if bool(self.anti_repeat_enabled) else 0.0
+
         return compose_engine_pick_payload(
             r18=int(filters.r18),
             r18_strict=int(self.r18_strict),
@@ -178,6 +184,10 @@ class RandomPickContext:
             debug=bool(debug),
             client_dedup_key=dedup_key,
             time_boost_enabled=bool(self.time_boost_enabled),
+            recent_image_ids=soft_imgs,
+            recent_author_ids=soft_auths,
+            dedup_image_penalty=img_pen,
+            dedup_author_penalty=auth_pen,
         )
 
     async def try_engine_batch(

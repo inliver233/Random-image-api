@@ -85,6 +85,10 @@ def build_engine_quality_params(
     freshness_half_life_days: float,
     velocity_smooth_days: float,
     time_boost_enabled: bool = True,
+    recent_image_ids: set[int] | list[int] | None = None,
+    recent_author_ids: set[int] | list[int] | None = None,
+    dedup_image_penalty: float = 0.0,
+    dedup_author_penalty: float = 0.0,
 ) -> dict[str, Any] | None:
     if strategy_norm != "quality":
         return None
@@ -94,7 +98,7 @@ def build_engine_quality_params(
     if not time_boost_enabled:
         weights["freshness"] = 0.0
         weights["bookmark_velocity"] = 0.0
-    return {
+    out: dict[str, Any] = {
         "samples": int(quality_samples_i),
         "pick_mode": pick_mode_raw,
         "temperature": float(temperature),
@@ -103,6 +107,26 @@ def build_engine_quality_params(
         "freshness_half_life_days": float(freshness_half_life_days),
         "velocity_smooth_days": float(velocity_smooth_days),
     }
+    # Soft anti-repeat (Python pick_by_quality logit penalties). Hard exclude is filters.exclude_image_ids;
+    # these ids/penalties still matter for authors and for recent images beyond the SQL exclude cap.
+    img_ids: list[int] = []
+    auth_ids: list[int] = []
+    try:
+        img_ids = sorted({int(x) for x in (recent_image_ids or []) if int(x) > 0})
+    except Exception:
+        img_ids = []
+    try:
+        auth_ids = sorted({int(x) for x in (recent_author_ids or []) if int(x) > 0})
+    except Exception:
+        auth_ids = []
+    if img_ids:
+        out["recent_image_ids"] = img_ids
+    if auth_ids:
+        out["recent_author_ids"] = auth_ids
+    if img_ids or auth_ids:
+        out["dedup_image_penalty"] = float(dedup_image_penalty)
+        out["dedup_author_penalty"] = float(dedup_author_penalty)
+    return out
 
 
 def build_engine_pick_payload(
@@ -179,6 +203,10 @@ def compose_engine_pick_payload(
     debug: bool = False,
     client_dedup_key: str | None = None,
     time_boost_enabled: bool = True,
+    recent_image_ids: set[int] | list[int] | None = None,
+    recent_author_ids: set[int] | list[int] | None = None,
+    dedup_image_penalty: float = 0.0,
+    dedup_author_penalty: float = 0.0,
 ) -> dict[str, Any]:
     """Compose full /v1/pick body (filters + quality + seed) for single or batch picks."""
     engine_filters = build_engine_filters(
@@ -213,6 +241,10 @@ def compose_engine_pick_payload(
         freshness_half_life_days=float(freshness_half_life_days),
         velocity_smooth_days=float(velocity_smooth_days),
         time_boost_enabled=bool(time_boost_enabled),
+        recent_image_ids=recent_image_ids,
+        recent_author_ids=recent_author_ids,
+        dedup_image_penalty=float(dedup_image_penalty),
+        dedup_author_penalty=float(dedup_author_penalty),
     )
     return build_engine_pick_payload(
         filters=engine_filters,

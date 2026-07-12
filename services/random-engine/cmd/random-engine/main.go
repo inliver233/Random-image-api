@@ -582,10 +582,15 @@ func handlePick(w http.ResponseWriter, r *http.Request, st *engineState) {
 		halfLife := floatFromAny(req.Quality["freshness_half_life_days"], 21.0)
 		velSmooth := floatFromAny(req.Quality["velocity_smooth_days"], 2.0)
 
+		imgPen := floatFromAny(req.Quality["dedup_image_penalty"], 0)
+		authPen := floatFromAny(req.Quality["dedup_author_penalty"], 0)
+		recentImgs := int64SetFromAny(req.Quality["recent_image_ids"])
+		recentAuths := int64SetFromAny(req.Quality["recent_author_ids"])
+
 		scored := make([]scoredImg, 0, len(pool))
 		for _, im := range pool {
 			// Temperature scales score only; log(mult) is added after (Python parity).
-			logit, dbg := qualityLogit(im, weights, multipliers, halfLife, velSmooth, temp)
+			logit, dbg := qualityLogit(im, weights, multipliers, halfLife, velSmooth, temp, recentImgs, recentAuths, imgPen, authPen)
 			scored = append(scored, scoredImg{im: im, logit: logit, dbg: dbg})
 		}
 		// Logits already include /temperature; softmax must not divide again.
@@ -754,7 +759,7 @@ func pickFromScored(scored []scoredImg, pickMode string, limit int, rng *rand.Ra
 	return out
 }
 
-func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLifeDays, velSmooth, temperature float64) (float64, map[string]any) {
+func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLifeDays, velSmooth, temperature float64, recentImageIDs, recentAuthorIDs map[int64]struct{}, imagePenalty, authorPenalty float64) (float64, map[string]any) {
 	wBookmark := weightOr(weights, "bookmark", 4.0)
 	wView := weightOr(weights, "view", 0.5)
 	wComment := weightOr(weights, "comment", 2.0)
@@ -830,6 +835,17 @@ func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLi
 	}
 	// Python: logit = score / temperature + log(multiplier)
 	logit := score/temperature + math.Log(mult)
+	// Soft anti-repeat (Python pick_by_quality): subtract penalties after base logit.
+	if imagePenalty != 0 && recentImageIDs != nil {
+		if _, ok := recentImageIDs[im.ID]; ok {
+			logit -= imagePenalty
+		}
+	}
+	if authorPenalty != 0 && recentAuthorIDs != nil && im.UserID != nil {
+		if _, ok := recentAuthorIDs[*im.UserID]; ok {
+			logit -= authorPenalty
+		}
+	}
 
 	dbg := map[string]any{
 		"logit":       logit,
@@ -1360,6 +1376,35 @@ func stringFromAny(v any, def string) string {
 	default:
 		return def
 	}
+}
+
+
+func int64SetFromAny(v any) map[int64]struct{} {
+	out := map[int64]struct{}{}
+	switch x := v.(type) {
+	case nil:
+		return out
+	case []any:
+		for _, el := range x {
+			id := int64FromAny(el, 0)
+			if id > 0 {
+				out[id] = struct{}{}
+			}
+		}
+	case []int64:
+		for _, id := range x {
+			if id > 0 {
+				out[id] = struct{}{}
+			}
+		}
+	case []int:
+		for _, id := range x {
+			if id > 0 {
+				out[int64(id)] = struct{}{}
+			}
+		}
+	}
+	return out
 }
 
 func mapFromAny(v any) map[string]float64 {

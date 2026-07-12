@@ -295,3 +295,29 @@ def test_dual_run_vector_plan_injects_bff_anti_repeat_dedup_key() -> None:
     plan_off = _minimal_plan(anti_repeat_enabled=False)
     body_off = plan_off.build_engine_payload(filters=filters, limit=1)
     assert "client_dedup_key" not in body_off
+
+
+def test_dual_run_vector_plan_quality_soft_penalties() -> None:
+    filters = _parse()
+    plan = _minimal_plan(anti_repeat_enabled=True, recent_exclude=[5, 8])
+    # Force quality strategy + non-zero penalties for soft anti-repeat parity.
+    plan.strategy_norm = "quality"
+    plan.dedup_image_penalty = 2.0
+    plan.dedup_author_penalty = 1.0
+    plan.recent_author_ids = {99}
+    plan.score_weights = {"bookmark": 1.0}
+    body = plan.build_engine_payload(filters=filters, exclude_image_ids=[5], limit=1)
+    q = body["quality"]
+    assert q["recent_image_ids"] == [5, 8]
+    assert q["recent_author_ids"] == [99]
+    assert q["dedup_image_penalty"] == 2.0
+    assert q["dedup_author_penalty"] == 1.0
+
+    plan_off = _minimal_plan(anti_repeat_enabled=False, recent_exclude=[5])
+    plan_off.strategy_norm = "quality"
+    plan_off.dedup_image_penalty = 2.0
+    plan_off.recent_image_ids = {5}
+    plan_off.score_weights = {"bookmark": 1.0}
+    body_off = plan_off.build_engine_payload(filters=filters, limit=1)
+    assert "recent_image_ids" not in body_off["quality"]
+    assert "dedup_image_penalty" not in body_off["quality"]

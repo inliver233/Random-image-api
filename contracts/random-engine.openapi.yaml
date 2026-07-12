@@ -207,6 +207,26 @@ components:
         multipliers:
           type: object
           additionalProperties: { type: number }
+        freshness_half_life_days:
+          type: number
+          description: "Aligns Python score_image_with_time_boosts half-life (days)"
+        velocity_smooth_days:
+          type: number
+          description: "Aligns Python velocity smooth days"
+        recent_image_ids:
+          type: array
+          items: { type: integer }
+          description: "Soft anti-repeat: subtract dedup_image_penalty from logit when id matches"
+        recent_author_ids:
+          type: array
+          items: { type: integer }
+          description: "Soft anti-repeat: subtract dedup_author_penalty when user_id matches"
+        dedup_image_penalty:
+          type: number
+          description: "Python pick_by_quality image soft penalty (logit units)"
+        dedup_author_penalty:
+          type: number
+          description: "Python pick_by_quality author soft penalty (logit units)"
     PickItem:
       type: object
       required: [id, illust_id, page_index, ext, edge_path]

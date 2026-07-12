@@ -327,7 +327,7 @@ func TestQualityBookmarkRatePerMille(t *testing.T) {
 	logit, _ := qualityLogit(im, map[string]float64{
 		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
 		"bookmark_rate": 1, "freshness": 0, "bookmark_velocity": 0,
-	}, map[string]float64{}, 21, 2, 1)
+	}, map[string]float64{}, 21, 2, 1, nil, nil, 0, 0)
 	want := math.Log1p((10.0/100.0)*1000.0) // log1p(100)
 	if math.Abs(logit-want) > 1e-9 {
 		t.Fatalf("bookmark_rate logit want %v got %v", want, logit)
@@ -344,7 +344,7 @@ func TestQualityTemperatureScalesScoreNotMultiplier(t *testing.T) {
 		"bookmark_rate": 1, "freshness": 0, "bookmark_velocity": 0,
 	}
 	mults := map[string]float64{"ai": 2, "non_ai": 1, "unknown_ai": 1}
-	logit, dbg := qualityLogit(im, weights, mults, 21, 2, 2)
+	logit, dbg := qualityLogit(im, weights, mults, 21, 2, 2, nil, nil, 0, 0)
 	score := math.Log1p(100.0) // only bookmark_rate term
 	want := score/2.0 + math.Log(2.0)
 	if math.Abs(logit-want) > 1e-9 {
@@ -361,9 +361,35 @@ func TestQualityVelocityDenomFloor(t *testing.T) {
 		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
 		"bookmark_rate": 0, "freshness": 0, "bookmark_velocity": 1,
 	}
-	logit, dbg := qualityLogit(im, weights, map[string]float64{}, 21, 0.1, 1)
+	logit, dbg := qualityLogit(im, weights, map[string]float64{}, 21, 0.1, 1, nil, nil, 0, 0)
 	want := math.Log1p(10.0 / 1.0)
 	if math.Abs(logit-want) > 1e-6 {
 		t.Fatalf("velocity logit want %v got %v dbg=%v", want, logit, dbg)
+	}
+}
+
+func TestQualitySoftDedupPenalties(t *testing.T) {
+	// Python pick_by_quality: logit -= image/author penalty after base logit.
+	bm, vw := 10, 100
+	uid := int64(42)
+	im := indexImage{ID: 7, BookmarkCount: &bm, ViewCount: &vw, UserID: &uid}
+	weights := map[string]float64{
+		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
+		"bookmark_rate": 1, "freshness": 0, "bookmark_velocity": 0,
+	}
+	base, _ := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, nil, nil, 0, 0)
+	recentImg := map[int64]struct{}{7: {}}
+	recentAuth := map[int64]struct{}{42: {}}
+	withImg, _ := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, recentImg, nil, 2.0, 0)
+	if math.Abs((base-2.0)-withImg) > 1e-9 {
+		t.Fatalf("image penalty: base %v penalized %v", base, withImg)
+	}
+	withAuth, _ := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, nil, recentAuth, 0, 1.5)
+	if math.Abs((base-1.5)-withAuth) > 1e-9 {
+		t.Fatalf("author penalty: base %v penalized %v", base, withAuth)
+	}
+	both, _ := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, recentImg, recentAuth, 2.0, 1.5)
+	if math.Abs((base-3.5)-both) > 1e-9 {
+		t.Fatalf("both penalties: base %v penalized %v", base, both)
 	}
 }

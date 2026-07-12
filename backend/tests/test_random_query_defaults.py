@@ -226,6 +226,25 @@ def test_build_engine_filters_and_quality() -> None:
     assert q_off["weights"]["freshness"] == 0.0
     assert q_off["weights"]["bookmark_velocity"] == 0.0
     assert q_off["weights"]["bookmark"] == 1.0
+    q_soft = build_engine_quality_params(
+        strategy_norm="quality",
+        quality_samples_i=8,
+        pick_mode_raw="weighted",
+        temperature=1.0,
+        score_weights={"bookmark": 1.0},
+        multipliers={},
+        freshness_half_life_days=30.0,
+        velocity_smooth_days=7.0,
+        recent_image_ids={9, 3, 3},
+        recent_author_ids={2, 1},
+        dedup_image_penalty=2.0,
+        dedup_author_penalty=1.5,
+    )
+    assert q_soft is not None
+    assert q_soft["recent_image_ids"] == [3, 9]
+    assert q_soft["recent_author_ids"] == [1, 2]
+    assert q_soft["dedup_image_penalty"] == 2.0
+    assert q_soft["dedup_author_penalty"] == 1.5
 
 
 class _Img:
