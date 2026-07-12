@@ -300,7 +300,7 @@ export function TokensPage() {
           createForm.resetFields();
         }}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<CreateTokenFormValues>
           form={createForm}
@@ -357,7 +357,7 @@ export function TokensPage() {
         open={editOpen}
         onCancel={closeEdit}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<EditTokenFormValues>
           form={editForm}

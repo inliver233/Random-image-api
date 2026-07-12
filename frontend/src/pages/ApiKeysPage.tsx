@@ -197,7 +197,7 @@ export function ApiKeysPage() {
         okText="创建"
         cancelText="取消"
         confirmLoading={createKey.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={createForm}

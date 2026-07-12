@@ -459,7 +459,7 @@ export function BindingsPage() {
           overrideForm.resetFields();
         }}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<OverrideFormValues>
           form={overrideForm}

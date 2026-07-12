@@ -391,7 +391,7 @@ export function ProxyPoolsPage() {
           createForm.resetFields();
         }}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<CreatePoolFormValues>
           form={createForm}
@@ -427,7 +427,7 @@ export function ProxyPoolsPage() {
           setEditingPool(null);
         }}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<EditPoolFormValues>
           form={editForm}
@@ -509,7 +509,7 @@ export function ProxyPoolsPage() {
             </Space>
           </Space>
         }
-        destroyOnClose
+        destroyOnHidden
       >
         {endpoints.isLoading && endpointRows.length === 0 ? (
           <Skeleton active />
