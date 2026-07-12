@@ -123,6 +123,47 @@ def _api_key_rate_limit_public_snapshot(request: Request, settings: Any) -> dict
     }
 
 
+def _job_queue_public_snapshot(request: Request, settings: Any) -> dict[str, Any]:
+    """Local job-queue port honesty for public /status (same as /healthz modules.job_queue)."""
+    requested = (
+        str(getattr(settings, "job_queue_backend", "sqlite") or "sqlite").strip().lower()
+        if settings is not None
+        else "sqlite"
+    )
+    if requested not in {"sqlite", "memory"}:
+        # Settings rejects redis/nats at boot; normalize any other label for honesty.
+        requested = "sqlite"
+    job_queue = getattr(request.app.state, "job_queue", None)
+    backend = str(getattr(job_queue, "backend", "sqlite") or "sqlite")
+    return {
+        "backend": backend,
+        "requested": requested,
+        "implemented": requested in {"sqlite", "memory"},
+    }
+
+
+def _recent_dedup_public_snapshot(request: Request, settings: Any) -> dict[str, Any]:
+    """Local recent-dedup port honesty for public /status (same as /healthz modules.recent_dedup)."""
+    requested = (
+        str(getattr(settings, "recent_dedup_backend", "memory") or "memory").strip().lower()
+        if settings is not None
+        else "memory"
+    )
+    if requested not in {"memory", "redis"}:
+        requested = "memory"
+    recent = getattr(request.app.state, "recent_dedup", None)
+    backend = str(
+        getattr(recent, "active_backend", None) or getattr(recent, "backend", "memory") or "memory"
+    ).strip().lower()
+    if backend not in {"memory", "redis"}:
+        backend = "memory"
+    return {
+        "backend": backend,
+        "requested": requested,
+        "using_memory_fallback": requested == "redis" and backend == "memory",
+    }
+
+
 async def _query_gallery_stats(engine) -> dict[str, Any]:
     async def _op() -> dict[str, Any]:
         async with engine.connect() as conn:
@@ -270,6 +311,25 @@ def _build_status_html(
         rl_chip = f"api-key-rl: required · {rl_requested}→{rl_backend}"
     else:
         rl_chip = f"api-key-rl: required · {rl_backend}"
+
+    # Job queue chip (sqlite/memory only; redis/nats rejected at settings load).
+    jq = payload.get("job_queue") if isinstance(payload.get("job_queue"), dict) else {}
+    jq_backend = str(jq.get("backend") or "sqlite")
+    jq_requested = str(jq.get("requested") or "sqlite")
+    if jq_backend == jq_requested:
+        jq_chip = f"job-queue: {jq_backend}"
+    else:
+        jq_chip = f"job-queue: {jq_requested}→{jq_backend}"
+
+    # Recent dedup chip (memory default; redis fail-open).
+    rd = payload.get("recent_dedup") if isinstance(payload.get("recent_dedup"), dict) else {}
+    rd_backend = str(rd.get("backend") or "memory")
+    rd_requested = str(rd.get("requested") or "memory")
+    rd_fallback = bool(rd.get("using_memory_fallback"))
+    if rd_fallback:
+        rd_chip = f"recent-dedup: {rd_requested}→{rd_backend}"
+    else:
+        rd_chip = f"recent-dedup: {rd_backend}"
 
     json_url = u("/status.json")
     docs_url = u("/docs")
@@ -533,6 +593,8 @@ def _build_status_html(
         <span class="chip" title="CF API proxy config readiness (same as /healthz modules.cf_api_proxy; no secrets / no outbound worker probe)">{cf_chip}</span>
         <span class="chip" title="R2 prewarm config readiness (same as /healthz modules.r2_prewarm ready; no secrets / no webhook probe)">{r2_chip}</span>
         <span class="chip" title="Public API key rate-limit backend (same as /healthz modules.api_key_rate_limit; no Redis URL / no probe)">{rl_chip}</span>
+        <span class="chip" title="Job queue port (same as /healthz modules.job_queue; redis/nats rejected at boot)">{jq_chip}</span>
+        <span class="chip" title="Recent-dedup port (same as /healthz modules.recent_dedup; no Redis URL / no probe)">{rd_chip}</span>
       </div>
     </div>
 
@@ -691,6 +753,9 @@ async def status_json(request: Request) -> JSONResponse:
     payload["r2_prewarm"] = _r2_prewarm_public_snapshot(settings)
     # API-key rate-limit backend honesty (same as /healthz modules.api_key_rate_limit; no Redis URL/probe).
     payload["api_key_rate_limit"] = _api_key_rate_limit_public_snapshot(request, settings)
+    # Modular ports (same shapes as /healthz modules.job_queue / recent_dedup).
+    payload["job_queue"] = _job_queue_public_snapshot(request, settings)
+    payload["recent_dedup"] = _recent_dedup_public_snapshot(request, settings)
 
     try:
         payload.update(await _query_gallery_stats(engine))
@@ -728,6 +793,8 @@ async def status_page(request: Request) -> HTMLResponse:
     payload["cf_api_proxy"] = _cf_api_proxy_public_snapshot(settings)
     payload["r2_prewarm"] = _r2_prewarm_public_snapshot(settings)
     payload["api_key_rate_limit"] = _api_key_rate_limit_public_snapshot(request, settings)
+    payload["job_queue"] = _job_queue_public_snapshot(request, settings)
+    payload["recent_dedup"] = _recent_dedup_public_snapshot(request, settings)
 
     try:
         payload.update(await _query_gallery_stats(engine))

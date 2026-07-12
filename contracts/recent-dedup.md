@@ -41,8 +41,8 @@ Public delivery side-effects adopt the port progressively:
 
 ## Ops
 
-- `/healthz` → `modules.recent_dedup`:
-  - `backend` = active store (`memory` / `redis`)
-  - `requested` = `Settings.recent_dedup_backend` (`RECENT_DEDUP_BACKEND`)
-  - `using_memory_fallback` = true when redis requested but active is memory (missing `REDIS_URL` / connect fail-open at boot)
-- `GET /admin/api/maintenance/modular-ports` → `configured_backend` vs `active_backend` + `using_memory_fallback` (same honesty shape; field names differ for admin UI)
+| Surface | Notes |
+| --- | --- |
+| `/healthz` → `modules.recent_dedup` | `backend` (active), `requested` (Settings), `using_memory_fallback` — no Redis probe / secrets |
+| `/status.json` → `data.recent_dedup` | Same public shape; `/status` HTML chip mirrors it (no Redis URL / no probe) |
+| `GET /admin/api/maintenance/modular-ports` | `configured_backend` vs `active_backend` + `using_memory_fallback` (same honesty shape; field names differ for admin UI) |
