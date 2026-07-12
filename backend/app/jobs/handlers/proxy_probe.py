@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
-import httpx
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.coerce import format_exc, truncate_text
 from app.core.config import Settings, load_settings
+from app.core.http_client import acquire_proxy_client
 from app.core.metrics import PROXY_PROBE_LATENCY_MS
 from app.core.proxy_health import (
     PROBE_BLACKLIST_AFTER_FAILURES,
@@ -65,12 +65,16 @@ async def _default_probe(target: ProbeTarget, cfg: ProbeConfig) -> ProbeResult:
     err: str | None = None
 
     try:
-        async with httpx.AsyncClient(
-            proxy=target.proxy_uri,
-            timeout=httpx.Timeout(cfg.timeout_s, connect=min(10.0, cfg.timeout_s)),
-            follow_redirects=True,
-        ) as client:
+        # Reuse process-local proxy client pool (same as residential stream/oauth).
+        client, owns_client = await acquire_proxy_client(
+            target.proxy_uri,
+            timeout_s=float(cfg.timeout_s),
+        )
+        try:
             resp = await client.get(cfg.url)
+        finally:
+            if owns_client:
+                await client.aclose()
         ok = int(resp.status_code) < 400
         if not ok:
             err = f"status={resp.status_code}"
