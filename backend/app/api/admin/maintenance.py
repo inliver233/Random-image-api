@@ -28,6 +28,14 @@ from app.core.random_request import parse_random_filters
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.db.random_pick_port import resolve_random_pick
+from app.db.jobs_cleanup import (
+    DEFAULT_JOBS_CHUNK_SIZE,
+    DEFAULT_JOBS_KEEP_DAYS,
+    DEFAULT_JOBS_MAX_DELETE_ROWS,
+    TERMINAL_JOB_STATUSES,
+    cleanup_jobs,
+    preview_jobs_cleanup,
+)
 from app.db.request_logs_cleanup import (
     DEFAULT_REQUEST_LOGS_CHUNK_SIZE,
     DEFAULT_REQUEST_LOGS_KEEP_DAYS,
@@ -40,24 +48,29 @@ from app.db.session import resolve_sessionmaker
 router = APIRouter()
 
 
-
-async def _load_cleanup_request_logs_json(request: Request) -> dict[str, Any]:
+async def _load_cleanup_batch_json(
+    request: Request,
+    *,
+    default_keep_days: int,
+    default_max_delete_rows: int,
+    default_chunk_size: int,
+) -> dict[str, Any]:
     data = await load_json_object(request)
 
     keep_days = parse_int_in_range(
-        data.get("keep_days", DEFAULT_REQUEST_LOGS_KEEP_DAYS),
+        data.get("keep_days", default_keep_days),
         field="keep_days",
         min_value=0,
         max_value=36500,
     )
     max_delete_rows = parse_int_in_range(
-        data.get("max_delete_rows", DEFAULT_REQUEST_LOGS_MAX_DELETE_ROWS),
+        data.get("max_delete_rows", default_max_delete_rows),
         field="max_delete_rows",
         min_value=1,
         max_value=10_000_000,
     )
     chunk_size = parse_int_in_range(
-        data.get("chunk_size", DEFAULT_REQUEST_LOGS_CHUNK_SIZE),
+        data.get("chunk_size", default_chunk_size),
         field="chunk_size",
         min_value=1,
         max_value=100_000,
@@ -87,7 +100,12 @@ async def cleanup_request_logs_endpoint(
 ) -> dict[str, Any]:
     _ = _claims
     rid = get_or_create_request_id(request)
-    cfg = await _load_cleanup_request_logs_json(request)
+    cfg = await _load_cleanup_batch_json(
+        request,
+        default_keep_days=DEFAULT_REQUEST_LOGS_KEEP_DAYS,
+        default_max_delete_rows=DEFAULT_REQUEST_LOGS_MAX_DELETE_ROWS,
+        default_chunk_size=DEFAULT_REQUEST_LOGS_CHUNK_SIZE,
+    )
 
     engine = request.app.state.engine
     if bool(cfg["dry_run"]):
@@ -113,6 +131,67 @@ async def cleanup_request_logs_endpoint(
         "has_more": bool(result.has_more)}, request_id=rid)
 
 
+@router.post(
+    "/maintenance/jobs/cleanup",
+    summary="Cleanup terminal jobs",
+    description=(
+        "Delete or dry-run purge of old terminal `jobs` rows "
+        f"({', '.join(TERMINAL_JOB_STATUSES)} only). Never deletes pending/running/paused. "
+        "Body: `keep_days`, `max_delete_rows`, `chunk_size`, `dry_run`. "
+        "Production data plane (F0–F2): keep jobs table bounded under Postgres SLA."
+    ),
+)
+async def cleanup_jobs_endpoint(
+    request: Request,
+    _claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    _ = _claims
+    rid = get_or_create_request_id(request)
+    cfg = await _load_cleanup_batch_json(
+        request,
+        default_keep_days=DEFAULT_JOBS_KEEP_DAYS,
+        default_max_delete_rows=DEFAULT_JOBS_MAX_DELETE_ROWS,
+        default_chunk_size=DEFAULT_JOBS_CHUNK_SIZE,
+    )
+
+    engine = request.app.state.engine
+    if bool(cfg["dry_run"]):
+        preview = await preview_jobs_cleanup(
+            engine,
+            keep_days=int(cfg["keep_days"]),
+            max_delete_rows=int(cfg["max_delete_rows"]),
+        )
+        return admin_ok(
+            request,
+            payload={
+                "dry_run": True,
+                "cutoff": preview.cutoff,
+                "would_delete": int(preview.would_delete),
+                "has_more": bool(preview.has_more),
+                "terminal_statuses": list(TERMINAL_JOB_STATUSES),
+            },
+            request_id=rid,
+        )
+
+    result = await cleanup_jobs(
+        engine,
+        keep_days=int(cfg["keep_days"]),
+        max_delete_rows=int(cfg["max_delete_rows"]),
+        chunk_size=int(cfg["chunk_size"]),
+    )
+    return admin_ok(
+        request,
+        payload={
+            "dry_run": False,
+            "cutoff": result.cutoff,
+            "deleted": int(result.deleted),
+            "has_more": bool(result.has_more),
+            "terminal_statuses": list(TERMINAL_JOB_STATUSES),
+        },
+        request_id=rid,
+    )
+
+
 @router.get(
     "/maintenance/image-edge",
     summary="Image Edge readiness status",
@@ -133,18 +212,35 @@ async def image_edge_status(
     settings = getattr(request.app.state, "settings", None)
     engine = getattr(request.app.state, "engine", None)
     try:
-        from app.core.cf_pool_overlay import ensure_overlay_fresh, get_image_overlay_bases
+        from app.core.cf_pool_overlay import (
+            ensure_overlay_fresh,
+            get_image_overlay_bases,
+            get_image_overlay_enabled,
+            get_image_overlay_secret,
+            get_image_overlay_secret_previous,
+        )
 
         await ensure_overlay_fresh(engine, force=True)
         rt_bases = get_image_overlay_bases()
+        rt_enabled = get_image_overlay_enabled()
+        rt_secret = str(get_image_overlay_secret() or "").strip()
+        rt_secret_previous = str(get_image_overlay_secret_previous() or "").strip()
     except Exception:
         rt_bases = []
-    flag_enabled = bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False
+        rt_enabled = False
+        rt_secret = ""
+        rt_secret_previous = ""
+    env_enabled = bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False
+    flag_enabled = bool(env_enabled or rt_enabled)
     raw_bases = list(getattr(settings, "image_edge_base_urls", None) or []) if settings is not None else []
     secret = str(getattr(settings, "image_edge_secret", "") or "").strip() if settings is not None else ""
+    if not secret:
+        secret = rt_secret
     secret_previous = (
         str(getattr(settings, "image_edge_secret_previous", "") or "").strip() if settings is not None else ""
     )
+    if not secret_previous:
+        secret_previous = rt_secret_previous
     ttl = int(getattr(settings, "image_edge_sign_ttl_seconds", 604800) or 604800) if settings is not None else 604800
     cfg = load_image_edge_config_from_settings(settings) if settings is not None else None
     ready = cfg is not None
@@ -178,6 +274,8 @@ async def image_edge_status(
         request,
         payload={
             "enabled_flag": flag_enabled,
+            "env_enabled_flag": env_enabled,
+            "runtime_enabled_flag": bool(rt_enabled),
             "ready": ready,
             "base_urls": merged_bases,
             "base_url_count": merged_count,
@@ -213,15 +311,27 @@ async def cf_api_proxy_status(
     settings = getattr(request.app.state, "settings", None)
     engine = getattr(request.app.state, "engine", None)
     try:
-        from app.core.cf_pool_overlay import ensure_overlay_fresh, get_api_overlay_bases
+        from app.core.cf_pool_overlay import (
+            ensure_overlay_fresh,
+            get_api_overlay_bases,
+            get_api_overlay_enabled,
+            get_api_overlay_secret,
+        )
 
         await ensure_overlay_fresh(engine, force=True)
         rt_bases = get_api_overlay_bases()
+        rt_enabled = get_api_overlay_enabled()
+        rt_secret = str(get_api_overlay_secret() or "").strip()
     except Exception:
         rt_bases = []
-    flag_enabled = bool(getattr(settings, "cf_api_proxy_enabled", False)) if settings is not None else False
+        rt_enabled = False
+        rt_secret = ""
+    env_enabled = bool(getattr(settings, "cf_api_proxy_enabled", False)) if settings is not None else False
+    flag_enabled = bool(env_enabled or rt_enabled)
     raw_bases = list(getattr(settings, "cf_api_proxy_base_urls", None) or []) if settings is not None else []
     secret = str(getattr(settings, "cf_api_proxy_secret", "") or "").strip() if settings is not None else ""
+    if not secret:
+        secret = rt_secret
     cfg = load_cf_api_proxy_config_from_settings(settings) if settings is not None else None
     ready = bool(cfg is not None and cfg.ready)
     # Always surface env∪overlay membership even when flag/secret not ready
@@ -255,6 +365,8 @@ async def cf_api_proxy_status(
         request,
         payload={
             "enabled_flag": flag_enabled,
+            "env_enabled_flag": env_enabled,
+            "runtime_enabled_flag": bool(rt_enabled),
             "ready": ready,
             "base_urls": merged_bases,
             "base_url_count": merged_count,

@@ -104,11 +104,114 @@ def test_cf_workers_deploy_registers_without_leaking_token(tmp_path: Path, monke
             assert body["deployed"] is True
             assert body["base_url"] == "https://ria-api-a.acct.workers.dev"
             assert body["registered"] is True
+            # Living spec: deploy defaults to auto-enable business egress.
+            assert body["business_enabled"] is True
+            assert body["ready"] is True
             assert "PROXY_SECRET" in body["secrets_set"]
+            assert "message" in body and body["message"]
             raw = resp.text
             assert "cf-token-abcdefghijklmnopqrstuvwxyz" not in raw
             assert "proxy-secret-value" not in raw
             deploy.assert_awaited_once()
+
+            # Pool + maintenance status should reflect runtime enable without env flag.
+            pool = client.get("/admin/api/cf-workers/pool", headers=headers).json()
+            assert pool["api"]["runtime_enabled"] is True
+            assert "https://ria-api-a.acct.workers.dev" in pool["api"]["merged_base_urls"]
+            status = client.get("/admin/api/maintenance/cf-api-proxy", headers=headers).json()
+            assert status["enabled_flag"] is True
+            assert status["runtime_enabled_flag"] is True
+            assert status["ready"] is True
+            assert status["has_secret"] is True
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_deploy_auto_generates_secret_once(tmp_path: Path, monkeypatch) -> None:
+    result = CfWorkerDeployResult(
+        kind="api",
+        worker_name="ria-api-gen",
+        worker_host="ria-api-gen.acct.workers.dev",
+        base_url="https://ria-api-gen.acct.workers.dev",
+        secrets_set=["PROXY_SECRET"],
+        deployed=True,
+    )
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_deploy_gen_secret")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        with patch(
+            "app.api.admin.cf_workers.deploy_cf_worker",
+            new_callable=AsyncMock,
+            return_value=result,
+        ) as deploy:
+            resp = client.post(
+                "/admin/api/cf-workers/deploy",
+                headers=headers,
+                json={
+                    "kind": "api",
+                    "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
+                    "account_id": "0123456789abcdef0123456789abcdef",
+                    "worker_name": "ria-api-gen",
+                    # no proxy_secret → auto-generate
+                },
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["deployed"] is True
+            assert body["business_enabled"] is True
+            assert body["secret_generated"] is True
+            gen = body.get("generated_secret")
+            assert isinstance(gen, str) and len(gen) >= 16
+            assert "cf-token-abcdefghijklmnopqrstuvwxyz" not in resp.text
+            # Deploy helper must receive the generated secret for Worker upload.
+            kwargs = deploy.await_args.kwargs if deploy.await_args else {}
+            assert kwargs.get("proxy_secret") == gen
+            status = client.get("/admin/api/maintenance/cf-api-proxy", headers=headers).json()
+            assert status["has_secret"] is True
+            assert status["ready"] is True
+            # Admin status never echoes the secret value.
+            assert gen not in str(status)
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_deploy_enable_business_false_skips_enable(tmp_path: Path, monkeypatch) -> None:
+    result = CfWorkerDeployResult(
+        kind="api",
+        worker_name="ria-api-off",
+        worker_host="ria-api-off.acct.workers.dev",
+        base_url="https://ria-api-off.acct.workers.dev",
+        secrets_set=["PROXY_SECRET"],
+        deployed=True,
+    )
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_deploy_no_enable")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        with patch(
+            "app.api.admin.cf_workers.deploy_cf_worker",
+            new_callable=AsyncMock,
+            return_value=result,
+        ):
+            resp = client.post(
+                "/admin/api/cf-workers/deploy",
+                headers=headers,
+                json={
+                    "kind": "api",
+                    "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
+                    "account_id": "0123456789abcdef0123456789abcdef",
+                    "worker_name": "ria-api-off",
+                    "proxy_secret": "proxy-secret-value",
+                    "enable_business": False,
+                },
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["deployed"] is True
+            assert body["registered"] is True
+            assert body["business_enabled"] is False
+            pool = client.get("/admin/api/cf-workers/pool", headers=headers).json()
+            assert pool["api"]["runtime_enabled"] is False
+            assert "https://ria-api-off.acct.workers.dev" in pool["api"]["merged_base_urls"]
     reset_overlay_for_tests()
 
 

@@ -11,6 +11,13 @@ PoolKind = Literal["api", "image"]
 # Runtime-settings keys for ops-registered CF pool members (merged with env bases).
 RUNTIME_KEY_API_BASES = "cf_pool.api.base_urls"
 RUNTIME_KEY_IMAGE_BASES = "cf_pool.image.base_urls"
+# Deploy-time business enable (OR with env CF_API_PROXY_ENABLED / IMAGE_EDGE_ENABLED).
+RUNTIME_KEY_API_ENABLED = "cf_pool.api.enabled"
+RUNTIME_KEY_IMAGE_ENABLED = "cf_pool.image.enabled"
+# Optional BFF shared secrets when env is empty (never returned by admin pool list).
+RUNTIME_KEY_API_SECRET = "cf_pool.api.secret"
+RUNTIME_KEY_IMAGE_SECRET = "cf_pool.image.secret"
+RUNTIME_KEY_IMAGE_SECRET_PREVIOUS = "cf_pool.image.secret_previous"
 
 
 @dataclass(frozen=True, slots=True)

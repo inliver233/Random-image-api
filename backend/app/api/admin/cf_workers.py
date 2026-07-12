@@ -17,14 +17,25 @@ from app.core.admin_request import (
 from app.core.cf_pool_overlay import (
     ensure_overlay_fresh,
     get_api_overlay_bases,
+    get_api_overlay_enabled,
     get_image_overlay_bases,
+    get_image_overlay_enabled,
     set_api_overlay_bases,
+    set_api_overlay_enabled,
+    set_api_overlay_secret,
     set_image_overlay_bases,
+    set_image_overlay_enabled,
+    set_image_overlay_secret,
 )
 from app.core.cf_pool_probe import probe_cf_pool_bases
 from app.core.cf_pool_registry import (
     RUNTIME_KEY_API_BASES,
+    RUNTIME_KEY_API_ENABLED,
+    RUNTIME_KEY_API_SECRET,
     RUNTIME_KEY_IMAGE_BASES,
+    RUNTIME_KEY_IMAGE_ENABLED,
+    RUNTIME_KEY_IMAGE_SECRET,
+    RUNTIME_KEY_IMAGE_SECRET_PREVIOUS,
     merge_base_url_lists,
     normalize_cf_base_url,
     pool_members_from_bases,
@@ -77,6 +88,60 @@ async def _persist_overlay(engine: Any, *, kind: str, bases: list[str], updated_
     )
 
 
+async def _persist_enable_and_secret(
+    engine: Any,
+    *,
+    kind: str,
+    enabled: bool,
+    secret: str,
+    secret_previous: str = "",
+    updated_by: str,
+) -> None:
+    """Persist deploy auto-enable + BFF secret overlay (never returns secrets to clients)."""
+    if engine is None:
+        return
+    if kind == "api":
+        await set_runtime_setting(
+            engine,
+            key=RUNTIME_KEY_API_ENABLED,
+            value=bool(enabled),
+            description="CF API pool business enable (OR with CF_API_PROXY_ENABLED env)",
+            updated_by=updated_by,
+        )
+        if secret:
+            await set_runtime_setting(
+                engine,
+                key=RUNTIME_KEY_API_SECRET,
+                value=str(secret),
+                description="CF API pool BFF shared secret (fail-closed; never returned by admin APIs)",
+                updated_by=updated_by,
+            )
+        return
+    await set_runtime_setting(
+        engine,
+        key=RUNTIME_KEY_IMAGE_ENABLED,
+        value=bool(enabled),
+        description="CF image edge business enable (OR with IMAGE_EDGE_ENABLED env)",
+        updated_by=updated_by,
+    )
+    if secret:
+        await set_runtime_setting(
+            engine,
+            key=RUNTIME_KEY_IMAGE_SECRET,
+            value=str(secret),
+            description="Image edge BFF HMAC secret (never returned by admin APIs)",
+            updated_by=updated_by,
+        )
+    if secret_previous:
+        await set_runtime_setting(
+            engine,
+            key=RUNTIME_KEY_IMAGE_SECRET_PREVIOUS,
+            value=str(secret_previous),
+            description="Image edge previous HMAC secret for rotation",
+            updated_by=updated_by,
+        )
+
+
 @router.get(
     "/cf-workers/pool",
     summary="CF Worker egress pool members",
@@ -115,17 +180,22 @@ async def cf_workers_pool(
                 "runtime_base_urls": list(rt_api),
                 "merged_base_urls": merge_base_url_lists(env_api, rt_api),
                 "members": api_members,
+                "runtime_enabled": bool(get_api_overlay_enabled()),
+                "env_enabled": bool(getattr(settings, "cf_api_proxy_enabled", False)) if settings else False,
             },
             "image": {
                 "env_base_urls": merge_base_url_lists(env_img),
                 "runtime_base_urls": list(rt_img),
                 "merged_base_urls": merge_base_url_lists(env_img, rt_img),
                 "members": image_members,
+                "runtime_enabled": bool(get_image_overlay_enabled()),
+                "env_enabled": bool(getattr(settings, "image_edge_enabled", False)) if settings else False,
             },
             "egress_policy": policy,
             "note": (
-                "Deploy/register does not flip CF_API_PROXY_ENABLED / IMAGE_EDGE_ENABLED. "
-                "Probe green, then enable flags. Residential is emergency-only when CF ready "
+                "Deploy (default enable_business=true) auto-registers + enables runtime business "
+                "flags (OR with env CF_API_PROXY_ENABLED / IMAGE_EDGE_ENABLED). "
+                "Secrets never returned here. Residential is emergency-only when CF ready "
                 "(RESIDENTIAL_EGRESS_EMERGENCY_ONLY, default true)."
             ),
         },
@@ -242,12 +312,13 @@ async def cf_workers_unregister(
     summary="Deploy CF Worker via Cloudflare API and register into pool",
     description=(
         "ds2api-style one-shot deploy: upload **this repo's** hardened Worker script "
-        "(api-worker or img-worker), enable workers.dev, register base into runtime pool. "
+        "(api-worker or img-worker), enable workers.dev, register base into runtime pool, "
+        "and **default-enable** business egress (runtime flag OR env). "
         "Requires api_token, account_id, worker_name, kind. "
         "api: proxy_secret (or uses CF_API_PROXY_SECRET). "
         "image: image_edge_secret (or uses IMAGE_EDGE_SECRET). "
-        "Never enables cutover flags; never stores CF API token. "
-        "Does **not** copy ds2api open whole-site proxy script."
+        "Body enable_business=false for deploy-only (advanced). "
+        "Never stores CF API token. Does **not** copy ds2api open whole-site proxy script."
     ),
 )
 async def cf_workers_deploy(
@@ -264,18 +335,46 @@ async def cf_workers_deploy(
     account_id = parse_required_str(data.get("account_id"), field="account_id", max_len=64)
     worker_name = parse_required_str(data.get("worker_name"), field="worker_name", max_len=63)
     register = parse_bool(data.get("register"), default=True)
+    # Living spec: deploy success → default enable business ready semantics.
+    # Advanced: enable_business=false for "deploy only" (old conservative path).
+    enable_business = parse_bool(data.get("enable_business"), default=True)
 
     settings = _settings(request)
+    # Reuse env secret, then process overlay, else generate once (returned only in this response).
+    try:
+        from app.core.cf_pool_overlay import get_api_overlay_secret, get_image_overlay_secret
+
+        overlay_api_secret = str(get_api_overlay_secret() or "").strip()
+        overlay_image_secret = str(get_image_overlay_secret() or "").strip()
+    except Exception:
+        overlay_api_secret = ""
+        overlay_image_secret = ""
+
     proxy_secret = parse_optional_str(data.get("proxy_secret")) or (
         str(getattr(settings, "cf_api_proxy_secret", "") or "").strip() if settings is not None else ""
-    )
+    ) or overlay_api_secret
     image_edge_secret = parse_optional_str(data.get("image_edge_secret")) or (
         str(getattr(settings, "image_edge_secret", "") or "").strip() if settings is not None else ""
-    )
+    ) or overlay_image_secret
     prewarm_secret = parse_optional_str(data.get("prewarm_secret")) or ""
     image_edge_secret_previous = parse_optional_str(data.get("image_edge_secret_previous")) or (
         str(getattr(settings, "image_edge_secret_previous", "") or "").strip() if settings is not None else ""
     )
+
+    secret_generated = False
+    generated_secret_once: str | None = None
+    if kind == "api" and not proxy_secret:
+        import secrets as _secrets
+
+        proxy_secret = _secrets.token_urlsafe(32)
+        secret_generated = True
+        generated_secret_once = proxy_secret
+    elif kind == "image" and not image_edge_secret:
+        import secrets as _secrets
+
+        image_edge_secret = _secrets.token_urlsafe(32)
+        secret_generated = True
+        generated_secret_once = image_edge_secret
 
     try:
         result = await deploy_cf_worker(
@@ -295,10 +394,12 @@ async def cf_workers_deploy(
             raise ApiError(code=ErrorCode.BAD_REQUEST, message=str(exc), status_code=status) from exc
         raise ApiError(code=ErrorCode.UPSTREAM_STREAM_ERROR, message=str(exc), status_code=502) from exc
 
+    updated_by = str(claims.get("sub") or claims.get("username") or "admin")
     runtime_bases: list[str] = []
+    business_enabled = False
+    # Refresh before RMW so multi-process deploy+register does not drop peer bases.
+    await ensure_overlay_fresh(_engine(request), force=True)
     if register:
-        # Refresh before RMW so multi-process deploy+register does not drop peer bases.
-        await ensure_overlay_fresh(_engine(request), force=True)
         if kind == "api":
             runtime_bases = register_base_url(get_api_overlay_bases(), result.base_url)
             set_api_overlay_bases(runtime_bases)
@@ -311,34 +412,99 @@ async def cf_workers_deploy(
                 _EDGE_CFG_FROM_SETTINGS.clear()
             except Exception:
                 pass
-        updated_by = str(claims.get("sub") or claims.get("username") or "admin")
         await _persist_overlay(_engine(request), kind=kind, bases=runtime_bases, updated_by=updated_by)
     else:
-        await ensure_overlay_fresh(_engine(request), force=True)
         runtime_bases = get_api_overlay_bases() if kind == "api" else get_image_overlay_bases()
 
-    # Never echo api_token or secrets.
-    return admin_ok(
-        request,
-        payload={
-            "deployed": True,
-            "kind": result.kind,
-            "worker_name": result.worker_name,
-            "worker_host": result.worker_host,
-            "base_url": result.base_url,
-            "secrets_set": list(result.secrets_set),
-            "registered": bool(register),
-            "runtime_base_urls": list(runtime_bases),
-            # R2 bucket binding is never attached by this deploy path (wrangler/dashboard only).
-            "r2_binding": bool(getattr(result, "r2_binding", False)),
-            "r2_note": str(getattr(result, "r2_note", "") or ""),
-            "cutover_hint": (
-                "Probe healthz, set CF_API_PROXY_BASE_URLS / IMAGE_EDGE_BASE_URLS (or rely on "
-                "runtime pool), match secrets, then enable CF_API_PROXY_ENABLED / IMAGE_EDGE_ENABLED."
-            ),
-        },
-        request_id=rid,
-    )
+    # Default product path: write BFF secret overlay + enable business flag.
+    # Secrets used for Worker upload are the same shared secrets BFF needs for ready.
+    if enable_business:
+        if kind == "api":
+            secret_for_bff = str(proxy_secret or "").strip()
+            if secret_for_bff:
+                set_api_overlay_secret(secret_for_bff)
+            set_api_overlay_enabled(True)
+            business_enabled = True
+            await _persist_enable_and_secret(
+                _engine(request),
+                kind="api",
+                enabled=True,
+                secret=secret_for_bff,
+                updated_by=updated_by,
+            )
+        else:
+            secret_for_bff = str(image_edge_secret or "").strip()
+            prev = str(image_edge_secret_previous or "").strip()
+            if secret_for_bff:
+                set_image_overlay_secret(secret_for_bff, previous=prev)
+            set_image_overlay_enabled(True)
+            business_enabled = True
+            try:
+                from app.core.image_edge import _EDGE_CFG_FROM_SETTINGS
+
+                _EDGE_CFG_FROM_SETTINGS.clear()
+            except Exception:
+                pass
+            await _persist_enable_and_secret(
+                _engine(request),
+                kind="image",
+                enabled=True,
+                secret=secret_for_bff,
+                secret_previous=prev,
+                updated_by=updated_by,
+            )
+
+    # Human success: whether egress is actually ready after this deploy.
+    if kind == "api":
+        from app.core.cf_api_proxy import load_cf_api_proxy_config_from_settings
+
+        cfg = load_cf_api_proxy_config_from_settings(settings)
+        ready = bool(cfg is not None and cfg.ready)
+        success_message = (
+            f"API 出口已部署并加入池：{result.worker_host}"
+            + ("；业务已启用" if business_enabled else "；未启用业务（enable_business=false）")
+            + ("；当前 ready" if ready else "；尚未 ready（检查 secret/bases）")
+        )
+    else:
+        from app.core.image_edge import image_edge_is_ready
+
+        ready = bool(settings is not None and image_edge_is_ready(settings))
+        success_message = (
+            f"出图边缘已部署并加入池：{result.worker_host}"
+            + ("；业务已启用" if business_enabled else "；未启用业务（enable_business=false）")
+            + ("；当前 ready（默认反代 i.pximg.net）" if ready else "；尚未 ready（检查 secret/bases）")
+        )
+
+    # Never echo api_token. Generated secret is returned once only (ops must save it).
+    payload: dict[str, Any] = {
+        "deployed": True,
+        "kind": result.kind,
+        "worker_name": result.worker_name,
+        "worker_host": result.worker_host,
+        "base_url": result.base_url,
+        "secrets_set": list(result.secrets_set),
+        "registered": bool(register),
+        "business_enabled": bool(business_enabled),
+        "ready": bool(ready),
+        "message": success_message,
+        "runtime_base_urls": list(runtime_bases),
+        "secret_generated": bool(secret_generated),
+        # R2 bucket binding is never attached by this deploy path (wrangler/dashboard only).
+        "r2_binding": bool(getattr(result, "r2_binding", False)),
+        "r2_note": str(getattr(result, "r2_note", "") or ""),
+        "cutover_hint": (
+            "默认已自动 register + enable 业务语义；可直接探针 healthz。"
+            " 若 secret_generated=true，请立即保存 generated_secret（仅此响应回显一次）。"
+            " 高级：enable_business=false 仅上传脚本。"
+            " 出图主路径：img-worker → i.pximg.net。"
+        ),
+    }
+    if secret_generated and generated_secret_once:
+        payload["generated_secret"] = generated_secret_once
+        payload["generated_secret_note"] = (
+            "系统生成的共享密钥，仅此响应回显一次；已写入 Worker 与 BFF runtime overlay。"
+        )
+    return admin_ok(request, payload=payload, request_id=rid)
 
 
 @router.get(

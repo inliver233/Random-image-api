@@ -81,6 +81,19 @@
 
 前置：`Docker` + `Docker Compose`。
 
+### 双主线拓扑（生产目标）
+
+| 平面 | 开发默认 | 生产主路径 |
+| --- | --- | --- |
+| 目录/任务库 | SQLite（`DATABASE_URL` 默认） | **Postgres**（`postgresql+asyncpg://…`）+ 终端 jobs 清理 |
+| 共享限流/去重 | 进程内存 | **Redis**（多实例时） |
+| 热选图 | Python pick | **Go Random Engine** 双跑切流 |
+| 出图字节 | 本地 `/i` 兼容 | **CF img-worker → i.pximg.net**（HMAC 签名 URL） |
+| 补全/OAuth 出口 | 住宅应急 | **CF api-worker** 池 |
+| 住宅/EasyProxies | 可用 | **仅应急**（`RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true`） |
+
+Admin → **CF Worker** 一页部署默认：register + secret + 启用业务语义（runtime overlay，无需手改 env 重启）。
+
 1. 准备环境变量
 
 ```bash
@@ -91,6 +104,7 @@ cp deploy/.env.example deploy/.env
 - `SECRET_KEY`
 - `ADMIN_PASSWORD`
 - `FIELD_ENCRYPTION_KEY`（生产环境必须提供）
+- 生产：`DATABASE_URL` 指向 Postgres（不要用 SQLite 当 SLA）
 
 3. 启动
 
@@ -103,7 +117,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 - 文档页：`http://localhost:23222/docs`
 - 状态页：`http://localhost:23222/status`
 - Swagger：`http://localhost:23222/api/docs`
-- 管理后台：`http://localhost:23222/admin`
+- 管理后台：`http://localhost:23222/admin`（CF Worker / 维护工具）
 
 ## 首次使用建议流程
 
@@ -124,7 +138,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 | 变量 | 作用 |
 | --- | --- |
 | `APP_ENV` | 运行环境（`dev` / `prod`） |
-| `DATABASE_URL` | 数据库连接（默认 SQLite） |
+| `DATABASE_URL` | 数据库连接（dev 默认 SQLite；生产用 Postgres） |
 | `SECRET_KEY` | JWT / API Key 哈希密钥 |
 | `FIELD_ENCRYPTION_KEY` / `FIELD_ENCRYPTION_KEY_FILE` | 敏感字段加密密钥 |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 后台账号密码 |

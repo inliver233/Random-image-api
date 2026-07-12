@@ -7,7 +7,12 @@ from typing import Any
 
 from app.core.cf_pool_registry import (
     RUNTIME_KEY_API_BASES,
+    RUNTIME_KEY_API_ENABLED,
+    RUNTIME_KEY_API_SECRET,
     RUNTIME_KEY_IMAGE_BASES,
+    RUNTIME_KEY_IMAGE_ENABLED,
+    RUNTIME_KEY_IMAGE_SECRET,
+    RUNTIME_KEY_IMAGE_SECRET_PREVIOUS,
     merge_base_url_lists,
     parse_base_urls_payload,
 )
@@ -22,6 +27,13 @@ _DEFAULT_OVERLAY_TTL_S = 5.0
 _lock = threading.RLock()
 _api_bases: list[str] = []
 _image_bases: list[str] = []
+# Deploy-auto-enable: OR with env CF_API_PROXY_ENABLED / IMAGE_EDGE_ENABLED.
+_api_enabled: bool = False
+_image_enabled: bool = False
+# Optional BFF secrets when env is empty (from deploy body; never logged).
+_api_secret: str = ""
+_image_secret: str = ""
+_image_secret_previous: str = ""
 _loaded_at_mono: float = 0.0
 _reload_lock: asyncio.Lock | None = None
 
@@ -69,6 +81,82 @@ def merge_image_bases_with_overlay(env_bases: list[str] | None) -> list[str]:
     return merge_base_url_lists(env_bases or [], get_image_overlay_bases())
 
 
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "y"}
+    return False
+
+
+def _as_secret(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def get_api_overlay_enabled() -> bool:
+    with _lock:
+        return bool(_api_enabled)
+
+
+def get_image_overlay_enabled() -> bool:
+    with _lock:
+        return bool(_image_enabled)
+
+
+def get_api_overlay_secret() -> str:
+    with _lock:
+        return str(_api_secret or "")
+
+
+def get_image_overlay_secret() -> str:
+    with _lock:
+        return str(_image_secret or "")
+
+
+def get_image_overlay_secret_previous() -> str:
+    with _lock:
+        return str(_image_secret_previous or "")
+
+
+def set_api_overlay_enabled(enabled: bool) -> bool:
+    with _lock:
+        global _api_enabled, _loaded_at_mono
+        _api_enabled = bool(enabled)
+        _loaded_at_mono = time.monotonic()
+        return bool(_api_enabled)
+
+
+def set_image_overlay_enabled(enabled: bool) -> bool:
+    with _lock:
+        global _image_enabled, _loaded_at_mono
+        _image_enabled = bool(enabled)
+        _loaded_at_mono = time.monotonic()
+        return bool(_image_enabled)
+
+
+def set_api_overlay_secret(secret: str | None) -> str:
+    with _lock:
+        global _api_secret, _loaded_at_mono
+        _api_secret = _as_secret(secret)
+        _loaded_at_mono = time.monotonic()
+        return str(_api_secret)
+
+
+def set_image_overlay_secret(secret: str | None, *, previous: str | None = None) -> str:
+    with _lock:
+        global _image_secret, _image_secret_previous, _loaded_at_mono
+        _image_secret = _as_secret(secret)
+        if previous is not None:
+            prev = _as_secret(previous)
+            _image_secret_previous = prev if prev and prev != _image_secret else ""
+        _loaded_at_mono = time.monotonic()
+        return str(_image_secret)
+
+
 def apply_runtime_values_to_overlay(values: dict[str, Any] | None) -> None:
     """Load overlay from runtime_settings values dict (startup / after write / TTL)."""
     values = values or {}
@@ -76,6 +164,13 @@ def apply_runtime_values_to_overlay(values: dict[str, Any] | None) -> None:
     image = parse_base_urls_payload(values.get(RUNTIME_KEY_IMAGE_BASES))
     set_api_overlay_bases(api)
     set_image_overlay_bases(image)
+    set_api_overlay_enabled(_as_bool(values.get(RUNTIME_KEY_API_ENABLED)))
+    set_image_overlay_enabled(_as_bool(values.get(RUNTIME_KEY_IMAGE_ENABLED)))
+    set_api_overlay_secret(values.get(RUNTIME_KEY_API_SECRET))
+    set_image_overlay_secret(
+        values.get(RUNTIME_KEY_IMAGE_SECRET),
+        previous=values.get(RUNTIME_KEY_IMAGE_SECRET_PREVIOUS),
+    )
     # Invalidate image-edge settings cache so merged bases apply immediately.
     try:
         from app.core.image_edge import _EDGE_CFG_FROM_SETTINGS
@@ -84,9 +179,11 @@ def apply_runtime_values_to_overlay(values: dict[str, Any] | None) -> None:
     except Exception:
         pass
     log.info(
-        "cf_pool_overlay_loaded api_bases=%s image_bases=%s",
+        "cf_pool_overlay_loaded api_bases=%s image_bases=%s api_enabled=%s image_enabled=%s",
         len(api),
         len(image),
+        get_api_overlay_enabled(),
+        get_image_overlay_enabled(),
     )
 
 
@@ -150,6 +247,10 @@ def reset_overlay_for_tests() -> None:
     global _loaded_at_mono, _reload_lock
     set_api_overlay_bases([])
     set_image_overlay_bases([])
+    set_api_overlay_enabled(False)
+    set_image_overlay_enabled(False)
+    set_api_overlay_secret("")
+    set_image_overlay_secret("", previous="")
     with _lock:
         _loaded_at_mono = 0.0
     _reload_lock = None

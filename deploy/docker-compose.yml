@@ -28,7 +28,8 @@ services:
     volumes:
       - ../data:/app/data
     # Optional dual-run: set RANDOM_ENGINE_URL=http://random-engine:8091 in deploy/.env
-    # (engine is a sibling service; BFF stays up if engine is down — pick falls back to SQLite).
+    # (engine is a sibling service; BFF stays up if engine is down — pick falls back to catalog store).
+    # Production data plane: point DATABASE_URL at Postgres (see deploy/.env.example); SQLite is dev-only.
     restart: unless-stopped
 
   worker:

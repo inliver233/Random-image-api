@@ -20,7 +20,7 @@ from app.core.admin_request import (
 )
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.errors import ApiError, ErrorCode
-from app.core.cf_api_proxy import record_cf_base_outcome
+from app.core.cf_api_proxy import record_cf_base_outcome, should_failover_cf_attempt
 from app.core.metrics import observe_pixiv_api_egress
 from app.core.proxy_selector import iter_pixiv_api_egress
 from app.core.request_id import get_or_create_request_id
@@ -359,9 +359,11 @@ async def test_refresh_token(
                         )
                 except PixivOauthError as exc:
                     observe_pixiv_api_egress(via=via_label, result="error")
-                    if attempt.via_cf and (exc.status_code is None or int(exc.status_code) >= 500):
+                    # CF Worker gate (403 secret / 429) or 5xx/transport → demote + next base.
+                    cf_retry = bool(attempt.via_cf and should_failover_cf_attempt(exc.status_code))
+                    if cf_retry:
                         record_cf_base_outcome(attempt.request_url, ok=False)
-                    if exc.status_code is None or int(exc.status_code) >= 500:
+                    if exc.status_code is None or int(exc.status_code) >= 500 or cf_retry:
                         last_exc = exc
                         # Soft fail-open: no residential + not CF → stop; else try next.
                         if attempt.residential is None and not attempt.via_cf:

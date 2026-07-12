@@ -19,7 +19,7 @@ from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
 from app.core.failover import classify_pixiv_rate_limit, pixiv_rate_limit_backoff_seconds
-from app.core.cf_api_proxy import record_cf_base_outcome
+from app.core.cf_api_proxy import record_cf_base_outcome, should_failover_cf_attempt
 from app.core.metrics import TOKEN_REFRESH_FAIL_TOTAL, observe_pixiv_api_egress
 from app.core.proxy_health import proxy_endpoint_fail_values_immediate, proxy_endpoint_ok_values
 from app.core.proxy_routing import invalidate_proxy_pool_caches
@@ -807,10 +807,17 @@ LIMIT 1;
                 except PixivOauthError as exc:
                     latency_ms = (float(time.monotonic()) - start_m) * 1000.0
                     observe_pixiv_api_egress(via="cf" if via_cf else "residential", result="error")
-                    if via_cf and (exc.status_code is None or int(exc.status_code) >= 500):
+                    # CF: transport/5xx + Worker gate (403 secret / 429 rate) → demote + next base.
+                    # Do not thrash on Pixiv business 4xx (e.g. OAuth 400).
+                    cf_retry = bool(via_cf and should_failover_cf_attempt(exc.status_code))
+                    if cf_retry:
                         record_cf_base_outcome(attempt.request_url, ok=False)
                     if picked_proxy is not None:
-                        if exc.status_code is not None and int(exc.status_code) < 500:
+                        if (
+                            exc.status_code is not None
+                            and int(exc.status_code) < 500
+                            and not cf_retry
+                        ):
                             await _mark_proxy_ok(
                                 int(picked_proxy.endpoint_id),
                                 latency_ms=float(latency_ms),
@@ -824,7 +831,7 @@ LIMIT 1;
                                 error=exc,
                             )
 
-                    if exc.status_code is None or int(exc.status_code) >= 500:
+                    if exc.status_code is None or int(exc.status_code) >= 500 or cf_retry:
                         last_exc = exc
                         # CF attempt has no residential proxy; still fall through to next try.
                         if picked_proxy is None and not via_cf:
@@ -988,14 +995,15 @@ LIMIT 1;
                 return data
 
             observe_pixiv_api_egress(via="cf" if via_cf else "residential", result="error")
-            if via_cf and int(resp.status_code) >= 500:
+            cf_retry = bool(via_cf and should_failover_cf_attempt(int(resp.status_code)))
+            if cf_retry:
                 record_cf_base_outcome(request_url, ok=False)
             http_exc = httpx.HTTPStatusError(
                 f"Pixiv App API error status={resp.status_code}",
                 request=resp.request,
                 response=resp,
             )
-            if int(resp.status_code) >= 500:
+            if int(resp.status_code) >= 500 or cf_retry:
                 last_exc = http_exc
                 # CF attempt has no residential proxy; still fall through to next try.
                 if picked_proxy is None and not via_cf:

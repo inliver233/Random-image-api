@@ -46,16 +46,24 @@ class CfApiProxyConfig:
 def load_cf_api_proxy_config_from_settings(settings: Settings | None) -> CfApiProxyConfig | None:
     if settings is None:
         return None
-    enabled = bool(getattr(settings, "cf_api_proxy_enabled", False))
+    env_enabled = bool(getattr(settings, "cf_api_proxy_enabled", False))
     env_bases = list(getattr(settings, "cf_api_proxy_base_urls", None) or [])
-    # Merge ops-registered runtime bases (ds2api-style pool members) with env CSV.
+    secret = str(getattr(settings, "cf_api_proxy_secret", "") or "").strip()
+    # Merge ops-registered runtime bases + deploy auto-enable/secret overlay.
     try:
-        from app.core.cf_pool_overlay import merge_api_bases_with_overlay
+        from app.core.cf_pool_overlay import (
+            get_api_overlay_enabled,
+            get_api_overlay_secret,
+            merge_api_bases_with_overlay,
+        )
 
         base_urls = merge_api_bases_with_overlay(env_bases)
+        enabled = bool(env_enabled or get_api_overlay_enabled())
+        if not secret:
+            secret = str(get_api_overlay_secret() or "").strip()
     except Exception:
         base_urls = list(env_bases)
-    secret = str(getattr(settings, "cf_api_proxy_secret", "") or "").strip()
+        enabled = env_enabled
     if not enabled or not base_urls:
         return None
     return CfApiProxyConfig(enabled=True, base_urls=base_urls, secret=secret)
@@ -127,6 +135,38 @@ def is_cf_base_cooling(base: str, *, now: float | None = None) -> bool:
                 _cf_base_cool_until.pop(b, None)
             return False
         return True
+
+
+def is_cf_worker_gate_status(status_code: int | None) -> bool:
+    """True for Worker-local gate statuses (auth/rate) that should failover to next CF base.
+
+    api-worker returns 403 Forbidden on bad/missing secret and 429 on isolate rate limit
+    *before* upstream Pixiv; those are base/config faults, not Pixiv business errors.
+    """
+    if status_code is None:
+        return False
+    try:
+        code = int(status_code)
+    except (TypeError, ValueError):
+        return False
+    return code in {401, 403, 429}
+
+
+def should_failover_cf_attempt(status_code: int | None) -> bool:
+    """Whether a via_cf attempt should continue to the next CF (or residential) candidate.
+
+    Transport-like (None), upstream 5xx, and Worker gate 401/403/429 → yes.
+    Typical Pixiv 4xx (e.g. OAuth 400 invalid_grant) → no (raise / stop).
+    """
+    if status_code is None:
+        return True
+    try:
+        code = int(status_code)
+    except (TypeError, ValueError):
+        return True
+    if code >= 500:
+        return True
+    return is_cf_worker_gate_status(code)
 
 
 def record_cf_base_outcome(

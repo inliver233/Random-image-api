@@ -444,13 +444,18 @@ export function ProxiesPage() {
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
       <Typography.Title level={3} style={{ margin: 0 }}>
-        代理管理（仅 Hydrate / OAuth）
+        代理节点（应急 / 遗留）
       </Typography.Title>
       <Alert
-        type="info"
+        type="warning"
         showIcon
-        message="住宅代理仅用于 Pixiv App API 补全与 OAuth，不用于用户出图"
-        description="公开图片优先走 Cloudflare Image Edge（302/签名 URL）；本地 /i 仅作兼容回退。请勿再把本池当作用户字节出口。"
+        message="主路径是 CF Worker，本页仅为应急/遗留住宅代理"
+        description={
+          <>
+            用户出图与后台补全默认应走侧栏「CF Worker」部署的 img-worker / api-worker。
+            住宅 / EasyProxies 仅在 CF 未 ready 或强制应急时使用；请勿再把本池当作用户字节出口。
+          </>
+        }
       />
 
       <ActionAlerts

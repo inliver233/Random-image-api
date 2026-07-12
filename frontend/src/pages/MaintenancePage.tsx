@@ -271,8 +271,10 @@ type ModularPortsStatusResponse = {
 
 export function MaintenancePage() {
   const [form] = Form.useForm<CleanupFormValues>();
+  const [jobsForm] = Form.useForm<CleanupFormValues>();
   const [cfPoolForm] = Form.useForm<CfPoolMemberForm>();
   const alerts = useActionAlerts();
+  const jobsAlerts = useActionAlerts();
   const engineAlerts = useActionAlerts();
   const cfPoolAlerts = useActionAlerts();
   const queryClient = useQueryClient();
@@ -344,6 +346,32 @@ export function MaintenancePage() {
     },
     onError: (err) => {
       alerts.setError(err);
+    },
+  });
+
+  const jobsCleanup = useMutation({
+    mutationFn: (values: CleanupFormValues) =>
+      apiJson<CleanupResponse>("/admin/api/maintenance/jobs/cleanup", {
+        method: "POST",
+        body: JSON.stringify({
+          keep_days: values.keep_days,
+          max_delete_rows: values.max_delete_rows,
+          chunk_size: values.chunk_size,
+          dry_run: Boolean(values.dry_run),
+        }),
+      }),
+    onMutate: () => {
+      jobsAlerts.clear();
+    },
+    onSuccess: (data) => {
+      const msg = data.dry_run ? "任务清理预览完成" : "任务清理完成";
+      const detail = data.dry_run
+        ? `cutoff=${data.cutoff}，would_delete=${data.would_delete ?? 0}，has_more=${String(data.has_more)}`
+        : `cutoff=${data.cutoff}，deleted=${data.deleted ?? 0}，has_more=${String(data.has_more)}`;
+      jobsAlerts.setSuccess(`${msg}（${detail}）`, data.request_id);
+    },
+    onError: (err) => {
+      jobsAlerts.setError(err);
     },
   });
 
@@ -633,14 +661,12 @@ export function MaintenancePage() {
         </Button>
       </Card>
 
-      <Card title="CF Worker 池（成员 + 探针）">
+      <Card title="CF Worker 池（成员 + 探针 · 高级）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          env CSV 与 runtime 注册成员合并后的出口池。探针 GET{" "}
+          日常部署请用侧栏 <Typography.Text strong>CF Worker</Typography.Text> 页（一点部署 + 默认启用业务）。
+          本卡为高级：env/runtime 成员、探针 GET{" "}
           <Typography.Text code>{"{base}/healthz"}</Typography.Text>
-          ，失败会写入进程内 ~30s 冷却；不翻转{" "}
-          <Typography.Text code>CF_API_PROXY_ENABLED</Typography.Text> /{" "}
-          <Typography.Text code>IMAGE_EDGE_ENABLED</Typography.Text>
-          。本页不收集 Cloudflare API Token（deploy 走 API/CLI）。
+          （失败 ~30s 进程冷却）。Deploy 默认会 runtime 启用业务（OR 环境变量 flag）。
         </Typography.Paragraph>
 
         <ActionAlerts
@@ -755,7 +781,7 @@ export function MaintenancePage() {
         ) : null}
 
         <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-          注册/注销仅改 runtime overlay（持久化到 DB，多进程 ~5s 可见）；不删 env CSV；不翻 ENABLED。
+          注册/注销仅改 runtime overlay（持久化到 DB，多进程 ~5s 可见）；不删 env CSV。业务启用请用 CF Worker 部署或 env flag。
         </Typography.Paragraph>
         <Form<CfPoolMemberForm>
           form={cfPoolForm}
@@ -1176,6 +1202,59 @@ export function MaintenancePage() {
             requestId={engineAlerts.requestId}
             errorMessage={engineAlerts.errorMessage}
             errorRequestId={engineAlerts.errorRequestId}
+            requestIdPlacement="description"
+          />
+        </div>
+      </Card>
+
+      <Card title="任务清理（终端 jobs）">
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          仅删除终端态 jobs（completed / failed / canceled / dlq），永不碰 pending/running/paused。
+          生产数据面（Postgres SLA）应用此清理控制 jobs 表膨胀。建议先 dry-run。
+        </Typography.Paragraph>
+
+        <Form
+          form={jobsForm}
+          layout="vertical"
+          initialValues={{ keep_days: 14, max_delete_rows: 50000, chunk_size: 2000, dry_run: true }}
+          onFinish={(values) => jobsCleanup.mutate(values)}
+          style={{ maxWidth: 520 }}
+        >
+          <Form.Item label="保留天数" name="keep_days" rules={[{ required: true }]}>
+            <InputNumber min={0} max={36500} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item label="单次最大删除行数" name="max_delete_rows" rules={[{ required: true }]}>
+            <InputNumber min={1} max={10_000_000} step={1000} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item label="分块大小" name="chunk_size" rules={[{ required: true }]}>
+            <InputNumber min={1} max={100_000} step={100} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item label="仅预览（dry_run）" name="dry_run" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+          <Space wrap>
+            <Button type="primary" htmlType="submit" loading={jobsCleanup.isPending}>
+              执行
+            </Button>
+            <Button
+              onClick={() => {
+                jobsForm.setFieldsValue({ dry_run: true });
+                jobsForm.submit();
+              }}
+              loading={jobsCleanup.isPending}
+            >
+              预览
+            </Button>
+          </Space>
+        </Form>
+
+        {jobsCleanup.isPending ? <Skeleton active style={{ marginTop: 16 }} /> : null}
+        <div style={{ marginTop: 16 }}>
+          <ActionAlerts
+            message={jobsAlerts.message}
+            requestId={jobsAlerts.requestId}
+            errorMessage={jobsAlerts.errorMessage}
+            errorRequestId={jobsAlerts.errorRequestId}
             requestIdPlacement="description"
           />
         </div>

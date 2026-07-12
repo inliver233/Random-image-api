@@ -10,6 +10,7 @@ from app.core.cf_api_proxy import (
     cf_proxy_base_from_request_url,
     is_cf_api_proxy_host_allowed,
     is_cf_base_cooling,
+    is_cf_worker_gate_status,
     load_cf_api_proxy_config,
     load_cf_api_proxy_config_from_settings,
     order_cf_bases_for_failover,
@@ -19,6 +20,7 @@ from app.core.cf_api_proxy import (
     resolve_pixiv_api_cf_candidates,
     resolve_pixiv_api_request,
     rewrite_url_via_cf_api_proxy,
+    should_failover_cf_attempt,
 )
 from app.core.config import Settings, load_settings
 
@@ -225,6 +227,23 @@ def test_order_cf_bases_for_failover_and_extract() -> None:
     demoted = order_cf_bases_for_failover(["https://hot.example.com", "https://cold.example.com"])
     assert demoted[0] == "https://cold.example.com"
     assert demoted[-1] == "https://hot.example.com"
+
+
+def test_should_failover_cf_attempt_gates_and_business_4xx() -> None:
+    """Worker gate 401/403/429 + 5xx/transport failover; Pixiv business 4xx does not thrash."""
+    assert should_failover_cf_attempt(None) is True
+    assert should_failover_cf_attempt(500) is True
+    assert should_failover_cf_attempt(502) is True
+    assert should_failover_cf_attempt(401) is True
+    assert should_failover_cf_attempt(403) is True
+    assert should_failover_cf_attempt(429) is True
+    assert is_cf_worker_gate_status(403) is True
+    assert is_cf_worker_gate_status(400) is False
+    # OAuth invalid_grant / bad request — stop, do not demote CF pool thrashing.
+    assert should_failover_cf_attempt(400) is False
+    assert should_failover_cf_attempt(404) is False
+    assert should_failover_cf_attempt("403") is True  # type: ignore[arg-type]
+    assert should_failover_cf_attempt("nope") is True  # type: ignore[arg-type]
 
 
 def test_settings_keeps_flag_without_env_bases_for_runtime_overlay() -> None:

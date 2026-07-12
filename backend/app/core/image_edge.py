@@ -54,18 +54,29 @@ class ImageEdgeConfig:
 
 
 def load_image_edge_config_from_settings(settings: Settings) -> ImageEdgeConfig | None:
-    enabled = bool(getattr(settings, "image_edge_enabled", False))
+    env_enabled = bool(getattr(settings, "image_edge_enabled", False))
     secret = str(getattr(settings, "image_edge_secret", "") or "").strip()
     secret_previous = str(getattr(settings, "image_edge_secret_previous", "") or "").strip()
-    if secret_previous and secret_previous == secret:
-        secret_previous = ""
     env_bases = list(getattr(settings, "image_edge_base_urls", None) or [])
     try:
-        from app.core.cf_pool_overlay import merge_image_bases_with_overlay
+        from app.core.cf_pool_overlay import (
+            get_image_overlay_enabled,
+            get_image_overlay_secret,
+            get_image_overlay_secret_previous,
+            merge_image_bases_with_overlay,
+        )
 
         base_urls = merge_image_bases_with_overlay(env_bases)
+        enabled = bool(env_enabled or get_image_overlay_enabled())
+        if not secret:
+            secret = str(get_image_overlay_secret() or "").strip()
+        if not secret_previous:
+            secret_previous = str(get_image_overlay_secret_previous() or "").strip()
     except Exception:
         base_urls = list(env_bases)
+        enabled = env_enabled
+    if secret_previous and secret_previous == secret:
+        secret_previous = ""
     ttl = int(getattr(settings, "image_edge_sign_ttl_seconds", 604800) or 604800)
     ttl = max(60, min(ttl, 31_536_000))
     cache_key = (enabled, secret, secret_previous, tuple(base_urls), ttl)
