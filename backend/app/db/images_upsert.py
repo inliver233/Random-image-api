@@ -1,10 +1,45 @@
 from __future__ import annotations
 
+from typing import Any
+
 import sqlalchemy as sa
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.images import Image
+
+
+def dialect_name_from_session(session: AsyncSession) -> str:
+    """Best-effort SQLAlchemy dialect name from the bound session (sqlite default)."""
+    try:
+        bind = session.get_bind()
+    except Exception:
+        return "sqlite"
+    name = getattr(getattr(bind, "dialect", None), "name", None)
+    text = str(name or "sqlite").strip().lower()
+    return text or "sqlite"
+
+
+def insert_for_dialect(table: Any, *, dialect_name: str) -> Any:
+    """Dialect-aware INSERT … ON CONFLICT builder (sqlite | postgresql)."""
+    name = (dialect_name or "sqlite").strip().lower() or "sqlite"
+    if name.startswith("postgres"):
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        return pg_insert(table)
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    return sqlite_insert(table)
+
+
+def now_expr_for_dialect(dialect_name: str) -> Any:
+    """UTC ISO-ish timestamp expression for updated_at (string column parity)."""
+    name = (dialect_name or "sqlite").strip().lower() or "sqlite"
+    if name.startswith("postgres"):
+        # Approximate SQLite strftime('%Y-%m-%dT%H:%M:%fZ','now') without requiring pgcrypto.
+        return sa.text(
+            "(to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD\"T\"HH24:MI:SS.MS') || 'Z')"
+        )
+    return sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
 
 
 async def upsert_image_by_illust_page(
@@ -18,7 +53,9 @@ async def upsert_image_by_illust_page(
     random_key: float,
     created_import_id: int | None,
 ) -> int:
-    stmt = sqlite_insert(Image).values(
+    dialect = dialect_name_from_session(session)
+    insert = insert_for_dialect(Image, dialect_name=dialect)
+    stmt = insert.values(
         illust_id=illust_id,
         page_index=page_index,
         ext=ext,
@@ -28,7 +65,7 @@ async def upsert_image_by_illust_page(
         created_import_id=created_import_id,
     )
 
-    now_expr = sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
+    now_expr = now_expr_for_dialect(dialect)
     stmt = stmt.on_conflict_do_update(
         index_elements=["illust_id", "page_index"],
         set_={
@@ -73,8 +110,10 @@ async def upsert_hydrated_image_page(
     Does not touch tags (ImageTag) — callers replace tags separately.
     On conflict, preserves existing random_key / status / fail counters.
     """
-    now_expr = sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
-    stmt = sqlite_insert(Image).values(
+    dialect = dialect_name_from_session(session)
+    insert = insert_for_dialect(Image, dialect_name=dialect)
+    now_expr = now_expr_for_dialect(dialect)
+    stmt = insert.values(
         illust_id=int(illust_id),
         page_index=int(page_index),
         ext=str(ext),
@@ -142,8 +181,10 @@ async def bulk_upsert_import_rows(
     if not rows:
         return []
 
-    now_expr = sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
-    stmt = sqlite_insert(Image).values(rows)
+    dialect = dialect_name_from_session(session)
+    insert = insert_for_dialect(Image, dialect_name=dialect)
+    now_expr = now_expr_for_dialect(dialect)
+    stmt = insert.values(rows)
     stmt = stmt.on_conflict_do_update(
         index_elements=["illust_id", "page_index"],
         set_={
@@ -201,6 +242,7 @@ async def bulk_upsert_import_rows(
     await session.execute(stmt)
 
     # Fill proxy_path for (newly inserted) rows that are still empty.
+    # ``||`` string concat is portable across SQLite and Postgres text.
     if keys:
         await session.execute(
             sa.update(Image)

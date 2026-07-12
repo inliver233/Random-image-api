@@ -1,12 +1,13 @@
 # Catalog Store Port
 
-Status: **Phase 4 readiness** (SQLite default; Postgres dialect label only)
+Status: **Phase 4 readiness** (SQLite default; Postgres dialect label + dialect-aware image upserts)
 
 Implementation:
 
 - Protocol: `CatalogStore` in `backend/app/db/catalog.py`
 - Default: `SqliteCatalogStore` → existing `images_upsert` / `images_get` / `images_mark`
-- Postgres label: `PostgresCatalogStore` (same helpers today; dialect-aware divergences later)
+- Postgres label: `PostgresCatalogStore` (same helpers; write path uses dialect-aware upsert)
+- Image upserts (`images_upsert.py`): `insert_for_dialect` + `now_expr_for_dialect` select SQLite vs PostgreSQL `INSERT … ON CONFLICT` builders and UTC timestamp expressions from the bound session dialect
 - Dialect map: `catalog_backend_from_database_url` → `db.dialect.backend_from_database_url` (shared with TagStore / RandomPickPort)
 - Wire-up: `app.state.catalog_store = build_catalog_store(database_url=...)` in `main.py`
 
@@ -65,4 +66,4 @@ Helpers remain available for non-public paths; injected store is preferred via `
 | `/status.json` → `data.catalog.backend` | Same public label; `/status` HTML `ports:` chip includes it |
 | `GET /admin/api/maintenance/modular-ports` | `catalog.backend` |
 
-**Not included:** schema migration, dual-write, or automatic cutover. Production Postgres still requires Alembic/ops work.
+**Not included:** schema migration, dual-write, or automatic cutover. Production Postgres still requires Alembic/ops work. Image upsert SQL is dialect-aware; remaining SQLite-specific write helpers (tags links, runtime_settings, proxy pool inserts) are separate residuals.
