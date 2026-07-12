@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import sqlalchemy as sa
-from sqlalchemy import distinct, func, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,18 @@ class TagListItem:
     count_images: int
 
 
+def _active_image_tag_exists() -> sa.Exists:
+    """EXISTS: tag has ≥1 link to status=1 image (same membership as pre-TAGS-1 INNER JOIN)."""
+    return (
+        sa.exists(
+            select(1)
+            .select_from(ImageTag)
+            .join(Image, Image.id == ImageTag.image_id)
+            .where(ImageTag.tag_id == Tag.id, Image.status == 1)
+        )
+    )
+
+
 async def list_tags(
     session: AsyncSession,
     *,
@@ -28,6 +40,11 @@ async def list_tags(
     cursor: str | None = None,
     q: str | None = None,
 ) -> tuple[list[TagListItem], str | None]:
+    """Cursor-paginated tags with active-image counts.
+
+    TAGS-1: page tags first (name order + optional q), then COUNT only for that page.
+    Avoids full join+GROUP BY over all image_tags on every /tags request (~14s on 62万图).
+    """
     limit_i = int(limit)
     if limit_i < 1:
         raise ValueError("limit must be >= 1")
@@ -44,18 +61,9 @@ async def list_tags(
         if use_fts:
             fts_q = sqlite_fts_phrase_query(q_norm)
 
-    def _build_stmt(*, use_fts_filter: bool) -> sa.Select:
-        stmt = (
-            select(
-                Tag.id,
-                Tag.name,
-                Tag.translated_name,
-                func.count(distinct(ImageTag.image_id)).label("count_images"),
-            )
-            .join(ImageTag, ImageTag.tag_id == Tag.id)
-            .join(Image, Image.id == ImageTag.image_id)
-            .where(Image.status == 1)
-        )
+    def _build_page_stmt(*, use_fts_filter: bool) -> sa.Select:
+        # Page candidates only — no aggregate over the full link table.
+        stmt = select(Tag.id, Tag.name, Tag.translated_name).where(_active_image_tag_exists())
 
         if q_norm:
             if use_fts_filter:
@@ -72,30 +80,45 @@ async def list_tags(
         if cursor_name:
             stmt = stmt.where(Tag.name > cursor_name)
 
-        return stmt.group_by(Tag.id).order_by(Tag.name.asc()).limit(limit_i + 1)
+        return stmt.order_by(Tag.name.asc()).limit(limit_i + 1)
 
-    stmt = _build_stmt(use_fts_filter=use_fts)
+    page_stmt = _build_page_stmt(use_fts_filter=use_fts)
     try:
-        rows = (await session.execute(stmt)).all()
+        page_rows = (await session.execute(page_stmt)).all()
     except DBAPIError:
         if not use_fts:
             raise
-        stmt = _build_stmt(use_fts_filter=False)
-        rows = (await session.execute(stmt)).all()
-    next_cursor: str | None = None
+        page_stmt = _build_page_stmt(use_fts_filter=False)
+        page_rows = (await session.execute(page_stmt)).all()
 
-    if len(rows) > limit_i:
-        rows = rows[:limit_i]
-        next_cursor = str(rows[-1][1] or "")
+    next_cursor: str | None = None
+    if len(page_rows) > limit_i:
+        page_rows = page_rows[:limit_i]
+        next_cursor = str(page_rows[-1][1] or "")
+
+    if not page_rows:
+        return [], None
+
+    tag_ids = [int(row[0]) for row in page_rows]
+    # PK (image_id, tag_id) → COUNT(*) is enough; status=1 filter matches prior semantics.
+    count_rows = (
+        await session.execute(
+            select(ImageTag.tag_id, func.count())
+            .join(Image, Image.id == ImageTag.image_id)
+            .where(ImageTag.tag_id.in_(tag_ids), Image.status == 1)
+            .group_by(ImageTag.tag_id)
+        )
+    ).all()
+    counts = {int(tag_id): int(cnt or 0) for tag_id, cnt in count_rows}
 
     items = [
         TagListItem(
             id=int(row[0]),
             name=str(row[1]),
             translated_name=str(row[2]) if row[2] is not None else None,
-            count_images=int(row[3] or 0),
+            count_images=int(counts.get(int(row[0]), 0)),
         )
-        for row in rows
+        for row in page_rows
     ]
 
     return items, next_cursor

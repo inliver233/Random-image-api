@@ -17,7 +17,8 @@ router = APIRouter()
     summary="List catalog tags",
     description=(
         "Cursor-paginated tag list (`limit`, `cursor`, optional `q` name filter). "
-        "When `PUBLIC_API_KEY_REQUIRED`, send `X-API-Key` or `?api_key=`."
+        "TAGS-1: pages tags first then counts only the page (avoids full-catalog "
+        "join+GROUP BY). When `PUBLIC_API_KEY_REQUIRED`, send `X-API-Key` or `?api_key=`."
     ),
 )
 async def list_tags(

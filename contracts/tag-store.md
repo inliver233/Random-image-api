@@ -18,9 +18,9 @@ Implementation:
 | Method | Role |
 | --- | --- |
 | `get_tag_names_for_image` | Single-image tag names (ordered) |
-| `map_tag_names_by_image_ids` | Engine serialize: image_id → tag name list |
+| `map_tag_names_by_image_ids` | Engine serialize: image_id → tag name list. **ENGINE-1:** chunked `IN` (900) for SQLite bind limits on full snapshot |
 | `image_has_any_tag` | `/i` opportunistic hydrate when tags missing |
-| `list_tags` | Public `GET /tags` cursor list (+ FTS when available) |
+| `list_tags` | Public `GET /tags` cursor list (+ FTS when available). **TAGS-1:** page tags first, COUNT only that page (no full join+GROUP BY) |
 | `ensure_tags_by_names` | Import: insert missing Tag by name (no translation) |
 | `upsert_tags_with_translations` | Hydrate: ensure Tag + optional translated_name update |
 | `link_image_tags` | Insert `(image_id, tag_id)` pairs; ignore conflicts |

@@ -15,6 +15,13 @@ from app.db.session import create_sessionmaker
 from app.main import create_app
 
 
+def test_tags_openapi_documents_tags1_page_first() -> None:
+    app = create_app()
+    op = app.openapi()["paths"]["/tags"]["get"]
+    desc = str(op.get("description") or "")
+    assert "TAGS-1" in desc or "page" in desc.lower()
+
+
 def test_tags_list_search_and_pagination(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "tags_list.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
@@ -125,6 +132,69 @@ def test_tags_list_invalid_limit_returns_400(tmp_path: Path, monkeypatch) -> Non
         assert body["ok"] is False
         assert body["code"] == "BAD_REQUEST"
         assert body["request_id"] == "req_test"
+
+
+def test_tags_list_excludes_tags_only_on_disabled_images(tmp_path: Path, monkeypatch) -> None:
+    """TAGS-1: membership still requires status=1 images (same as old INNER JOIN)."""
+    db_path = tmp_path / "tags_list_status.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            live = Image(
+                illust_id=1,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/1.jpg",
+                proxy_path="/i/1.jpg",
+                random_key=0.1,
+                status=1,
+            )
+            dead = Image(
+                illust_id=2,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/2.jpg",
+                proxy_path="/i/2.jpg",
+                random_key=0.2,
+                status=2,
+            )
+            session.add_all([live, dead])
+            t_live = Tag(name="alive")
+            t_dead = Tag(name="dead_only")
+            session.add_all([t_live, t_dead])
+            await session.commit()
+            await session.refresh(live)
+            await session.refresh(dead)
+            await session.refresh(t_live)
+            await session.refresh(t_dead)
+            session.add_all(
+                [
+                    ImageTag(image_id=int(live.id), tag_id=int(t_live.id)),
+                    ImageTag(image_id=int(dead.id), tag_id=int(t_dead.id)),
+                ]
+            )
+            await session.commit()
+
+        await app.state.engine.dispose()
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        resp = client.get("/tags", headers={"X-Request-Id": "req_status"})
+        assert resp.status_code == 200
+        names = [i["name"] for i in resp.json()["items"]]
+        assert names == ["alive"]
+        assert resp.json()["items"][0]["count_images"] == 1
 
 
 def test_tags_list_uses_fts_when_available(tmp_path: Path, monkeypatch) -> None:

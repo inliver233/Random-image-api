@@ -141,6 +141,45 @@ def test_sqlite_tag_store_links_and_names(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
+def test_map_tag_names_by_image_ids_chunks_large_id_lists(tmp_path: Path) -> None:
+    """ENGINE-1: >999 image ids must not hit SQLite 'too many SQL variables'."""
+    engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "t_chunk.db").as_posix())
+
+    async def _run() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        store = build_tag_store(database_url=str(engine.url))
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            img = Image(
+                illust_id=1,
+                page_index=0,
+                ext="jpg",
+                original_url="https://example.test/1.jpg",
+                proxy_path="/i/1.jpg",
+                random_key=0.1,
+                status=1,
+            )
+            session.add(img)
+            await session.flush()
+            t1 = Tag(name="zulu", translated_name=None)
+            session.add(t1)
+            await session.flush()
+            session.add(ImageTag(image_id=int(img.id), tag_id=int(t1.id)))
+            await session.commit()
+
+            # Real id + many missing ids → single unchunked IN would exceed ~999 binds.
+            huge_ids = [int(img.id)] + list(range(10_000, 12_100))
+            assert len(huge_ids) > 1000
+            mapped = await store.map_tag_names_by_image_ids(session, image_ids=huge_ids)
+            assert mapped[int(img.id)] == ["zulu"]
+            assert mapped[10_000] == []
+            assert len(mapped) == len(huge_ids)
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_sqlite_tag_store_list_tags(tmp_path: Path) -> None:
     engine = create_engine("sqlite+aiosqlite:///" + (tmp_path / "t_list.db").as_posix())
 

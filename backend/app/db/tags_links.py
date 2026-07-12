@@ -24,22 +24,31 @@ async def map_tag_names_by_image_ids(
     *,
     image_ids: Sequence[int],
 ) -> dict[int, list[str]]:
+    """Map image_id → tag name list for engine snapshot/events.
+
+    ENGINE-1: chunk IN lists under SQLite's ~999 bind variable limit so a full
+    catalog snapshot (62万 ids) does not raise "too many SQL variables".
+    """
     ids = [int(i) for i in image_ids]
     out: dict[int, list[str]] = {i: [] for i in ids}
     if not ids:
         return out
-    rows = (
-        await session.execute(
-            sa.select(ImageTag.image_id, Tag.name)
-            .join(Tag, Tag.id == ImageTag.tag_id)
-            .where(ImageTag.image_id.in_(ids))
-        )
-    ).all()
-    for image_id, name in rows:
-        n = str(name or "").strip()
-        if not n:
-            continue
-        out.setdefault(int(image_id), []).append(n)
+    # Match images_delete / delete_image_tags chunking.
+    chunk_size = 900
+    for offset in range(0, len(ids), chunk_size):
+        chunk = ids[offset : offset + chunk_size]
+        rows = (
+            await session.execute(
+                sa.select(ImageTag.image_id, Tag.name)
+                .join(Tag, Tag.id == ImageTag.tag_id)
+                .where(ImageTag.image_id.in_(chunk))
+            )
+        ).all()
+        for image_id, name in rows:
+            n = str(name or "").strip()
+            if not n:
+                continue
+            out.setdefault(int(image_id), []).append(n)
     return out
 
 
