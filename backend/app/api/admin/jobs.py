@@ -44,7 +44,17 @@ def _serialize_job_row(row: JobRow, *, include_payload: bool = False) -> dict[st
     return item
 
 
-@router.get("/jobs")
+@router.get(
+    "/jobs",
+    summary="List jobs",
+    description=(
+        "Cursor-paged job rows from the SQLite `jobs` table (admin UI persistence). "
+        "Optional filters: `status` (pending/running/paused/canceled/completed/failed/dlq) "
+        "and free-form `type`. "
+        "JobQueuePort claim/enqueue backends (sqlite/memory today; redis/nats fail-loud) "
+        "do not replace this table until a full external-queue cutover — see contracts/job-queue.md."
+    ),
+)
 async def list_jobs(
     request: Request,
     limit: int = 50,
@@ -90,7 +100,14 @@ async def list_jobs(
     return admin_cursor_list(request, items=items, next_cursor=next_cursor, request_id=rid)
 
 
-@router.get("/jobs/{job_id}")
+@router.get(
+    "/jobs/{job_id}",
+    summary="Get job detail",
+    description=(
+        "Single job row including soft-parsed `payload` / raw `payload_json`. "
+        "Status and locks are SQLite-persisted regardless of JobQueuePort claim backend."
+    ),
+)
 async def get_job(
     job_id: int,
     request: Request,
@@ -116,7 +133,14 @@ async def get_job(
     )
 
 
-@router.post("/jobs/{job_id}/retry")
+@router.post(
+    "/jobs/{job_id}/retry",
+    summary="Retry job",
+    description=(
+        "Re-queue a non-running job: status→`pending`, clear `run_after` and lock fields. "
+        "Rejects while status is `running`. Worker claim path re-picks via JobQueuePort."
+    ),
+)
 async def retry_job(
     job_id: int,
     request: Request,
@@ -156,7 +180,14 @@ async def retry_job(
     return await with_sqlite_busy_retry(_op)
 
 
-@router.post("/jobs/{job_id}/cancel")
+@router.post(
+    "/jobs/{job_id}/cancel",
+    summary="Cancel job",
+    description=(
+        "Mark job `canceled` and clear locks. Does not interrupt an in-process handler; "
+        "stops further claim/retry via JobQueuePort until re-queued."
+    ),
+)
 async def cancel_job(
     job_id: int,
     request: Request,
@@ -192,7 +223,14 @@ async def cancel_job(
     return await with_sqlite_busy_retry(_op)
 
 
-@router.post("/jobs/{job_id}/move-to-dlq")
+@router.post(
+    "/jobs/{job_id}/move-to-dlq",
+    summary="Move job to DLQ",
+    description=(
+        "Force status→`dlq`, clear `run_after` and locks. Dead-letter is SQLite admin state; "
+        "retry can re-open to `pending` for JobQueuePort claim."
+    ),
+)
 async def move_job_to_dlq(
     job_id: int,
     request: Request,

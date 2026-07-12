@@ -133,3 +133,31 @@ def test_admin_list_jobs_cursor_and_filters(tmp_path: Path, monkeypatch) -> None
         assert len(body4["items"]) == 2
         assert {item["type"] for item in body4["items"]} == {"import_images"}
 
+
+def test_admin_jobs_openapi_documents_queue_persistence() -> None:
+    """Admin jobs OpenAPI must not use bare Title-Case auto titles; document SQLite persistence vs JobQueuePort."""
+    app = create_app()
+    schema = app.openapi()
+    paths = schema["paths"]
+
+    list_op = paths["/admin/api/jobs"]["get"]
+    assert list_op.get("summary") == "List jobs"
+    list_desc = str(list_op.get("description") or "")
+    assert "jobs" in list_desc.lower()
+    assert "JobQueuePort" in list_desc or "job queue" in list_desc.lower()
+
+    get_op = paths["/admin/api/jobs/{job_id}"]["get"]
+    assert get_op.get("summary") == "Get job detail"
+    assert "payload" in str(get_op.get("description") or "").lower()
+
+    retry_op = paths["/admin/api/jobs/{job_id}/retry"]["post"]
+    assert retry_op.get("summary") == "Retry job"
+    assert "pending" in str(retry_op.get("description") or "")
+
+    cancel_op = paths["/admin/api/jobs/{job_id}/cancel"]["post"]
+    assert cancel_op.get("summary") == "Cancel job"
+    assert "canceled" in str(cancel_op.get("description") or "")
+
+    dlq_op = paths["/admin/api/jobs/{job_id}/move-to-dlq"]["post"]
+    assert dlq_op.get("summary") == "Move job to DLQ"
+    assert "dlq" in str(dlq_op.get("description") or "").lower()
