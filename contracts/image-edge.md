@@ -5,10 +5,11 @@ Implementation:
 
 - Worker: `edge/img-worker`
 - Python signer: `backend/app/core/image_edge.py`
-- Public wiring:
-  - `/random` `urls.proxy` via `resolve_public_proxy_url`
-  - `/random?format=image` and `redirect=1` → 302 to signed edge when enabled
-  - `/i/{id}.{ext}` → 302 to signed edge when enabled (`?local=1` forces origin stream)
+- Public wiring (H0 product semantics):
+  - `/random` `urls.proxy` via `resolve_public_proxy_url` (JSON best URL; may still be signed edge)
+  - `/random?format=image` (default) → **same-origin 200** stream; BFF pulls signed img-worker when ready
+  - `/random?redirect=1` → browser **302** to signed edge URL (opt-in; F5 does not re-pick)
+  - `/i/{id}.{ext}` → same-origin 200 stream via CF when ready; `?redirect=1` / `edge_redirect=1` → browser 302; `?local=1` forces local/mirror stream
 
 ## URL
 
@@ -45,13 +46,14 @@ BFF counters: Prometheus `new_pixiv_image_delivery_total{path=...}`:
 
 | path | Meaning |
 | --- | --- |
-| `edge_redirect` | 302 to signed edge URL |
+| `edge_stream` | same-origin **200** with BFF streaming signed img-worker (H0 default when edge ready) |
+| `edge_redirect` | browser **302** to signed edge URL (opt-in `redirect=1` only) |
 | `edge_unavailable` | prefer edge but no signed URL → local cascade |
 | `local_stream` | any local byte stream (legacy aggregate) |
 | `local_stream_direct` | local stream without residential proxy |
 | `local_stream_residential` | local stream via residential pool |
 | `local_stream_mirror` | local stream via pixiv.cat / host mirror |
-| `local_i_redirect` | `/i` non-stream redirect path |
+| `local_i_redirect` | `/random?redirect=1` cascade to local `/i` when edge not usable |
 
 BFF R2 prewarm enqueue counters: Prometheus `new_pixiv_r2_prewarm_total{result=...}` (best-effort; never raises):
 

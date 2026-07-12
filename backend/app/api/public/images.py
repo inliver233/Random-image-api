@@ -141,10 +141,12 @@ async def get_image(
 
 @router.get(
     "/i/{image_id}.{ext}",
-    summary="Deliver image bytes or edge redirect",
+    summary="Deliver image bytes (same-origin stream via CF when ready)",
     description=(
-        "Public image delivery: 302 to signed Image Edge when ready, else local stream. "
-        "`?local=1` forces origin-side stream. When `PUBLIC_API_KEY_REQUIRED`, send "
+        "Public image delivery (H0): same-origin **200** stream; when Image Edge is ready, "
+        "BFF pulls signed img-worker URL (upstream i.pximg.net). "
+        "`?redirect=1` / `?edge_redirect=1` opts into browser 302 to workers.dev. "
+        "`?local=1` forces origin/mirror stream (skip edge). When `PUBLIC_API_KEY_REQUIRED`, send "
         "`X-API-Key` or `?api_key=` (browser navigations typically use the query form)."
     ),
 )
@@ -170,7 +172,7 @@ async def proxy_image(
         if image is None or (image.ext or "").lower() != ext:
             raise ApiError(code=ErrorCode.NOT_FOUND, message="Image not found", status_code=404)
         should_mark_ok = should_mark_image_ok(image)
-        # Skip tag SQL when edge is ready and client prefers edge — edge 302 only needs
+        # Skip tag SQL when edge is ready and client prefers edge — edge stream/302 only needs
         # cheap opportunistic hydrate for metadata holes (tags checked only on local stream).
         settings = getattr(request.app.state, "settings", None)
         # Multi-process: refresh runtime image pool before readiness/hydrate branch

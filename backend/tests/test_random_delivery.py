@@ -14,6 +14,7 @@ from app.core.random_delivery import (
     deliver_random_image_stream,
     schedule_edge_side_effects,
 )
+from app.core.random_request import prefer_edge_browser_redirect_from_query
 
 
 def test_build_edge_redirect_response_headers() -> None:
@@ -22,6 +23,14 @@ def test_build_edge_redirect_response_headers() -> None:
     assert resp.headers.get("location") == "https://img.example.com/u/1/sig/path"
     assert resp.headers.get("x-image-edge") == "1"
     assert resp.headers.get("cache-control") == "no-store"
+
+
+def test_prefer_edge_browser_redirect_from_query() -> None:
+    assert prefer_edge_browser_redirect_from_query({}) is False
+    assert prefer_edge_browser_redirect_from_query({"redirect": "0"}) is False
+    assert prefer_edge_browser_redirect_from_query({"redirect": "1"}) is True
+    assert prefer_edge_browser_redirect_from_query({"edge_redirect": "true"}) is True
+    assert prefer_edge_browser_redirect_from_query({"local": "1"}) is False
 
 
 def test_attach_background_sets_when_missing() -> None:
@@ -78,7 +87,8 @@ def test_observe_image_delivery_counts_edge_path(monkeypatch: pytest.MonkeyPatch
     assert after_miss == before_miss + 1.0
 
 
-def test_deliver_random_image_stream_edge_redirect(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_deliver_random_image_stream_edge_stream_h0(monkeypatch: pytest.MonkeyPatch) -> None:
+    """H0: prefer edge → same-origin stream via signed img-worker (not browser 302)."""
     image = SimpleNamespace(
         id=1,
         illust_id=10,
@@ -117,6 +127,18 @@ def test_deliver_random_image_stream_edge_redirect(monkeypatch: pytest.MonkeyPat
     )
     monkeypatch.setattr("app.core.random_delivery.needs_opportunistic_hydrate", lambda _img: False)
 
+    streamed: list[str] = []
+
+    class _FakeResp:
+        status_code = 200
+        headers: dict[str, str] = {}
+
+    async def _stream_url(url, **kwargs):  # type: ignore[no-untyped-def]
+        streamed.append(str(url))
+        return _FakeResp()
+
+    monkeypatch.setattr("app.core.random_delivery.stream_url", _stream_url)
+
     bg = BackgroundTasks()
 
     def no_match() -> ApiError:
@@ -133,7 +155,7 @@ def test_deliver_random_image_stream_edge_redirect(monkeypatch: pytest.MonkeyPat
             httpx_client=None,
             range_header=None,
             attempts=1,
-            prefer_edge_redirect=True,
+            prefer_edge_stream=True,
             use_pixiv_cat=False,
             mirror_host="i.pixiv.cat",
             anti_repeat_enabled=False,
@@ -146,16 +168,18 @@ def test_deliver_random_image_stream_edge_redirect(monkeypatch: pytest.MonkeyPat
 
     from app.core.metrics import IMAGE_DELIVERY_TOTAL
 
-    before = IMAGE_DELIVERY_TOTAL.labels(path="edge_redirect")._value.get()
+    before = IMAGE_DELIVERY_TOTAL.labels(path="edge_stream")._value.get()
+    before_redirect = IMAGE_DELIVERY_TOTAL.labels(path="edge_redirect")._value.get()
     resp = asyncio.run(_run())
-    assert isinstance(resp, RedirectResponse)
-    assert resp.status_code == 302
-    assert resp.headers.get("x-image-edge") == "1"
-    assert (resp.headers.get("location") or "").startswith("https://img.example.com/")
-    # No mark_ok background task when edge 302 (hydrate false, anti_repeat false)
-    assert len(bg.tasks) == 0
-    after = IMAGE_DELIVERY_TOTAL.labels(path="edge_redirect")._value.get()
+    assert isinstance(resp, _FakeResp)
+    assert streamed == ["https://img.example.com/u/1/sig/b64"]
+    assert resp.headers.get("X-Image-Edge") == "stream"
+    # Stream proved bytes → mark_ok scheduled (last_ok_at was None / error).
+    assert len(bg.tasks) == 1
+    after = IMAGE_DELIVERY_TOTAL.labels(path="edge_stream")._value.get()
+    after_redirect = IMAGE_DELIVERY_TOTAL.labels(path="edge_redirect")._value.get()
     assert after == before + 1.0
+    assert after_redirect == before_redirect
 
 
 def test_deliver_random_image_stream_edge_unavailable_falls_to_local(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -342,10 +366,10 @@ def test_deliver_random_image_stream_engine_dto_marks_ok_on_local(
     assert getattr(bg.tasks[0].func, "__name__", "") == "best_effort"
 
 
-def test_deliver_random_image_stream_engine_dto_skips_mark_ok_on_edge(
+def test_deliver_random_image_stream_engine_dto_marks_ok_on_edge_stream(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Even with from_engine_item, edge 302 must not schedule mark_ok."""
+    """H0 edge stream proves bytes → mark_ok for engine DTO (unlike old browser 302)."""
     image = SimpleNamespace(
         id=4,
         illust_id=40,
@@ -385,6 +409,15 @@ def test_deliver_random_image_stream_engine_dto_skips_mark_ok_on_edge(
     )
     monkeypatch.setattr("app.core.random_delivery.needs_opportunistic_hydrate", lambda _img: False)
 
+    class _FakeResp:
+        status_code = 200
+        headers: dict[str, str] = {}
+
+    async def _stream_url(*args, **kwargs):  # type: ignore[no-untyped-def]
+        return _FakeResp()
+
+    monkeypatch.setattr("app.core.random_delivery.stream_url", _stream_url)
+
     bg = BackgroundTasks()
 
     def no_match() -> ApiError:
@@ -401,7 +434,7 @@ def test_deliver_random_image_stream_engine_dto_skips_mark_ok_on_edge(
             httpx_client=None,
             range_header=None,
             attempts=1,
-            prefer_edge_redirect=True,
+            prefer_edge_stream=True,
             use_pixiv_cat=False,
             mirror_host="i.pixiv.cat",
             anti_repeat_enabled=False,
@@ -413,8 +446,8 @@ def test_deliver_random_image_stream_engine_dto_skips_mark_ok_on_edge(
         )
 
     resp = asyncio.run(_run())
-    assert isinstance(resp, RedirectResponse)
-    assert len(bg.tasks) == 0
+    assert isinstance(resp, _FakeResp)
+    assert len(bg.tasks) == 1
 
 
 def test_deliver_random_image_stream_sticky_skip_engine_on_retries(

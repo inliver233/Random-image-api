@@ -41,7 +41,11 @@ router = APIRouter()
     "/random",
     summary="Pick one random image",
     description=(
-        "Public single pick. JSON formats omit `data.debug` unless `debug=1` "
+        "Public single pick. Default `format=image`: same-origin **200** image stream "
+        "(upstream via self-built CF img-worker when ready; address bar stays on /random). "
+        "Only `redirect=1` issues browser 302 to signed workers.dev URL. "
+        "`local=1` forces local/mirror stream (skip edge). "
+        "JSON formats omit `data.debug` unless `debug=1` "
         "(surfaces dual-run `engine_status` such as `ok`, `skipped_circuit`, "
         "`skipped_sticky`, `skipped_traffic`). Image/redirect modes ignore debug."
     ),
@@ -227,8 +231,10 @@ async def random_image(
 
     # Multi-process: refresh overlay before readiness gate so runtime-only bases can enable edge.
     # deliver_random_image_stream also refreshes before sign; this avoids false prefer=false.
+    # H0: format=image default = same-origin 200 + BFF stream via signed img-worker (not 302).
+    # Browser 302 is only the redirect=1 branch above.
     await ensure_image_edge_overlay_fresh(getattr(request.app.state, "engine", None))
-    prefer_edge_redirect = prefer_image_edge(
+    prefer_edge_stream = prefer_image_edge(
         proxy_override=proxy_override,
         pixiv_cat=int(pixiv_cat),
         pximg_mirror_host_override=pximg_mirror_host_override,
@@ -258,7 +264,8 @@ async def random_image(
         httpx_client=getattr(request.app.state, "httpx_client", None),
         range_header=request.headers.get("Range"),
         attempts=int(pick_ctx.attempts),
-        prefer_edge_redirect=prefer_edge_redirect,
+        prefer_edge_stream=prefer_edge_stream,
+        prefer_edge_redirect=False,
         use_pixiv_cat=use_pixiv_cat,
         mirror_host=mirror_host,
         anti_repeat_enabled=bool(pick_ctx.anti_repeat_enabled),

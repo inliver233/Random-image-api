@@ -93,11 +93,11 @@ type ProbeResponse = {
 
 const USAGE_STEPS = [
   "创建具有 Workers 编辑权限的 CF API 令牌",
-  "填写账户 ID 与 Worker 名称",
+  "填写账户 ID 与 Worker 名称（出图建议 -img 后缀、API 建议 -api；image/api 禁止同名以免互相覆盖）",
   "选择类型：API 出口 或 出图边缘，点击部署",
   "成功后自动加入本系统对应出口池，无需手写 BASE_URLS",
-  "补全/Token 走 api-worker；用户出图走 img-worker 反代 i.pximg.net，而非住宅",
-  "多 Worker 名 = 多出口节点；runtime 可「注销」出池（不删脚本），或「删除脚本」走 CF API 真正删 Worker（需再次填 Token，Token 不落库）",
+  "补全/Token 走 api-worker；用户出图默认本域 200，字节上游经 img-worker 反代 i.pximg.net（非住宅；redirect=1 才 302 到 workers.dev）",
+  "多 Worker 名 = 多出口节点；「注销」仅摘本系统池、不需 Token；「删除脚本」走 CF API 硬删 Worker，须重填 API Token + 账户 ID（Token 不落库）",
 ];
 
 function formatBaseCooldown(rows: BaseCooldownRow[] | undefined): string {
@@ -116,11 +116,51 @@ function formatBaseCooldown(rows: BaseCooldownRow[] | undefined): string {
     .join(" · ");
 }
 
+/** Normalize Worker script name for same-name checks (CF names are case-insensitive). */
+function normalizeWorkerName(name: string): string {
+  return String(name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\.workers\.dev$/i, "");
+}
+
+function workerNameFromHost(host: string): string {
+  const h = String(host || "").trim();
+  const noScheme = h.replace(/^https?:\/\//i, "");
+  const first = noScheme.split("/")[0] || noScheme;
+  const dot = first.indexOf(".");
+  return dot > 0 ? first.slice(0, dot) : first;
+}
+
+/** Collect registered/env Worker names for the opposite kind (cross-kind overwrite guard). */
+function collectWorkerNames(side: PoolSide | undefined): Set<string> {
+  const out = new Set<string>();
+  for (const raw of side?.merged_base_urls || []) {
+    const host = String(raw || "")
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/$/, "");
+    const n = normalizeWorkerName(workerNameFromHost(host));
+    if (n) out.add(n);
+  }
+  for (const m of side?.members || []) {
+    const host = String(m.base_url || "")
+      .replace(/^https?:\/\//i, "")
+      .replace(/\/$/, "");
+    const n = normalizeWorkerName(workerNameFromHost(host));
+    if (n) out.add(n);
+  }
+  return out;
+}
+
 export function CfWorkerPage() {
   const queryClient = useQueryClient();
   const alerts = useActionAlerts();
   const [form] = Form.useForm<DeployFormValues>();
   const kind = Form.useWatch("kind", form) as "api" | "image" | undefined;
+  const watchedApiToken = Form.useWatch("api_token", form);
+  const watchedAccountId = Form.useWatch("account_id", form);
+  const hasDeleteCredentials =
+    Boolean(String(watchedApiToken || "").trim()) && Boolean(String(watchedAccountId || "").trim());
 
   const poolQuery = useQuery({
     queryKey: ["admin", "cf-workers", "pool"],
@@ -285,14 +325,13 @@ export function CfWorkerPage() {
 
   const pool = poolQuery.data;
   const policy = pool?.egress_policy;
+  const otherKindNames = React.useMemo(() => {
+    if (kind === "image") return collectWorkerNames(pool?.api);
+    if (kind === "api") return collectWorkerNames(pool?.image);
+    return new Set<string>();
+  }, [kind, pool?.api, pool?.image]);
 
-  const workerNameFromHost = (host: string): string => {
-    const h = String(host || "").trim();
-    const dot = h.indexOf(".");
-    return dot > 0 ? h.slice(0, dot) : h;
-  };
-
-  const renderPoolBases = (side: PoolSide | undefined, kind: "api" | "image") => {
+  const renderPoolBases = (side: PoolSide | undefined, sideKind: "api" | "image") => {
     const envSet = new Set((side?.env_base_urls || []).map((u) => String(u).replace(/\/$/, "")));
     const merged = side?.merged_base_urls || [];
     if (merged.length === 0) {
@@ -306,66 +345,79 @@ export function CfWorkerPage() {
           const host = base.replace(/^https?:\/\//, "");
           const workerName = workerNameFromHost(host);
           return (
-            <Space key={`${kind}:${base}`} wrap size={8}>
+            <Space key={`${sideKind}:${base}`} wrap size={8} align="start">
               <Typography.Text code style={{ fontSize: 12 }}>
                 {host}
               </Typography.Text>
               <Tag>{fromEnv ? "env" : "runtime"}</Tag>
               {!fromEnv ? (
-                <>
-                  <Button
-                    size="small"
-                    danger
-                    loading={
-                      unregister.isPending &&
-                      unregister.variables?.kind === kind &&
-                      unregister.variables?.base_url === base
-                    }
-                    onClick={() => {
-                      const ok = window.confirm(
-                        `从运行时池注销 ${host}？\n不会删除 Cloudflare 上的 Worker 脚本；仅从本系统出口池移除。`,
-                      );
-                      if (!ok) return;
-                      unregister.mutate({ kind, base_url: base });
-                    }}
-                  >
-                    注销
-                  </Button>
-                  <Button
-                    size="small"
-                    danger
-                    type="dashed"
-                    loading={
-                      deleteScript.isPending &&
-                      deleteScript.variables?.kind === kind &&
-                      deleteScript.variables?.base_url === base
-                    }
-                    onClick={() => {
-                      const values = form.getFieldsValue();
-                      const apiToken = String(values.api_token || "").trim();
-                      const accountId = String(values.account_id || "").trim();
-                      if (!apiToken || !accountId) {
-                        alerts.setErrorMessage(
-                          "删除 CF 脚本需在上方表单填写 API Token 与账户 ID（不落库）",
-                        );
-                        return;
+                <Space direction="vertical" size={2}>
+                  <Space wrap size={8}>
+                    <Button
+                      size="small"
+                      danger
+                      loading={
+                        unregister.isPending &&
+                        unregister.variables?.kind === sideKind &&
+                        unregister.variables?.base_url === base
                       }
-                      const ok = window.confirm(
-                        `从 Cloudflare 删除 Worker 脚本「${workerName}」并尝试从本系统池注销 ${host}？\n此操作不可恢复（CF 侧脚本删除）。`,
-                      );
-                      if (!ok) return;
-                      deleteScript.mutate({
-                        kind,
-                        base_url: base,
-                        worker_name: workerName,
-                        api_token: apiToken,
-                        account_id: accountId,
-                      });
-                    }}
-                  >
-                    删除脚本
-                  </Button>
-                </>
+                      onClick={() => {
+                        const ok = window.confirm(
+                          `从运行时池注销 ${host}？\n不会删除 Cloudflare 上的 Worker 脚本；仅从本系统出口池移除（无需 CF Token）。`,
+                        );
+                        if (!ok) return;
+                        unregister.mutate({ kind: sideKind, base_url: base });
+                      }}
+                    >
+                      注销（仅摘池）
+                    </Button>
+                    <Button
+                      size="small"
+                      danger
+                      type="dashed"
+                      disabled={!hasDeleteCredentials}
+                      title={
+                        hasDeleteCredentials
+                          ? "从 Cloudflare 删除脚本并尝试从本系统池注销"
+                          : "须先在上方表单重填 API Token 与账户 ID（部署成功后 Token 已清空，不落库）"
+                      }
+                      loading={
+                        deleteScript.isPending &&
+                        deleteScript.variables?.kind === sideKind &&
+                        deleteScript.variables?.base_url === base
+                      }
+                      onClick={() => {
+                        const values = form.getFieldsValue();
+                        const apiToken = String(values.api_token || "").trim();
+                        const accountId = String(values.account_id || "").trim();
+                        if (!apiToken || !accountId) {
+                          alerts.setErrorMessage(
+                            "删除脚本失败：须在上方表单重填 Cloudflare API Token 与账户 ID（Token 部署后会清空且永不落库）。「注销」仅摘池、不需要 Token。",
+                          );
+                          return;
+                        }
+                        const ok = window.confirm(
+                          `从 Cloudflare 硬删 Worker 脚本「${workerName}」并尝试从本系统池注销 ${host}？\n此操作不可恢复（CF 侧脚本删除）。\n注意：这与「注销（仅摘池）」不同。`,
+                        );
+                        if (!ok) return;
+                        deleteScript.mutate({
+                          kind: sideKind,
+                          base_url: base,
+                          worker_name: workerName,
+                          api_token: apiToken,
+                          account_id: accountId,
+                        });
+                      }}
+                    >
+                      删除脚本
+                    </Button>
+                  </Space>
+                  {!hasDeleteCredentials ? (
+                    <Typography.Text type="danger" style={{ fontSize: 12 }}>
+                      删除脚本须重填上方 API Token + 账户 ID（与「注销」不同，注销不需 Token）
+                    </Typography.Text>
+                  ) : null}
+                </Space>
               ) : (
                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   env 成员请改 IMAGE_EDGE / CF_API_PROXY 环境变量
@@ -449,11 +501,35 @@ export function CfWorkerPage() {
           <Form.Item
             name="worker_name"
             label="Worker 名称"
-            rules={[{ required: true, message: "填写 Worker 名" }]}
-            extra="小写字母/数字/连字符；多名称 = 多出口节点"
+            rules={[
+              { required: true, message: "填写 Worker 名" },
+              {
+                validator: async (_, value) => {
+                  const n = normalizeWorkerName(String(value || ""));
+                  if (!n) return;
+                  if (otherKindNames.has(n)) {
+                    const other = kind === "image" ? "API" : "出图";
+                    throw new Error(
+                      `与已注册的${other} Worker 同名，会互相覆盖（曾导致 /u Forbidden）。请改用不同名称（建议出图 *-img、API *-api）。`,
+                    );
+                  }
+                },
+              },
+            ]}
+            extra="小写字母/数字/连字符；多名称 = 多出口节点。image/api 禁止同名。"
           >
-            <Input placeholder="ria-img-a" allowClear />
+            <Input
+              placeholder={kind === "api" ? "ria-api-a" : "ria-img-a"}
+              allowClear
+            />
           </Form.Item>
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="禁止 image / API 使用相同 Worker 名称"
+            description="同名会互相覆盖脚本：出图路径可能返回 API 的 Forbidden。默认占位已区分 -img / -api；部署前请确认与另一池成员不同名。"
+          />
           {kind === "api" ? (
             <Form.Item
               name="proxy_secret"
@@ -569,7 +645,7 @@ export function CfWorkerPage() {
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label="API base 冷却">
-                <Cooldown.Text type="secondary" style={{ fontSize: 12 }}>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                   {formatBaseCooldown(pool.api?.base_cooldown)}
                 </Typography.Text>
               </Descriptions.Item>
@@ -586,7 +662,7 @@ export function CfWorkerPage() {
           type="info"
           showIcon
           message="主路径说明"
-          description="用户出图：签名 URL → img-worker → i.pximg.net。后台补全/Token：api-worker allowlist。住宅/EasyProxies 仅应急；上表「进程强制住宅」为一键应急开关（进程本地、不改 env）。base 冷却为进程本地指数退避（30s×2^(streak-1)，上限 300s），多副本不共享。"
+          description="用户出图：默认本域 200（地址栏保持 /random，F5 换图），字节上游经自建 img-worker → i.pximg.net；仅 redirect=1 才 302 到 workers.dev 签名 URL。后台补全/Token：api-worker allowlist。住宅/EasyProxies 仅应急；「进程强制住宅」为一键应急（进程本地）。base 冷却为进程本地指数退避，多副本不共享。"
         />
       </Card>
 

@@ -503,7 +503,10 @@ def test_random_simple_json_proxy_prefers_image_edge(tmp_path: Path, monkeypatch
         assert sig == expect
 
 
-def test_proxy_image_route_prefers_image_edge(tmp_path: Path, monkeypatch) -> None:
+def test_proxy_image_route_prefers_image_edge_stream(tmp_path: Path, monkeypatch) -> None:
+    """H0: /i default is same-origin stream via signed edge, not browser 302."""
+    from starlette.responses import Response
+
     db_path = tmp_path / "image_edge_i_route.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
 
@@ -513,6 +516,14 @@ def test_proxy_image_route_prefers_image_edge(tmp_path: Path, monkeypatch) -> No
     monkeypatch.setenv("IMAGE_EDGE_SECRET", "edge-secret")
     monkeypatch.setenv("IMAGE_EDGE_BASE_URLS", "https://img.example.com")
     monkeypatch.setenv("IMAGE_EDGE_SIGN_TTL_SECONDS", "3600")
+
+    streamed: list[str] = []
+
+    async def _fake_stream(url, **kwargs):  # type: ignore[no-untyped-def]
+        streamed.append(str(url))
+        return Response(content=b"png-bytes", media_type="image/png", status_code=200)
+
+    monkeypatch.setattr("app.core.image_delivery.stream_url", _fake_stream)
 
     app = create_app()
 
@@ -539,18 +550,34 @@ def test_proxy_image_route_prefers_image_edge(tmp_path: Path, monkeypatch) -> No
 
     with TestClient(app) as client:
         resp = client.get("/i/1.png", headers={"X-Request-Id": "req_i_edge"}, follow_redirects=False)
-        assert resp.status_code == 302
-        loc = resp.headers.get("location") or ""
-        assert loc.startswith("https://img.example.com/u/")
-        assert resp.headers.get("x-image-edge") == "1"
+        assert resp.status_code == 200
+        assert resp.headers.get("location") is None
+        assert resp.headers.get("x-image-edge") == "stream"
+        assert streamed and streamed[0].startswith("https://img.example.com/u/")
 
+        # Opt-in browser 302 still available.
+        redir = client.get(
+            "/i/1.png?redirect=1",
+            headers={"X-Request-Id": "req_i_edge_302"},
+            follow_redirects=False,
+        )
+        assert redir.status_code == 302
+        assert (redir.headers.get("location") or "").startswith("https://img.example.com/u/")
+        assert redir.headers.get("x-image-edge") == "1"
+
+        streamed.clear()
         local = client.get("/i/1.png?local=1", headers={"X-Request-Id": "req_i_local"}, follow_redirects=False)
-        # Local stream path may fail upstream in unit env; must NOT be edge 302.
+        # Local stream must not pull signed edge URL.
+        assert local.headers.get("x-image-edge") != "stream"
         assert local.headers.get("x-image-edge") != "1"
+        assert not any(u.startswith("https://img.example.com/") for u in streamed)
         assert not (local.headers.get("location") or "").startswith("https://img.example.com/")
 
 
-def test_random_image_default_prefers_edge_redirect(tmp_path: Path, monkeypatch) -> None:
+def test_random_image_default_prefers_edge_stream(tmp_path: Path, monkeypatch) -> None:
+    """H0: default /random format=image is same-origin 200 via CF edge stream, not 302."""
+    from starlette.responses import Response
+
     db_path = tmp_path / "image_edge_random_default.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
 
@@ -560,6 +587,15 @@ def test_random_image_default_prefers_edge_redirect(tmp_path: Path, monkeypatch)
     monkeypatch.setenv("IMAGE_EDGE_SECRET", "edge-secret")
     monkeypatch.setenv("IMAGE_EDGE_BASE_URLS", "https://img.example.com")
     monkeypatch.setenv("IMAGE_EDGE_SIGN_TTL_SECONDS", "3600")
+
+    streamed: list[str] = []
+
+    async def _fake_stream(url, **kwargs):  # type: ignore[no-untyped-def]
+        streamed.append(str(url))
+        return Response(content=b"jpg-bytes", media_type="image/jpeg", status_code=200)
+
+    # random_delivery imports stream_url into its module namespace.
+    monkeypatch.setattr("app.core.random_delivery.stream_url", _fake_stream)
 
     app = create_app()
 
@@ -586,13 +622,27 @@ def test_random_image_default_prefers_edge_redirect(tmp_path: Path, monkeypatch)
 
     with TestClient(app) as client:
         resp = client.get("/random?format=image", headers={"X-Request-Id": "req_edge_img"}, follow_redirects=False)
-        assert resp.status_code == 302
-        assert (resp.headers.get("location") or "").startswith("https://img.example.com/u/")
-        assert resp.headers.get("x-image-edge") == "1"
+        assert resp.status_code == 200
+        assert resp.headers.get("location") is None
+        assert resp.headers.get("x-image-edge") == "stream"
+        assert streamed and streamed[0].startswith("https://img.example.com/u/")
 
+        # Opt-in redirect=1 remains browser 302.
+        redir = client.get(
+            "/random?format=image&redirect=1",
+            headers={"X-Request-Id": "req_edge_img_302"},
+            follow_redirects=False,
+        )
+        assert redir.status_code == 302
+        assert (redir.headers.get("location") or "").startswith("https://img.example.com/u/")
+        assert redir.headers.get("x-image-edge") == "1"
+
+        streamed.clear()
         forced = client.get(
             "/random?format=image&local=1",
             headers={"X-Request-Id": "req_edge_local"},
             follow_redirects=False,
         )
+        assert forced.headers.get("x-image-edge") != "stream"
         assert forced.headers.get("x-image-edge") != "1"
+        assert not any(u.startswith("https://img.example.com/") for u in streamed)

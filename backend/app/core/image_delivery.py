@@ -24,7 +24,11 @@ from app.core.random_delivery import (
     schedule_mark_ok_if_needed,
     should_mark_image_ok,
 )
-from app.core.random_request import force_local_from_query, prefer_image_edge
+from app.core.random_request import (
+    force_local_from_query,
+    prefer_edge_browser_redirect_from_query,
+    prefer_image_edge,
+)
 from app.core.random_strategy import needs_opportunistic_hydrate
 from app.core.runtime_config_cache import resolve_runtime_for_request
 from app.core.time import iso_utc_ms
@@ -84,6 +88,8 @@ async def deliver_public_image_from_request(
         proxy=proxy,
     )
     force_local = force_local_from_query(request.query_params)
+    # H0: /i default = same-origin stream via CF; only redirect=1 / edge_redirect=1 → browser 302.
+    prefer_browser_302 = prefer_edge_browser_redirect_from_query(request.query_params)
     return await deliver_known_image(
         request=request,
         engine=engine,
@@ -102,6 +108,7 @@ async def deliver_public_image_from_request(
         mark_fail_on_upstream=bool(mark_fail_on_upstream),
         catalog=catalog,
         job_queue=job_queue,
+        prefer_edge_browser_redirect=prefer_browser_302,
     )
 
 
@@ -126,8 +133,16 @@ async def deliver_known_image(
     mark_fail_on_upstream: bool = False,
     catalog: CatalogStore | None = None,
     job_queue: Any | None = None,
+    # H0: same-origin 200 via CF edge stream by default; opt-in browser 302 only.
+    prefer_edge_browser_redirect: bool = False,
 ) -> Any:
-    """Shared edge-prefer + local stream path for /i and legacy routes."""
+    """Shared edge-prefer + local stream path for /i and legacy routes.
+
+    H0 product default when image edge is ready: BFF streams signed img-worker URL
+    and returns **200 on this domain**. Browser 302 to workers.dev only when
+    ``prefer_edge_browser_redirect=True`` (e.g. ``?redirect=1`` / ``edge_redirect=1``).
+    ``?local=1`` and explicit mirror/proxy query still skip edge.
+    """
     store = resolve_catalog_store(catalog)
     # Multi-process: refresh runtime image pool members before readiness/sign.
     await ensure_image_edge_overlay_fresh(engine)
@@ -144,13 +159,14 @@ async def deliver_known_image(
         )
         and image_edge_is_ready(settings)
     )
+    edge_url: str | None = None
     if prefer_edge:
         edge_url = resolve_image_edge_redirect_url(
             settings=settings,
             original_url=str(image.original_url),
         )
-        if edge_url:
-            # Edge 302 does not prove bytes were served — never mark_image_ok here.
+        if edge_url and prefer_edge_browser_redirect:
+            # Opt-in browser 302 — does not prove bytes; never mark_image_ok here.
             if background_tasks is not None:
                 schedule_hydrate_if_needed(
                     background_tasks=background_tasks,
@@ -165,52 +181,70 @@ async def deliver_known_image(
             if background_tasks is not None:
                 return attach_background(resp, background_tasks)
             return resp
-        # Edge ready but no signed URL (bad path / non-pximg) → local stream.
-        observe_image_delivery(path="edge_unavailable")
+        if not edge_url:
+            # Edge ready but no signed URL (bad path / non-pximg) → local stream.
+            observe_image_delivery(path="edge_unavailable")
 
-    resolved = resolve_proxy_mirror(
-        runtime=runtime,
-        headers=request.headers,
-        pixiv_cat=1 if use_pixiv_cat else int(pixiv_cat),
-        pximg_mirror_host=pximg_mirror_host_override or proxy_override,
-        proxy=proxy_override,
-        raise_on_invalid=False,
-    )
-    # Caller already decided use_pixiv_cat; keep it authoritative for stream source.
-    mirror_host = proxy_override or pximg_mirror_host_override or resolved.mirror_host
-    use_mirror = bool(use_pixiv_cat) or bool(proxy_override)
-    source_url, proxy_uri = await prepare_origin_stream(
-        engine=engine,
-        settings=settings,
-        runtime=runtime,
-        origin_url=str(image.original_url),
-        use_mirror=use_mirror,
-        mirror_host=mirror_host,
-        # Explicit mirror/proxy override may still use mirror rewrite; residential only
-        # when edge is not ready (default inside prepare_origin_stream).
-    )
+    delivery_via_edge = bool(prefer_edge and edge_url and not prefer_edge_browser_redirect)
+    if delivery_via_edge:
+        assert edge_url is not None
+        source_url = edge_url
+        proxy_uri = None
+        use_mirror = False
+    else:
+        resolved = resolve_proxy_mirror(
+            runtime=runtime,
+            headers=request.headers,
+            pixiv_cat=1 if use_pixiv_cat else int(pixiv_cat),
+            pximg_mirror_host=pximg_mirror_host_override or proxy_override,
+            proxy=proxy_override,
+            raise_on_invalid=False,
+        )
+        # Caller already decided use_pixiv_cat; keep it authoritative for stream source.
+        mirror_host = proxy_override or pximg_mirror_host_override or resolved.mirror_host
+        use_mirror = bool(use_pixiv_cat) or bool(proxy_override)
+        source_url, proxy_uri = await prepare_origin_stream(
+            engine=engine,
+            settings=settings,
+            runtime=runtime,
+            origin_url=str(image.original_url),
+            use_mirror=use_mirror,
+            mirror_host=mirror_host,
+            # Explicit mirror/proxy override may still use mirror rewrite; residential only
+            # when edge is not ready (default inside prepare_origin_stream).
+        )
 
     transport = getattr(request.app.state, "httpx_transport", None)
     shared_client = getattr(request.app.state, "httpx_client", None)
     now = iso_utc_ms()
     try:
-        resp = await stream_url(
-            source_url,
-            transport=transport,
-            client=shared_client if not proxy_uri else None,
-            proxy=proxy_uri,
-            cache_control=cache_control_stream,
-            range_header=request.headers.get("Range"),
-        )
-        observe_image_delivery(path="local_stream")
-        if use_mirror:
-            observe_image_delivery(path="local_stream_mirror")
-        elif proxy_uri:
-            observe_image_delivery(path="local_stream_residential")
+        stream_kwargs: dict[str, Any] = {
+            "transport": transport,
+            "client": shared_client if not proxy_uri else None,
+            "proxy": proxy_uri,
+            "cache_control": cache_control_stream if not delivery_via_edge else cache_control_edge,
+            "range_header": request.headers.get("Range"),
+        }
+        if delivery_via_edge:
+            # Worker attaches Pixiv Referer to origin; BFF→Worker needs none.
+            stream_kwargs["referer"] = ""
+        resp = await stream_url(source_url, **stream_kwargs)
+        if delivery_via_edge:
+            observe_image_delivery(path="edge_stream")
+            try:
+                resp.headers["X-Image-Edge"] = "stream"
+            except Exception:
+                pass
         else:
-            observe_image_delivery(path="local_stream_direct")
+            observe_image_delivery(path="local_stream")
+            if use_mirror:
+                observe_image_delivery(path="local_stream_mirror")
+            elif proxy_uri:
+                observe_image_delivery(path="local_stream_residential")
+            else:
+                observe_image_delivery(path="local_stream_direct")
         if background_tasks is not None:
-            # Local stream proved bytes — mark ok when the row still needs it.
+            # Stream proved bytes — mark ok when the row still needs it.
             schedule_mark_ok_if_needed(
                 background_tasks=background_tasks,
                 engine=engine,

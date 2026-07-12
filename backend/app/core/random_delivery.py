@@ -219,7 +219,8 @@ async def deliver_random_image_stream(
     httpx_client: Any,
     range_header: str | None,
     attempts: int,
-    prefer_edge_redirect: bool,
+    prefer_edge_redirect: bool = False,
+    prefer_edge_stream: bool | None = None,
     use_pixiv_cat: bool,
     mirror_host: str,
     anti_repeat_enabled: bool,
@@ -232,12 +233,27 @@ async def deliver_random_image_stream(
     recent_dedup: RecentDedupPort | None = None,
     job_queue: Any | None = None,
 ) -> Any:
-    """Pick + edge-redirect-or-stream retry loop for /random?format=image.
+    """Pick + same-origin edge stream (or local cascade) for /random?format=image.
+
+    H0 product default when image edge is ready: BFF streams signed img-worker URL
+    and returns **200 on this domain** (address bar stays on /random; F5 re-picks).
+    Browser 302 to workers.dev is **not** this path — callers use redirect=1 +
+    ``build_edge_redirect_response`` instead.
+
+    ``prefer_edge_redirect`` is retained for API compatibility but ignored for the
+    default stream path (historical name meant "prefer edge when ready").
 
     After the first pick attempt, subsequent retries pass ``skip_engine=True`` so
     dual-run does not pay another engine RTT when only the origin stream failed
     (mirrors /feed top-up sticky skip).
     """
+    # H0: default delivery is same-origin stream via CF edge, not browser 302.
+    # prefer_edge_redirect historically meant "edge ready"; map to prefer_edge_stream.
+    if prefer_edge_stream is None:
+        prefer_edge_stream = bool(prefer_edge_redirect)
+    prefer_edge = bool(prefer_edge_stream)
+    _ = prefer_edge_redirect  # explicit: do not 302 from format=image default path
+
     store = resolve_catalog_store(catalog)
     dedup = resolve_recent_dedup(recent_dedup)
     tried_ids: set[int] = set()
@@ -245,6 +261,8 @@ async def deliver_random_image_stream(
     attempts_i = max(1, int(attempts))
     # First attempt may dual-run; retries stay on Python pick path.
     skip_engine = False
+    # Count edge_unavailable at most once per request (first edge-ready miss).
+    edge_unavailable_counted = False
 
     for _ in range(attempts_i):
         async with Session() as session:
@@ -263,12 +281,16 @@ async def deliver_random_image_stream(
             needs_hydrate = needs_opportunistic_hydrate(image)
             should_mark_ok = should_mark_image_ok(image)
             # Engine DTOs set last_ok_at="engine" so edge/JSON skip catalog mark without a
-            # row load. Local stream below proves origin bytes — force mark_ok for DTOs.
+            # row load. Stream path below proves bytes — force mark_ok for DTOs.
             if getattr(image, "from_engine_item", False):
                 should_mark_ok = True
             user_id_for_recent = int(image.user_id) if getattr(image, "user_id", None) is not None else None
 
-        if prefer_edge_redirect:
+        source_url: str | None = None
+        proxy_uri: str | None = None
+        delivery_via_edge = False
+
+        if prefer_edge:
             try:
                 from app.core.image_edge import ensure_image_edge_overlay_fresh
 
@@ -277,50 +299,39 @@ async def deliver_random_image_stream(
                 pass
             edge_url = resolve_image_edge_redirect_url(settings=settings, original_url=origin_url)
             if edge_url:
-                schedule_edge_side_effects(
-                    background_tasks=background_tasks,
-                    engine=engine,
-                    image_id=image_id,
-                    illust_id=illust_id_for_hydrate,
-                    user_id=user_id_for_recent,
-                    anti_repeat_enabled=bool(anti_repeat_enabled),
-                    dedup_window_s=float(dedup_window_s),
-                    dedup_max_images=int(dedup_max_images),
-                    dedup_max_authors=int(dedup_max_authors),
-                    needs_hydrate=bool(needs_hydrate),
-                    hydrate_reason="random",
-                    mark_ok_on_edge=False,
-                    should_mark_ok=bool(should_mark_ok),
-                    catalog=store,
-                    recent_dedup=dedup,
-                    job_queue=job_queue,
-                )
-                observe_image_delivery(path="edge_redirect")
-                return attach_background(
-                    build_edge_redirect_response(edge_url=edge_url, cache_control="no-store"),
-                    background_tasks,
-                )
-            # Prefer edge but no signed URL (disabled/misconfigured/path rejected) → local cascade.
-            observe_image_delivery(path="edge_unavailable")
+                # Same-origin 200: BFF pulls signed img-worker (HMAC path → i.pximg.net).
+                source_url = edge_url
+                proxy_uri = None
+                delivery_via_edge = True
+            else:
+                # Prefer edge but no signed URL → local cascade (count once).
+                if not edge_unavailable_counted:
+                    observe_image_delivery(path="edge_unavailable")
+                    edge_unavailable_counted = True
 
-        source_url, proxy_uri = await prepare_origin_stream(
-            engine=engine,
-            settings=settings,
-            runtime=runtime,
-            origin_url=origin_url,
-            use_mirror=bool(use_pixiv_cat),
-            mirror_host=mirror_host,
-        )
-        try:
-            resp = await stream_url(
-                source_url,
-                transport=httpx_transport,
-                client=httpx_client if not proxy_uri else None,
-                proxy=proxy_uri,
-                cache_control="no-store",
-                range_header=range_header,
+        if source_url is None:
+            source_url, proxy_uri = await prepare_origin_stream(
+                engine=engine,
+                settings=settings,
+                runtime=runtime,
+                origin_url=origin_url,
+                use_mirror=bool(use_pixiv_cat),
+                mirror_host=mirror_host,
             )
-            # Stream path proved bytes — mark ok when needed (edge 302 does not).
+
+        try:
+            # Edge stream: no Pixiv Referer (Worker already attaches it to origin).
+            stream_kwargs: dict[str, Any] = {
+                "transport": httpx_transport,
+                "client": httpx_client if not proxy_uri else None,
+                "proxy": proxy_uri,
+                "cache_control": "no-store",
+                "range_header": range_header,
+            }
+            if delivery_via_edge:
+                stream_kwargs["referer"] = ""
+            resp = await stream_url(source_url, **stream_kwargs)
+            # Stream path proved bytes — mark ok when needed (browser 302 does not).
             schedule_edge_side_effects(
                 background_tasks=background_tasks,
                 engine=engine,
@@ -339,13 +350,20 @@ async def deliver_random_image_stream(
                 recent_dedup=dedup,
                 job_queue=job_queue,
             )
-            observe_image_delivery(path="local_stream")
-            if use_pixiv_cat:
-                observe_image_delivery(path="local_stream_mirror")
-            elif proxy_uri:
-                observe_image_delivery(path="local_stream_residential")
+            if delivery_via_edge:
+                observe_image_delivery(path="edge_stream")
+                try:
+                    resp.headers["X-Image-Edge"] = "stream"
+                except Exception:
+                    pass
             else:
-                observe_image_delivery(path="local_stream_direct")
+                observe_image_delivery(path="local_stream")
+                if use_pixiv_cat:
+                    observe_image_delivery(path="local_stream_mirror")
+                elif proxy_uri:
+                    observe_image_delivery(path="local_stream_residential")
+                else:
+                    observe_image_delivery(path="local_stream_direct")
             return attach_background(resp, background_tasks)
         except ApiError as exc:
             if exc.code in {

@@ -305,8 +305,30 @@ def parse_random_filters(
 
 
 def force_local_from_query(query_params: Any) -> bool:
-    """True when client forces local /i stream (skip CF edge 302)."""
+    """True when client forces local stream (skip CF image edge entirely)."""
     return str(query_params.get("local") or "").strip().lower() in {"1", "true", "yes"}
+
+
+def prefer_edge_browser_redirect_from_query(query_params: Any) -> bool:
+    """True when client opts into browser 302 to signed workers.dev URL.
+
+    H0: default delivery is same-origin 200 + BFF stream via img-worker.
+    Only ``redirect=1`` / ``edge_redirect=1`` (or true/yes/on) enable browser 302.
+    """
+    if query_params is None:
+        return False
+    for key in ("edge_redirect", "redirect"):
+        raw = query_params.get(key)
+        if raw is None:
+            continue
+        try:
+            if int(raw) == 1:
+                return True
+        except Exception:
+            pass
+        if str(raw or "").strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+    return False
 
 
 def parse_public_debug_flag(query_params: Any) -> bool:
@@ -325,7 +347,11 @@ def prefer_image_edge(
     pximg_mirror_host_override: str | None,
     force_local: bool = False,
 ) -> bool:
-    """True when public delivery should prefer CF signed edge over local stream/mirror."""
+    """True when public delivery should prefer CF image edge over local/mirror.
+
+    When ready, default product path is same-origin **stream** via signed
+    img-worker (H0). Browser 302 is a separate opt-in (redirect=1).
+    """
     if force_local:
         return False
     if proxy_override is not None:

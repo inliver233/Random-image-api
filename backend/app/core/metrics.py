@@ -89,15 +89,17 @@ RANDOM_LATENCY_SECONDS = Histogram(
     ),
 )
 
-# Public image bytes delivery path (edge 302 vs local cascade).
+# Public image bytes delivery path (edge stream / opt-in 302 / local cascade).
 # Labels stay small:
-#   edge_redirect | edge_unavailable | local_stream | local_i_redirect
+#   edge_stream | edge_redirect | edge_unavailable | local_stream | local_i_redirect
 #   local_stream_direct | local_stream_residential | local_stream_mirror
+# edge_stream = same-origin 200 with BFF pulling signed img-worker (H0 default).
+# edge_redirect = opt-in browser 302 to workers.dev (redirect=1 only).
 # edge_unavailable = edge *ready* (flag+secret+bases) but sign/path failed; then local
 # still counted. Default-off must NOT prefer edge → no edge_unavailable spam.
 IMAGE_DELIVERY_TOTAL = Counter(
     "new_pixiv_image_delivery_total",
-    "Public image delivery outcomes by path (edge vs local cascade).",
+    "Public image delivery outcomes by path (edge stream/redirect vs local cascade).",
     ["path"],
 )
 
@@ -229,6 +231,7 @@ MODULE_READINESS_FLAGS: dict[str, tuple[str, ...]] = {
 MODULE_BASE_URL_MODULES: tuple[str, ...] = ("image_edge", "cf_api_proxy")
 
 IMAGE_DELIVERY_PATHS: tuple[str, ...] = (
+    "edge_stream",
     "edge_redirect",
     "edge_unavailable",
     "local_stream",
