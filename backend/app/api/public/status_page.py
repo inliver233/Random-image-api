@@ -66,7 +66,13 @@ async def _query_gallery_stats(engine) -> dict[str, Any]:
     return await with_sqlite_busy_retry(_op)
 
 
-def _build_status_html(*, base_url: str, status_code: int, payload: dict[str, Any]) -> str:
+def _build_status_html(
+    *,
+    base_url: str,
+    status_code: int,
+    payload: dict[str, Any],
+    public_api_key_required: bool = False,
+) -> str:
     base = (base_url or "").rstrip("/")
     if not base:
         base = ""
@@ -80,6 +86,11 @@ def _build_status_html(*, base_url: str, status_code: int, payload: dict[str, An
     api_status = str(payload.get("api_status") or "unknown")
     api_status_code = int(payload.get("api_status_code") or status_code)
     updated_at = str(payload.get("updated_at") or "")
+    public_key_note = (
+        "本部署已开启 PUBLIC_API_KEY_REQUIRED：调用 /random 等接口需 X-API-Key 或 ?api_key=（见 /docs）。"
+        if public_api_key_required
+        else ""
+    )
 
     gallery = payload.get("gallery") if isinstance(payload.get("gallery"), dict) else {}
     images_total = _as_nonneg_stat(gallery.get("images_total"))
@@ -394,7 +405,7 @@ def _build_status_html(*, base_url: str, status_code: int, payload: dict[str, An
       </div>
       <div class="footer">
         说明：占比统计基于 <code>status=1</code> 的图片；未补全字段会落到 unknown。<br/>
-        /status 只读展示，不需要登录。
+        /status 只读展示，不需要登录。{(" " + public_key_note) if public_key_note else ""}
       </div>
     </section>
   </div>
@@ -538,10 +549,13 @@ async def status_page(request: Request) -> HTMLResponse:
         payload["api_status_code"] = api_status_code
         payload["error"] = {"type": type(exc).__name__, "message": str(exc)}
 
+    settings = getattr(request.app.state, "settings", None)
+    public_api_key_required = bool(getattr(settings, "public_api_key_required", False))
     html = _build_status_html(
         base_url=str(getattr(request, "base_url", "") or "").rstrip("/"),
         status_code=int(api_status_code),
         payload=payload,
+        public_api_key_required=public_api_key_required,
     )
     resp = HTMLResponse(content=html, status_code=int(api_status_code), headers={"Cache-Control": "no-store"})
     set_request_id_header(resp, rid)

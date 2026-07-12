@@ -185,3 +185,38 @@ def test_wtf_page_injects_public_api_key_required_flag(tmp_path: Path, monkeypat
         assert 'id="apiKeyWrap"' in body
         assert "wtf_public_api_key" in body
 
+
+def test_docs_page_documents_public_api_key(tmp_path: Path, monkeypatch) -> None:
+    """/docs must explain X-API-Key + api_key query when enforcement is on."""
+    db_path = tmp_path / "docs_public_api_key.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("PUBLIC_API_KEY_REQUIRED", "true")
+    monkeypatch.setenv("PUBLIC_API_KEY_RPM", "0")
+    monkeypatch.setenv("PUBLIC_API_KEY_BURST", "0")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await app.state.engine.dispose()
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        resp = client.get("/docs")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "PUBLIC_API_KEY_REQUIRED" in body
+        assert "X-API-Key" in body
+        assert "api_key=" in body
+        assert "当前部署已开启" in body
+
+        status = client.get("/status")
+        assert status.status_code == 200
+        assert "PUBLIC_API_KEY_REQUIRED" in status.text
+

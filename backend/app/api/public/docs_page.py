@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse
 router = APIRouter()
 
 
-def _build_docs_html(*, base_url: str) -> str:
+def _build_docs_html(*, base_url: str, public_api_key_required: bool = False) -> str:
     base = (base_url or "").rstrip("/")
     if not base:
         base = ""
@@ -50,7 +50,29 @@ def _build_docs_html(*, base_url: str) -> str:
         "authors_api": u("/authors"),
         "swagger": u("/api/docs"),
         "openapi": u("/openapi.json"),
+        "curl_header": (
+            f'curl -i -H "X-API-Key: YOUR_KEY" {u("/random?format=json")}'
+        ),
+        "curl_query": f'curl -i "{u("/random?format=json&api_key=YOUR_KEY")}"',
+        "img_query": u("/random?api_key=YOUR_KEY"),
     }
+
+    # Always document the contract; highlight when this deployment enforces it.
+    if public_api_key_required:
+        auth_banner = (
+            '<div class="note" style="margin-top:12px;">'
+            "<strong>当前部署已开启 PUBLIC_API_KEY_REQUIRED：</strong>"
+            "公开接口（/random、/feed、/i、/tags、/authors 等）需要 API Key；"
+            "/docs、/status、/wtf 页面本身可直接访问。"
+            "</div>"
+        )
+    else:
+        auth_banner = (
+            '<div class="note" style="margin-top:12px;">'
+            "<strong>可选：</strong>运维可将 <span class=\"kbd\">PUBLIC_API_KEY_REQUIRED=true</span> "
+            "开启公开接口鉴权（默认关闭）。"
+            "</div>"
+        )
 
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -316,6 +338,21 @@ def _build_docs_html(*, base_url: str) -> str:
     </section>
 
     <section class="card" style="margin-top: 14px;">
+      <h2>5.1) 公开 API Key（可选）</h2>
+      {auth_banner}
+      <p>当服务端开启 <span class="kbd">PUBLIC_API_KEY_REQUIRED</span> 时，公开数据接口需要有效 API Key（管理端「API Keys」创建）。</p>
+      <ul>
+        <li><strong>程序调用优先</strong>：请求头 <span class="kbd">X-API-Key: YOUR_KEY</span>（不建议把密钥写进访问日志）。</li>
+        <li><strong>浏览器兜底</strong>：查询参数 <span class="kbd">api_key=YOUR_KEY</span>（用于 <code>window.open</code> / <code>&lt;img&gt;</code> / 重定向，无法自定义 Header 时）。</li>
+        <li><strong>页面豁免</strong>：<span class="kbd">/docs</span>、<span class="kbd">/status</span>、<span class="kbd">/status.json</span>、<span class="kbd">/wtf</span>、<span class="kbd">/healthz</span>、<span class="kbd">/version</span> 本身不要求 Key；但 /wtf 内部请求的 <span class="kbd">/feed</span> 与相对 <span class="kbd">/i/…</span> 仍需要 Key。</li>
+      </ul>
+      <pre><code>{examples["curl_header"]}
+{examples["curl_query"]}
+{examples["img_query"]}</code></pre>
+      <p class="muted">限流：<span class="kbd">PUBLIC_API_KEY_RPM</span> / <span class="kbd">PUBLIC_API_KEY_BURST</span>；后端可选 memory 或 redis（见 contracts/api-key-rate-limit.md）。</p>
+    </section>
+
+    <section class="card" style="margin-top: 14px;">
       <h2>筛选语法速记</h2>
       <div class="note">
         <strong>标签 AND / OR 速记：</strong>
@@ -463,5 +500,10 @@ def _build_docs_html(*, base_url: str) -> str:
 
 @router.get("/docs", include_in_schema=False)
 async def docs_page(request: Request) -> HTMLResponse:
-    html = _build_docs_html(base_url=str(getattr(request, "base_url", "") or "").rstrip("/"))
+    settings = getattr(request.app.state, "settings", None)
+    public_api_key_required = bool(getattr(settings, "public_api_key_required", False))
+    html = _build_docs_html(
+        base_url=str(getattr(request, "base_url", "") or "").rstrip("/"),
+        public_api_key_required=public_api_key_required,
+    )
     return HTMLResponse(content=html, status_code=200, headers={"Cache-Control": "no-store"})
