@@ -157,6 +157,23 @@ Isolate-local counter: after `ORIGIN_403_CIRCUIT_THRESHOLD` origin `403`s within
 
 When disabled or non-pximg `original_url`, public API falls back to local `/i/{id}.{ext}` stream (proxy pool / mirrors).
 
+## Ops
+
+| Surface | Notes |
+| --- | --- |
+| `/healthz` → `modules.image_edge` | `enabled_flag`, `ready`, `base_url_count` — config only, no outbound edge probe / secrets |
+| `GET /admin/api/maintenance/image-edge` | Same readiness shape for Dashboard / Maintenance tags (never returns secret) |
+| Prometheus `new_pixiv_image_delivery_total{path=…}` | `edge_redirect` / `edge_unavailable` / local cascade paths |
+
+Deploy / probe (repo root):
+
+```
+.\scripts\edge\deploy-img-worker.ps1   # when present
+# Worker: GET /healthz on each IMAGE_EDGE_BASE_URLS host
+```
+
+Flip `IMAGE_EDGE_ENABLED=true` only after bases report `service=random-image-edge`, HMAC secret matches, and (if using R2) prewarm/secret readiness is understood. Production flag stays **default-off**.
+
 Escape hatches:
 - `?local=1` on `/i/...` or `/random?format=image` forces origin-side stream (admin/debug).
 - Explicit `proxy=` / `pixiv_cat=1` / `pximg_mirror_host=` keep local mirror path.
