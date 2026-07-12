@@ -59,6 +59,10 @@ Helpers remain available for non-public paths; injected store is preferred via `
 
 ## Ops
 
-`/healthz` → `modules.catalog.backend` = `sqlite` | `postgres` | other dialect name.
+| Surface | Notes |
+| --- | --- |
+| `/healthz` → `modules.catalog.backend` | `sqlite` \| `postgres` \| other dialect name (from `DATABASE_URL`) |
+| `/status.json` → `data.catalog.backend` | Same public label; `/status` HTML `ports:` chip includes it |
+| `GET /admin/api/maintenance/modular-ports` | `catalog.backend` |
 
 **Not included:** schema migration, dual-write, or automatic cutover. Production Postgres still requires Alembic/ops work.

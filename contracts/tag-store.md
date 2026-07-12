@@ -42,6 +42,8 @@ Adoption:
 
 ## Ops
 
-`/healthz` → `modules.tags.backend` = `sqlite` | `postgres` | other.
-
-Admin `GET /admin/api/maintenance/modular-ports` → `tags.backend`.
+| Surface | Notes |
+| --- | --- |
+| `/healthz` → `modules.tags.backend` | `sqlite` \| `postgres` \| other (from `DATABASE_URL`) |
+| `/status.json` → `data.tags.backend` | Same public label; `/status` HTML `ports:` chip includes it |
+| `GET /admin/api/maintenance/modular-ports` | `tags.backend` |

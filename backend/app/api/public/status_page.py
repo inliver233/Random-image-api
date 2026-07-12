@@ -164,6 +164,13 @@ def _recent_dedup_public_snapshot(request: Request, settings: Any) -> dict[str, 
     }
 
 
+def _port_backend_public_snapshot(request: Request, attr: str, *, default: str) -> dict[str, Any]:
+    """Single-field modular port label for public /status (catalog/tags/random_*)."""
+    port = getattr(request.app.state, attr, None)
+    backend = str(getattr(port, "backend", default) or default)
+    return {"backend": backend}
+
+
 async def _query_gallery_stats(engine) -> dict[str, Any]:
     async def _op() -> dict[str, Any]:
         async with engine.connect() as conn:
@@ -330,6 +337,17 @@ def _build_status_html(
         rd_chip = f"recent-dedup: {rd_requested}→{rd_backend}"
     else:
         rd_chip = f"recent-dedup: {rd_backend}"
+
+    # Dialect / factory labels (same as /healthz modules.catalog|tags|random_*).
+    cat = payload.get("catalog") if isinstance(payload.get("catalog"), dict) else {}
+    tags = payload.get("tags") if isinstance(payload.get("tags"), dict) else {}
+    rs = payload.get("random_service") if isinstance(payload.get("random_service"), dict) else {}
+    rp = payload.get("random_pick") if isinstance(payload.get("random_pick"), dict) else {}
+    catalog_backend = str(cat.get("backend") or "sqlite")
+    tags_backend = str(tags.get("backend") or "sqlite")
+    rs_backend = str(rs.get("backend") or "default")
+    rp_backend = str(rp.get("backend") or "sqlite")
+    ports_chip = f"ports: cat {catalog_backend} · tags {tags_backend} · svc {rs_backend} · pick {rp_backend}"
 
     json_url = u("/status.json")
     docs_url = u("/docs")
@@ -595,6 +613,7 @@ def _build_status_html(
         <span class="chip" title="Public API key rate-limit backend (same as /healthz modules.api_key_rate_limit; no Redis URL / no probe)">{rl_chip}</span>
         <span class="chip" title="Job queue port (same as /healthz modules.job_queue; redis/nats rejected at boot)">{jq_chip}</span>
         <span class="chip" title="Recent-dedup port (same as /healthz modules.recent_dedup; no Redis URL / no probe)">{rd_chip}</span>
+        <span class="chip" title="Modular port dialect labels (same as /healthz modules.catalog|tags|random_service|random_pick)">{ports_chip}</span>
       </div>
     </div>
 
@@ -756,6 +775,10 @@ async def status_json(request: Request) -> JSONResponse:
     # Modular ports (same shapes as /healthz modules.job_queue / recent_dedup).
     payload["job_queue"] = _job_queue_public_snapshot(request, settings)
     payload["recent_dedup"] = _recent_dedup_public_snapshot(request, settings)
+    payload["catalog"] = _port_backend_public_snapshot(request, "catalog_store", default="sqlite")
+    payload["tags"] = _port_backend_public_snapshot(request, "tag_store", default="sqlite")
+    payload["random_service"] = _port_backend_public_snapshot(request, "random_service", default="default")
+    payload["random_pick"] = _port_backend_public_snapshot(request, "random_pick", default="sqlite")
 
     try:
         payload.update(await _query_gallery_stats(engine))
@@ -795,6 +818,10 @@ async def status_page(request: Request) -> HTMLResponse:
     payload["api_key_rate_limit"] = _api_key_rate_limit_public_snapshot(request, settings)
     payload["job_queue"] = _job_queue_public_snapshot(request, settings)
     payload["recent_dedup"] = _recent_dedup_public_snapshot(request, settings)
+    payload["catalog"] = _port_backend_public_snapshot(request, "catalog_store", default="sqlite")
+    payload["tags"] = _port_backend_public_snapshot(request, "tag_store", default="sqlite")
+    payload["random_service"] = _port_backend_public_snapshot(request, "random_service", default="default")
+    payload["random_pick"] = _port_backend_public_snapshot(request, "random_pick", default="sqlite")
 
     try:
         payload.update(await _query_gallery_stats(engine))

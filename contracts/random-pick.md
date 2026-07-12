@@ -26,7 +26,10 @@ Ring sample SQL stays in `db/random_pick.py`. Port does not reimplement SQL.
 
 ## Ops
 
-- `/healthz` → `modules.random_pick.backend` = `sqlite` | `postgres` (from `DATABASE_URL`)
-- Admin → `GET /admin/api/maintenance/modular-ports` → `random_pick.backend`
+| Surface | Notes |
+| --- | --- |
+| `/healthz` → `modules.random_pick.backend` | `sqlite` \| `postgres` (from `DATABASE_URL`) |
+| `/status.json` → `data.random_pick.backend` | Same public label; `/status` HTML `ports:` chip includes it |
+| `GET /admin/api/maintenance/modular-ports` | `random_pick.backend` |
 
 **Not included:** Postgres-specific ring SQL, dual-write, or automatic cutover. Production Postgres still requires Alembic/ops work (same gate as CatalogStore).

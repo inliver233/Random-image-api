@@ -45,11 +45,14 @@ When dual-run is not routed for the batch (`try_engine_batch` → `eng_meta is N
 
 ## Ops
 
-- `/healthz` → `modules.random_service.backend` (default: `default`)
-- `/healthz` → `modules.random_engine.circuit` — process-local dual-run circuit (no outbound probe)
-- `/status.json` → `data.random_engine` (`url_configured` / `enabled` / `traffic_percent` + same process-local `circuit`); `/status` HTML chip mirrors it (no outbound probe)
-- `/metrics` (admin) → circuit gauges: `new_pixiv_random_engine_circuit_state{state=…}`, `…_open_remaining_seconds`, `…_consecutive_failures` (refreshed from local snapshot each scrape)
-- Admin → `GET /admin/api/maintenance/modular-ports` → `random_service.backend`
-- Admin → `GET /admin/api/maintenance/random-engine` → full engine readiness + same `circuit` object; open may set `cutover_warning`
+| Surface | Notes |
+| --- | --- |
+| `/healthz` → `modules.random_service.backend` | Default factory label: `default` |
+| `/status.json` → `data.random_service.backend` | Same public label; `/status` HTML `ports:` chip includes it |
+| `/healthz` → `modules.random_engine.circuit` | Process-local dual-run circuit (no outbound probe) |
+| `/status.json` → `data.random_engine` | `url_configured` / `enabled` / `traffic_percent` + same process-local `circuit`; HTML chip mirrors it |
+| `/metrics` (admin) | Circuit gauges: `new_pixiv_random_engine_circuit_state{state=…}`, `…_open_remaining_seconds`, `…_consecutive_failures` |
+| `GET /admin/api/maintenance/modular-ports` | `random_service.backend` |
+| `GET /admin/api/maintenance/random-engine` | Full engine readiness + same `circuit` object; open may set `cutover_warning` |
 
 No env switch yet; factory is DI-swappable for tests and future alternate planners.

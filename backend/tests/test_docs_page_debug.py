@@ -33,6 +33,11 @@ def test_docs_html_documents_debug_engine_status() -> None:
     assert "modules.job_queue" in html
     assert "data.recent_dedup" in html
     assert "modules.recent_dedup" in html
+    # Dialect labels on public status.
+    assert "data.catalog.backend" in html
+    assert "data.tags.backend" in html
+    assert "data.random_service.backend" in html
+    assert "data.random_pick.backend" in html
     # Catalog list + delivery + version links (parity with OpenAPI public summaries).
     assert 'href="https://example.test/tags"' in html
     assert 'href="https://example.test/authors"' in html
@@ -52,5 +57,7 @@ def test_docs_html_public_key_required_banner() -> None:
     assert "data.api_key_rate_limit" in html
     assert "data.job_queue" in html
     assert "data.recent_dedup" in html
+    assert "data.catalog.backend" in html
+    assert "data.random_pick.backend" in html
     assert "/images" in html
     assert "/version" in html
