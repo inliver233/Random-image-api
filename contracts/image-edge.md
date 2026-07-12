@@ -167,6 +167,7 @@ When disabled or non-pximg `original_url`, public API falls back to local `/i/{i
 | `GET /admin/api/maintenance/image-edge` | Same readiness shape for Dashboard / Maintenance tags (never returns secret) |
 | `GET /admin/api/maintenance/r2-prewarm` | BFF prewarm webhook readiness (`ready` requires secret; never returns secret) |
 | Prometheus `new_pixiv_image_delivery_total{path=…}` | `edge_redirect` / `edge_unavailable` / local cascade paths |
+| `/metrics` (admin) → modular readiness | `new_pixiv_module_readiness{module="image_edge\|r2_prewarm",flag=…}` + `new_pixiv_module_base_url_count{module="image_edge"}` (local config only) |
 
 Deploy / probe (repo root):
 

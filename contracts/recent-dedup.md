@@ -46,3 +46,4 @@ Public delivery side-effects adopt the port progressively:
 | `/healthz` → `modules.recent_dedup` | `backend` (active), `requested` (Settings), `using_memory_fallback` — no Redis probe / secrets |
 | `/status.json` → `data.recent_dedup` | Same public shape; `/status` HTML chip mirrors it (no Redis URL / no probe) |
 | `GET /admin/api/maintenance/modular-ports` | `configured_backend` vs `active_backend` + `using_memory_fallback` (same honesty shape; field names differ for admin UI) |
+| `/metrics` (admin) → modular readiness | `new_pixiv_module_readiness{module="recent_dedup",flag="using_memory_fallback"}` |

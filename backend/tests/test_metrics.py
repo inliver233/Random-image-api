@@ -80,6 +80,32 @@ def test_metrics_exposes_random_jobs_and_proxy_metrics(tmp_path: Path, monkeypat
         assert 'state="closed"' in text
         assert "new_pixiv_random_engine_circuit_open_remaining_seconds" in text
         assert "new_pixiv_random_engine_circuit_consecutive_failures" in text
+        # Modular readiness gauges (local config snapshot; pre-registered zero series).
+        assert "new_pixiv_module_readiness" in text
+        assert "new_pixiv_module_base_url_count" in text
+        for module in (
+            "image_edge",
+            "cf_api_proxy",
+            "r2_prewarm",
+            "api_key_rate_limit",
+            "job_queue",
+            "recent_dedup",
+        ):
+            assert f'module="{module}"' in text
+        # Defaults: flags off; job_queue implemented (sqlite).
+        # prometheus_client sorts label names alphabetically (flag before module).
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="enabled",module="image_edge"\}\s+0(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="implemented",module="job_queue"\}\s+1(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_base_url_count\{module="image_edge"\}\s+0(\.0+)?\b',
+            text,
+        )
         assert "new_pixiv_image_delivery_total" in text
         assert "new_pixiv_upstream_stream_errors_total" in text
         assert "new_pixiv_jobs_claim_total" in text
@@ -133,3 +159,62 @@ def test_metrics_exposes_open_dual_run_circuit(tmp_path: Path, monkeypatch) -> N
             )
     finally:
         reset_engine_circuit_for_tests()
+
+
+def test_metrics_exposes_modular_readiness_when_edge_ready(tmp_path: Path, monkeypatch) -> None:
+    """Image edge + r2 prewarm readiness flags flip on when config is complete."""
+    db_path = tmp_path / "metrics_modular.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("IMAGE_EDGE_ENABLED", "true")
+    monkeypatch.setenv("IMAGE_EDGE_BASE_URLS", "https://img-a.example,https://img-b.example")
+    monkeypatch.setenv("IMAGE_EDGE_SECRET", "edge-secret-test")
+    monkeypatch.setenv("R2_PREWARM_ENABLED", "true")
+    monkeypatch.setenv("R2_PREWARM_URL", "https://prewarm.example/hook")
+    monkeypatch.setenv("R2_PREWARM_SECRET", "prewarm-secret")
+    monkeypatch.setenv("PUBLIC_API_KEY_REQUIRED", "true")
+    monkeypatch.setenv("PUBLIC_API_KEY_RATE_LIMIT_BACKEND", "redis")
+    # No REDIS_URL → memory fallback honesty.
+
+    app = create_app()
+
+    async def _migrate() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_migrate())
+
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        resp = client.get("/metrics", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+        text = resp.text
+        # prometheus_client sorts label names alphabetically (flag before module).
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="enabled",module="image_edge"\}\s+1(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="ready",module="image_edge"\}\s+1(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_base_url_count\{module="image_edge"\}\s+2(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="ready",module="r2_prewarm"\}\s+1(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="required",module="api_key_rate_limit"\}\s+1(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="using_memory_fallback",module="api_key_rate_limit"\}\s+1(\.0+)?\b',
+            text,
+        )
