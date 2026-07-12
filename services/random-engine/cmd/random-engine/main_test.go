@@ -324,7 +324,7 @@ func TestQualityBookmarkRatePerMille(t *testing.T) {
 	bm := 10
 	vw := 100
 	im := indexImage{BookmarkCount: &bm, ViewCount: &vw}
-	logit, _ := qualityLogit(im, map[string]float64{
+logit, _, _ := qualityLogit(im, map[string]float64{
 		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
 		"bookmark_rate": 1, "freshness": 0, "bookmark_velocity": 0,
 	}, map[string]float64{}, 21, 2, 1, nil, nil, 0, 0)
@@ -344,7 +344,7 @@ func TestQualityTemperatureScalesScoreNotMultiplier(t *testing.T) {
 		"bookmark_rate": 1, "freshness": 0, "bookmark_velocity": 0,
 	}
 	mults := map[string]float64{"ai": 2, "non_ai": 1, "unknown_ai": 1}
-	logit, dbg := qualityLogit(im, weights, mults, 21, 2, 2, nil, nil, 0, 0)
+logit, dbg, _ := qualityLogit(im, weights, mults, 21, 2, 2, nil, nil, 0, 0)
 	score := math.Log1p(100.0) // only bookmark_rate term
 	want := score/2.0 + math.Log(2.0)
 	if math.Abs(logit-want) > 1e-9 {
@@ -361,7 +361,7 @@ func TestQualityVelocityDenomFloor(t *testing.T) {
 		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
 		"bookmark_rate": 0, "freshness": 0, "bookmark_velocity": 1,
 	}
-	logit, dbg := qualityLogit(im, weights, map[string]float64{}, 21, 0.1, 1, nil, nil, 0, 0)
+logit, dbg, _ := qualityLogit(im, weights, map[string]float64{}, 21, 0.1, 1, nil, nil, 0, 0)
 	want := math.Log1p(10.0 / 1.0)
 	if math.Abs(logit-want) > 1e-6 {
 		t.Fatalf("velocity logit want %v got %v dbg=%v", want, logit, dbg)
@@ -377,19 +377,38 @@ func TestQualitySoftDedupPenalties(t *testing.T) {
 		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
 		"bookmark_rate": 1, "freshness": 0, "bookmark_velocity": 0,
 	}
-	base, _ := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, nil, nil, 0, 0)
+	base, _, ok := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, nil, nil, 0, 0)
+	if !ok {
+		t.Fatal("expected base logit ok")
+	}
 	recentImg := map[int64]struct{}{7: {}}
 	recentAuth := map[int64]struct{}{42: {}}
-	withImg, _ := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, recentImg, nil, 2.0, 0)
-	if math.Abs((base-2.0)-withImg) > 1e-9 {
-		t.Fatalf("image penalty: base %v penalized %v", base, withImg)
+	withImg, _, ok := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, recentImg, nil, 2.0, 0)
+	if !ok || math.Abs((base-2.0)-withImg) > 1e-9 {
+		t.Fatalf("image penalty: base %v penalized %v ok=%v", base, withImg, ok)
 	}
-	withAuth, _ := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, nil, recentAuth, 0, 1.5)
-	if math.Abs((base-1.5)-withAuth) > 1e-9 {
-		t.Fatalf("author penalty: base %v penalized %v", base, withAuth)
+	withAuth, _, ok := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, nil, recentAuth, 0, 1.5)
+	if !ok || math.Abs((base-1.5)-withAuth) > 1e-9 {
+		t.Fatalf("author penalty: base %v penalized %v ok=%v", base, withAuth, ok)
 	}
-	both, _ := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, recentImg, recentAuth, 2.0, 1.5)
-	if math.Abs((base-3.5)-both) > 1e-9 {
-		t.Fatalf("both penalties: base %v penalized %v", base, both)
+	both, _, ok := qualityLogit(im, weights, map[string]float64{}, 21, 2, 1, recentImg, recentAuth, 2.0, 1.5)
+	if !ok || math.Abs((base-3.5)-both) > 1e-9 {
+		t.Fatalf("both penalties: base %v penalized %v ok=%v", base, both, ok)
+	}
+}
+
+func TestQualityZeroMultiplierSkipped(t *testing.T) {
+	// Python pick_by_quality continues when multiplier<=0; Go must not clamp to 1e-9.
+	ai := 1
+	bm, vw := 10, 100
+	im := indexImage{BookmarkCount: &bm, ViewCount: &vw, AIType: &ai}
+	weights := map[string]float64{
+		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
+		"bookmark_rate": 1, "freshness": 0, "bookmark_velocity": 0,
+	}
+	mults := map[string]float64{"ai": 0, "non_ai": 1, "unknown_ai": 1}
+	_, _, ok := qualityLogit(im, weights, mults, 21, 2, 1, nil, nil, 0, 0)
+	if ok {
+		t.Fatal("expected zero AI multiplier to skip candidate")
 	}
 }

@@ -590,7 +590,11 @@ func handlePick(w http.ResponseWriter, r *http.Request, st *engineState) {
 		scored := make([]scoredImg, 0, len(pool))
 		for _, im := range pool {
 			// Temperature scales score only; log(mult) is added after (Python parity).
-			logit, dbg := qualityLogit(im, weights, multipliers, halfLife, velSmooth, temp, recentImgs, recentAuths, imgPen, authPen)
+			// Python pick_by_quality skips multiplier<=0 candidates entirely (no 1e-9 clamp).
+			logit, dbg, ok := qualityLogit(im, weights, multipliers, halfLife, velSmooth, temp, recentImgs, recentAuths, imgPen, authPen)
+			if !ok {
+				continue
+			}
 			scored = append(scored, scoredImg{im: im, logit: logit, dbg: dbg})
 		}
 		// Logits already include /temperature; softmax must not divide again.
@@ -759,7 +763,7 @@ func pickFromScored(scored []scoredImg, pickMode string, limit int, rng *rand.Ra
 	return out
 }
 
-func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLifeDays, velSmooth, temperature float64, recentImageIDs, recentAuthorIDs map[int64]struct{}, imagePenalty, authorPenalty float64) (float64, map[string]any) {
+func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLifeDays, velSmooth, temperature float64, recentImageIDs, recentAuthorIDs map[int64]struct{}, imagePenalty, authorPenalty float64) (float64, map[string]any, bool) {
 	wBookmark := weightOr(weights, "bookmark", 4.0)
 	wView := weightOr(weights, "view", 0.5)
 	wComment := weightOr(weights, "comment", 2.0)
@@ -828,7 +832,8 @@ func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLi
 		}
 	}
 	if mult <= 0 {
-		mult = 1e-9
+		// Python pick_by_quality: continue (drop candidate); do not clamp to epsilon.
+		return 0, nil, false
 	}
 	if temperature <= 0 {
 		temperature = 1
@@ -857,7 +862,7 @@ func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLi
 		"velocity":    vel,
 		"multiplier":  mult,
 	}
-	return logit, dbg
+	return logit, dbg, true
 }
 
 func filterImages(st *engineState, filters map[string]any) []indexImage {
