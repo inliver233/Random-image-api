@@ -17,12 +17,14 @@ Ops-only. Deploy/register **never** flips `CF_API_PROXY_ENABLED` / `IMAGE_EDGE_E
 2. Probe matrix (no flag flip):
    ```text
    python scripts/edge/probe-api-proxy.py --bases https://a,https://b --secret $SECRET --healthz --proxy-path --out api-proxy-matrix.json
+   # Or admin (merged pool / override base_urls; records process-local cooldown on hard fail):
+   # POST /admin/api/cf-workers/probe  {"kind":"api"}  or  {"kind":"all","base_urls":["https://a","https://b"]}
    ```
-   Expect `service_ok` + secret match on each base.
+   Expect `service_ok` + secret match on each base (CLI) / `ok` + `service` on admin probe.
 3. Membership without enable:
    - Env: `CF_API_PROXY_BASE_URLS=…` + `CF_API_PROXY_SECRET=…`
    - And/or `POST /admin/api/cf-workers/register` `{ "kind":"api", "base_url":"https://…" }`
-4. Inspect: `GET /admin/api/cf-workers/pool`, `GET /admin/api/maintenance/cf-api-proxy`
+4. Inspect: `GET /admin/api/cf-workers/pool`, `GET /admin/api/maintenance/cf-api-proxy`, optional re-`probe`
 5. Enable: `CF_API_PROXY_ENABLED=true`
 6. Accept: admin metrics `new_pixiv_pixiv_api_egress_total{via="cf"}` dominates; residential near-zero when CF candidates exist
 7. Rollback: `CF_API_PROXY_ENABLED=false` (or unset)
@@ -30,7 +32,7 @@ Ops-only. Deploy/register **never** flips `CF_API_PROXY_ENABLED` / `IMAGE_EDGE_E
 ## Image edge pool (`edge/img-worker`)
 
 1. Deploy ≥1 (better ≥2) bases with shared `IMAGE_EDGE_SECRET`
-2. Probe matrix with a known pximg path (`--twice --healthz`)
+2. Probe matrix with a known pximg path (`--twice --healthz`); admin `POST /admin/api/cf-workers/probe` `{"kind":"image"}` for pool healthz
 3. Membership: `IMAGE_EDGE_BASE_URLS` and/or register `kind=image`
 4. Inspect: pool + `GET /admin/api/maintenance/image-edge`
 5. Enable: `IMAGE_EDGE_ENABLED=true`
@@ -49,4 +51,4 @@ See [`engine-traffic-cutover.md`](./engine-traffic-cutover.md) for traffic% ramp
 - Admin deploy uses **this repo’s** workers only — not ds2api open reverse proxy.
 - Never store CF API tokens in runtime_settings / logs.
 - Real multi-base CF deploy still needs a CF account (code path ready; flags stay default-off).
-- BFF process-local CF base cooldown (~30s after 5xx/transport) demotes sticky dead members within a process; multi-process still needs ops/probe.
+- BFF process-local base cooldown (~30s after 5xx/transport or admin probe hard fail) demotes sticky dead members within a process for API + image ordered lists; public image 302 stays sticky-only; multi-process still needs ops/probe.

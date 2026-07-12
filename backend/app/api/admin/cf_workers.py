@@ -2,17 +2,25 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_json import admin_ok
-from app.core.admin_request import load_json_object, parse_bool, parse_optional_str, parse_required_str
+from app.core.admin_request import (
+    load_json_object,
+    load_json_object_optional,
+    parse_bool,
+    parse_optional_str,
+    parse_required_str,
+)
 from app.core.cf_pool_overlay import (
     get_api_overlay_bases,
     get_image_overlay_bases,
     set_api_overlay_bases,
     set_image_overlay_bases,
 )
+from app.core.cf_pool_probe import probe_cf_pool_bases
 from app.core.cf_pool_registry import (
     RUNTIME_KEY_API_BASES,
     RUNTIME_KEY_IMAGE_BASES,
@@ -329,5 +337,89 @@ async def cf_workers_egress_policy(
     return admin_ok(
         request,
         payload=dict(egress_policy_snapshot(_settings(request))),
+        request_id=rid,
+    )
+
+
+@router.post(
+    "/cf-workers/probe",
+    summary="Probe CF Worker pool bases (healthz)",
+    description=(
+        "Outbound GET {base}/healthz for each merged pool member (or body base_urls). "
+        "Records process-local base cooldown on hard failure (does not flip enable flags). "
+        "Body optional: kind=api|image|all (default all), base_urls=[…] override, timeout_s."
+    ),
+)
+async def cf_workers_probe(
+    request: Request,
+    _claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    _ = _claims
+    rid = get_or_create_request_id(request)
+    data = await load_json_object_optional(request)
+    kind_raw = (parse_optional_str(data.get("kind")) or "all").strip().lower()
+    if kind_raw not in {"api", "image", "all"}:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="kind must be api, image, or all", status_code=400)
+    timeout_s = 3.0
+    try:
+        if data.get("timeout_s") is not None:
+            timeout_s = float(data.get("timeout_s"))
+    except Exception:
+        timeout_s = 3.0
+    timeout_s = max(0.5, min(timeout_s, 15.0))
+
+    settings = _settings(request)
+    env_api = _env_api_bases(settings)
+    env_img = _env_image_bases(settings)
+    rt_api = get_api_overlay_bases()
+    rt_img = get_image_overlay_bases()
+
+    override_raw = data.get("base_urls")
+    override: list[str] = []
+    if isinstance(override_raw, list):
+        override = [str(x) for x in override_raw if str(x or "").strip()]
+    elif isinstance(override_raw, str) and override_raw.strip():
+        override = [override_raw.strip()]
+
+    http_client = getattr(request.app.state, "httpx_client", None)
+    owns_client = False
+    if http_client is None:
+        http_client = httpx.AsyncClient()
+        owns_client = True
+
+    api_results: list[dict[str, Any]] = []
+    image_results: list[dict[str, Any]] = []
+    try:
+        if kind_raw in {"api", "all"}:
+            api_bases = merge_base_url_lists(override) if override else merge_base_url_lists(env_api, rt_api)
+            api_results = await probe_cf_pool_bases(
+                http_client, kind="api", bases=api_bases, timeout_s=timeout_s
+            )
+        if kind_raw in {"image", "all"}:
+            img_bases = merge_base_url_lists(override) if override else merge_base_url_lists(env_img, rt_img)
+            image_results = await probe_cf_pool_bases(
+                http_client, kind="image", bases=img_bases, timeout_s=timeout_s
+            )
+    finally:
+        if owns_client:
+            await http_client.aclose()
+
+    def _summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        ok_n = sum(1 for r in rows if r.get("ok"))
+        return {"total": len(rows), "ok": ok_n, "fail": len(rows) - ok_n}
+
+    return admin_ok(
+        request,
+        payload={
+            "probed": True,
+            "kind": kind_raw,
+            "timeout_s": timeout_s,
+            "api": {"results": api_results, "summary": _summary(api_results)},
+            "image": {"results": image_results, "summary": _summary(image_results)},
+            "note": (
+                "Probe never enables CF_API_PROXY_ENABLED / IMAGE_EDGE_ENABLED. "
+                "Hard failures demote process-local base cooldown (~30s)."
+            ),
+        },
         request_id=rid,
     )

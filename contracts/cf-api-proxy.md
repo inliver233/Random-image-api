@@ -61,6 +61,7 @@ Env CSV bases merge with runtime-registered bases (`cf_pool.api.base_urls` in `r
 | `POST /admin/api/cf-workers/register` | add runtime base (`kind=api\|image`, `base_url`) |
 | `POST /admin/api/cf-workers/unregister` | remove runtime base |
 | `POST /admin/api/cf-workers/deploy` | CF API upload of **hardened** `edge/api-worker` or `edge/img-worker`, enable workers.dev, optional auto-register — **does not** flip enable flags; never stores CF API token |
+| `POST /admin/api/cf-workers/probe` | outbound `GET {base}/healthz` for merged pool (or body `base_urls`); optional `kind=api\|image\|all` (default all), `timeout_s`; records process-local base cooldown on hard fail — **never** flips enable flags |
 
 ## Security rules
 
@@ -72,9 +73,9 @@ Env CSV bases merge with runtime-registered bases (`cf_pool.api.base_urls` in `r
 
 ## Process-local base cooldown
 
-After a CF base transport / 5xx failure, BFF demotes that base for ~30s (process memory only):
+After a CF base transport / 5xx failure (or admin probe hard fail), BFF demotes that base for ~30s (process memory only):
 
-- `record_cf_base_outcome(request_url|base, ok=…)` from hydrate OAuth/detail + admin token test-refresh
+- `record_cf_base_outcome(request_url|base, ok=…)` from hydrate OAuth/detail + admin token test-refresh + `POST /admin/api/cf-workers/probe` (`kind=api`)
 - `resolve_pixiv_api_cf_candidates` keeps sticky-first among **hot** bases, then appends cooling bases
 - Success clears cooldown; not a residential DB blacklist and not shared across processes
 

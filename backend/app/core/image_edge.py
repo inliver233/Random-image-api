@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import threading
 import time
 from dataclasses import dataclass
 from typing import Any, Mapping
@@ -18,6 +19,12 @@ _ALLOWED_EDGE_EXTS = frozenset({"jpg", "jpeg", "png", "gif", "webp"})
 # Settings are immutable per process boot; cache by config key for hot delivery path.
 _EDGE_CFG_FROM_SETTINGS: dict[tuple[Any, ...], ImageEdgeConfig | None] = {}
 _EDGE_CFG_CACHE_MAX = 32
+
+# Process-local soft cooldown for multi-base image edge (ops candidates / alternate lists).
+# Public 302 sticky path stays sticky for cache locality; ordered helpers demote cooling bases.
+_IMAGE_EDGE_BASE_COOLDOWN_S = 30.0
+_image_edge_base_lock = threading.Lock()
+_image_edge_base_cool_until: dict[str, float] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,12 +195,82 @@ def pick_image_edge_base_url(cfg: ImageEdgeConfig, path: str) -> str:
     return bases[idx]
 
 
+def reset_image_edge_base_cooldown_for_tests() -> None:
+    """Clear process image-edge base cooldown map (unit tests only)."""
+    with _image_edge_base_lock:
+        _image_edge_base_cool_until.clear()
+
+
+def normalize_image_edge_base_url(base: str) -> str:
+    return str(base or "").strip().rstrip("/")
+
+
+def is_image_edge_base_cooling(base: str, *, now: float | None = None) -> bool:
+    b = normalize_image_edge_base_url(base)
+    if not b:
+        return False
+    t = time.monotonic() if now is None else float(now)
+    with _image_edge_base_lock:
+        until = float(_image_edge_base_cool_until.get(b) or 0.0)
+        if until <= t:
+            if b in _image_edge_base_cool_until:
+                _image_edge_base_cool_until.pop(b, None)
+            return False
+        return True
+
+
+def record_image_edge_base_outcome(
+    base: str,
+    *,
+    ok: bool,
+    cooldown_s: float = _IMAGE_EDGE_BASE_COOLDOWN_S,
+    now: float | None = None,
+) -> None:
+    """Record image-edge worker base success/failure for process-local demotion.
+
+    Success clears cooldown. Failure opens/extends cooldown so ordered candidate lists
+    demote that base. Public sticky 302 still uses sticky alone. Best-effort; never raises.
+    """
+    try:
+        b = normalize_image_edge_base_url(base)
+        if not b:
+            return
+        t = time.monotonic() if now is None else float(now)
+        with _image_edge_base_lock:
+            if ok:
+                _image_edge_base_cool_until.pop(b, None)
+                return
+            cool = max(1.0, float(cooldown_s))
+            prev = float(_image_edge_base_cool_until.get(b) or 0.0)
+            _image_edge_base_cool_until[b] = max(prev, t + cool)
+    except Exception:
+        return
+
+
+def order_image_edge_bases_for_failover(bases: list[str], *, now: float | None = None) -> list[str]:
+    """Keep sticky-first order among healthy bases; append cooling bases last."""
+    hot: list[str] = []
+    cold: list[str] = []
+    seen: set[str] = set()
+    for raw in bases:
+        b = normalize_image_edge_base_url(raw)
+        if not b or b in seen:
+            continue
+        seen.add(b)
+        if is_image_edge_base_cooling(b, now=now):
+            cold.append(b)
+        else:
+            hot.append(b)
+    return hot + cold
+
+
 def ordered_image_edge_base_urls(cfg: ImageEdgeConfig, path: str) -> list[str]:
     """Sticky base first, then remaining configured bases (deduped).
 
     Mirrors ``resolve_pixiv_api_cf_candidates`` ordering for CF API proxy multi-deploy.
     Public 302 still uses sticky alone (clients cannot walk a candidate list); this helper
     is for ops probes, multi-URL JSON surfaces, and future BFF-side retries.
+    Cooling bases (process-local after probe/egress hard fails) are demoted to the end.
     """
     try:
         sticky = pick_image_edge_base_url(cfg, path)
@@ -202,12 +279,12 @@ def ordered_image_edge_base_urls(cfg: ImageEdgeConfig, path: str) -> list[str]:
     ordered: list[str] = []
     seen: set[str] = set()
     for base in [sticky, *list(cfg.base_urls or [])]:
-        b = str(base or "").strip().rstrip("/")
+        b = normalize_image_edge_base_url(base)
         if not b or b in seen:
             continue
         seen.add(b)
         ordered.append(b)
-    return ordered
+    return order_image_edge_bases_for_failover(ordered)
 
 
 def sign_image_edge_path(cfg: ImageEdgeConfig, path: str, *, now: int | None = None, base_url: str | None = None) -> str:

@@ -129,3 +129,91 @@ def test_cf_workers_deploy_validation(tmp_path: Path, monkeypatch) -> None:
         )
         assert resp.status_code == 400
     reset_overlay_for_tests()
+
+
+def test_cf_workers_probe_empty_body_and_override(tmp_path: Path, monkeypatch) -> None:
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_probe")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    fake_api = [
+        {
+            "kind": "api",
+            "base_url": "https://api-a.example.workers.dev",
+            "ok": True,
+            "status_code": 200,
+            "latency_ms": 12.5,
+            "error": None,
+            "service": "random-image-api-proxy",
+            "secret_configured": True,
+            "body_ok": True,
+        }
+    ]
+    fake_img = [
+        {
+            "kind": "image",
+            "base_url": "https://img-a.example.workers.dev",
+            "ok": False,
+            "status_code": 503,
+            "latency_ms": 4.0,
+            "error": "status=503",
+            "service": None,
+            "secret_configured": None,
+            "body_ok": None,
+        }
+    ]
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        with patch(
+            "app.api.admin.cf_workers.probe_cf_pool_bases",
+            new_callable=AsyncMock,
+            side_effect=[fake_api, fake_img],
+        ) as probe:
+            # Empty body → kind=all, probes both pools (may be empty if no members).
+            resp = client.post("/admin/api/cf-workers/probe", headers=headers)
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["ok"] is True
+            assert body["probed"] is True
+            assert body["kind"] == "all"
+            assert body["api"]["summary"]["total"] == 1
+            assert body["image"]["summary"]["fail"] == 1
+            assert probe.await_count == 2
+
+        with patch(
+            "app.api.admin.cf_workers.probe_cf_pool_bases",
+            new_callable=AsyncMock,
+            return_value=fake_api,
+        ) as probe_one:
+            resp2 = client.post(
+                "/admin/api/cf-workers/probe",
+                headers=headers,
+                json={
+                    "kind": "api",
+                    "base_urls": ["https://api-a.example.workers.dev/"],
+                    "timeout_s": 2,
+                },
+            )
+            assert resp2.status_code == 200
+            body2 = resp2.json()
+            assert body2["kind"] == "api"
+            assert body2["api"]["summary"]["ok"] == 1
+            assert body2["image"]["summary"]["total"] == 0
+            probe_one.assert_awaited_once()
+            kwargs = probe_one.await_args.kwargs
+            assert kwargs["kind"] == "api"
+            assert kwargs["bases"] == ["https://api-a.example.workers.dev"]
+            assert kwargs["timeout_s"] == 2.0
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_probe_rejects_bad_kind(tmp_path: Path, monkeypatch) -> None:
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_probe_bad_kind")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        resp = client.post(
+            "/admin/api/cf-workers/probe",
+            headers=headers,
+            json={"kind": "bogus"},
+        )
+        assert resp.status_code == 400
+    reset_overlay_for_tests()

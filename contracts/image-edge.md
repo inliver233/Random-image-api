@@ -158,9 +158,11 @@ Backend note: pure edge **302** does **not** call `mark_image_ok` (bytes not ver
 | Helper | Behavior |
 | --- | --- |
 | `pick_image_edge_base_url(cfg, path)` | Sticky SHA-256 pick: same path → same base (cache locality) |
-| `ordered_image_edge_base_urls(cfg, path)` | Sticky first, then remaining bases (deduped) — same order shape as CF API `resolve_pixiv_api_cf_candidates` |
+| `ordered_image_edge_base_urls(cfg, path)` | Sticky first, then remaining bases (deduped); cooling bases demoted to end — same order shape as CF API `resolve_pixiv_api_cf_candidates` |
+| `record_image_edge_base_outcome` / `order_image_edge_bases_for_failover` | Process-local ~30s cooldown after probe/egress hard fails (ops ordered lists only; public sticky 302 unchanged) |
 | `resolve_image_edge_signed_candidates(settings, original_url)` | Signs once per ordered base; empty when edge not ready / non-pximg |
 | Public 302 / `urls.proxy` | Sticky primary only (clients cannot walk a candidate list on a single Location) |
+| `POST /admin/api/cf-workers/probe` (`kind=image\|all`) | Outbound `GET {base}/healthz` for image pool; records image-edge base cooldown on hard fail; never enables `IMAGE_EDGE_ENABLED` |
 
 ### Secret rotation (zero-downtime)
 

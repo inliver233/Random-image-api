@@ -270,6 +270,52 @@ def test_ordered_image_edge_base_urls_sticky_first() -> None:
     assert set(ordered) == set(cfg.base_urls)
 
 
+def test_image_edge_base_cooldown_demotes_failed_base() -> None:
+    from app.core.image_edge import (
+        is_image_edge_base_cooling,
+        ordered_image_edge_base_urls,
+        order_image_edge_bases_for_failover,
+        pick_image_edge_base_url,
+        record_image_edge_base_outcome,
+        reset_image_edge_base_cooldown_for_tests,
+    )
+
+    reset_image_edge_base_cooldown_for_tests()
+    cfg = ImageEdgeConfig(
+        enabled=True,
+        base_urls=["https://img-a.example.com", "https://img-b.example.com", "https://img-c.example.com"],
+        secret="s",
+        sign_ttl_seconds=60,
+    )
+    path = "/img-original/img/2020/01/01/00/00/00/1_p0.jpg"
+    sticky = pick_image_edge_base_url(cfg, path)
+    first = ordered_image_edge_base_urls(cfg, path)
+    assert first[0] == sticky
+    record_image_edge_base_outcome(sticky, ok=False)
+    assert is_image_edge_base_cooling(sticky) is True
+    second = ordered_image_edge_base_urls(cfg, path)
+    assert len(second) == 3
+    assert second[0] != sticky
+    assert second[-1] == sticky
+    # Public sticky pick is unchanged (cache locality).
+    assert pick_image_edge_base_url(cfg, path) == sticky
+    record_image_edge_base_outcome(sticky, ok=True)
+    assert is_image_edge_base_cooling(sticky) is False
+    third = ordered_image_edge_base_urls(cfg, path)
+    assert third[0] == sticky
+    demoted = order_image_edge_bases_for_failover(
+        ["https://hot.example.com", "https://cold.example.com"]
+    )
+    assert demoted == ["https://hot.example.com", "https://cold.example.com"]
+    record_image_edge_base_outcome("https://hot.example.com", ok=False, cooldown_s=60.0)
+    demoted2 = order_image_edge_bases_for_failover(
+        ["https://hot.example.com", "https://cold.example.com"]
+    )
+    assert demoted2[0] == "https://cold.example.com"
+    assert demoted2[-1] == "https://hot.example.com"
+    reset_image_edge_base_cooldown_for_tests()
+
+
 def test_resolve_image_edge_signed_candidates_orders_sticky_first() -> None:
     from app.core.image_edge import (
         pick_image_edge_base_url,
