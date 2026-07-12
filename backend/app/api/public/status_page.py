@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.core.coerce import clamp_float
+from app.core.random_engine_client import engine_circuit_snapshot, random_engine_base_url
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.time import iso_utc_ms
 from app.db.session import with_sqlite_busy_retry
@@ -22,6 +23,23 @@ def _as_nonneg_stat(value: Any) -> int:
         return int(value or 0)
     except Exception:
         return 0
+
+
+def _random_engine_public_snapshot(settings: Any) -> dict[str, Any]:
+    """Local dual-run readiness for public /status (no outbound engine probe)."""
+    engine_url = random_engine_base_url(settings) if settings is not None else None
+    enabled = bool(getattr(settings, "random_engine_enabled", False)) if settings is not None else False
+    try:
+        traffic = int(getattr(settings, "random_engine_traffic_percent", 100) or 0) if settings is not None else 0
+    except Exception:
+        traffic = 0
+    return {
+        "url_configured": bool(engine_url),
+        "enabled": enabled,
+        "traffic_percent": traffic,
+        # Process dual-run circuit (same shape as /healthz modules.random_engine.circuit).
+        "circuit": engine_circuit_snapshot(),
+    }
 
 
 async def _query_gallery_stats(engine) -> dict[str, Any]:
@@ -106,6 +124,20 @@ def _build_status_html(
     if not math.isfinite(last_window_success_rate):
         last_window_success_rate = 0.0
     last_window_success_rate = clamp_float(float(last_window_success_rate), min_v=0.0, max_v=1.0)
+
+    # Dual-run readiness chip (local circuit snapshot; no outbound probe).
+    eng = payload.get("random_engine") if isinstance(payload.get("random_engine"), dict) else {}
+    eng_enabled = bool(eng.get("enabled"))
+    eng_url_ok = bool(eng.get("url_configured"))
+    eng_traffic = _as_nonneg_stat(eng.get("traffic_percent"))
+    eng_circuit = eng.get("circuit") if isinstance(eng.get("circuit"), dict) else {}
+    eng_state = str(eng_circuit.get("state") or "closed")
+    if eng_enabled and eng_url_ok:
+        eng_chip = f"dual-run: on · traffic {eng_traffic}% · circuit {eng_state}"
+    elif eng_url_ok:
+        eng_chip = f"dual-run: off · circuit {eng_state}"
+    else:
+        eng_chip = f"dual-run: not configured · circuit {eng_state}"
 
     json_url = u("/status.json")
     docs_url = u("/docs")
@@ -364,6 +396,7 @@ def _build_status_html(
         <a class="chip" href="{random_url}"><strong>/random</strong> 随机出图</a>
         <a class="chip" href="{docs_url}"><strong>/docs</strong> 使用文档</a>
         <a class="chip" href="{wtf_url}"><strong>/wtf</strong> 瀑布流</a>
+        <span class="chip" title="process-local dual-run circuit (same as /healthz modules.random_engine.circuit; no outbound probe)">{eng_chip}</span>
       </div>
     </div>
 
@@ -491,6 +524,7 @@ async def status_json(request: Request) -> JSONResponse:
     set_request_id_on_state(request, rid)
 
     engine = request.app.state.engine
+    settings = getattr(request.app.state, "settings", None)
     api_status = "ok"
     api_status_code = 200
     payload: dict[str, Any] = {"api_status": api_status, "api_status_code": api_status_code, "updated_at": iso_utc_ms()}
@@ -510,6 +544,9 @@ async def status_json(request: Request) -> JSONResponse:
             "last_window_error": 0,
             "last_window_success_rate": 0.0,
         }
+
+    # Local dual-run circuit (same fields as /healthz modules.random_engine; no outbound probe).
+    payload["random_engine"] = _random_engine_public_snapshot(settings)
 
     try:
         payload.update(await _query_gallery_stats(engine))
@@ -531,6 +568,7 @@ async def status_page(request: Request) -> HTMLResponse:
     set_request_id_on_state(request, rid)
 
     engine = request.app.state.engine
+    settings = getattr(request.app.state, "settings", None)
     api_status = "ok"
     api_status_code = 200
 
@@ -539,6 +577,9 @@ async def status_page(request: Request) -> HTMLResponse:
     stats = getattr(request.app.state, "random_request_stats", None)
     if stats is not None:
         payload["random"] = asdict(await stats.snapshot())
+
+    # Local dual-run circuit for HTML chip + DATA payload (no outbound probe).
+    payload["random_engine"] = _random_engine_public_snapshot(settings)
 
     try:
         payload.update(await _query_gallery_stats(engine))
@@ -549,7 +590,6 @@ async def status_page(request: Request) -> HTMLResponse:
         payload["api_status_code"] = api_status_code
         payload["error"] = {"type": type(exc).__name__, "message": str(exc)}
 
-    settings = getattr(request.app.state, "settings", None)
     public_api_key_required = bool(getattr(settings, "public_api_key_required", False))
     html = _build_status_html(
         base_url=str(getattr(request, "base_url", "") or "").rstrip("/"),
