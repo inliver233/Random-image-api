@@ -111,6 +111,11 @@ def test_metrics_exposes_random_jobs_and_proxy_metrics(tmp_path: Path, monkeypat
         assert "new_pixiv_jobs_claim_total" in text
         assert "new_pixiv_jobs_failed_total" in text
         assert "new_pixiv_token_refresh_fail_total" in text
+        assert "new_pixiv_pixiv_api_egress_total" in text
+        assert 'via="cf"' in text
+        assert 'via="residential"' in text
+        assert "new_pixiv_r2_prewarm_total" in text
+        assert 'result="skipped_disabled"' in text or 'result="ok"' in text
         assert "new_pixiv_jobs_status_count" in text
         assert "new_pixiv_proxy_endpoints_state_count" in text
         assert "new_pixiv_proxy_probe_latency_ms" in text

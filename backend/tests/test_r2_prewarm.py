@@ -86,6 +86,8 @@ def test_r2_prewarm_settings_secret_fallback() -> None:
 
 
 def test_maybe_enqueue_posts_paths_and_secret() -> None:
+    from app.core.metrics import R2_PREWARM_TOTAL
+
     s = load_settings(
         {
             "R2_PREWARM_ENABLED": "1",
@@ -94,6 +96,7 @@ def test_maybe_enqueue_posts_paths_and_secret() -> None:
         }
     )
     client = _FakeClient()
+    before_ok = R2_PREWARM_TOTAL.labels(result="ok")._value.get()  # type: ignore[attr-defined]
 
     async def _run() -> dict[str, Any] | None:
         return await maybe_enqueue_r2_prewarm(
@@ -111,6 +114,26 @@ def test_maybe_enqueue_posts_paths_and_secret() -> None:
     assert call["headers"].get("X-Prewarm-Secret") == "pw-secret"
     # Must not send legacy image_ids shape to Worker.
     assert "image_ids" not in (call["json"] or {})
+    after_ok = R2_PREWARM_TOTAL.labels(result="ok")._value.get()  # type: ignore[attr-defined]
+    assert after_ok >= before_ok + 1
+
+
+def test_maybe_enqueue_skipped_disabled_observes_metric() -> None:
+    from app.core.metrics import R2_PREWARM_TOTAL
+
+    s = load_settings({"R2_PREWARM_ENABLED": "0"})
+    before = R2_PREWARM_TOTAL.labels(result="skipped_disabled")._value.get()  # type: ignore[attr-defined]
+
+    async def _run() -> dict[str, Any] | None:
+        return await maybe_enqueue_r2_prewarm(
+            paths=["/img-original/img/2020/01/01/00/00/00/1_p0.jpg"],
+            settings=s,
+            client=_FakeClient(),
+        )
+
+    assert asyncio.run(_run()) is None
+    after = R2_PREWARM_TOTAL.labels(result="skipped_disabled")._value.get()  # type: ignore[attr-defined]
+    assert after >= before + 1
 
 
 def test_maybe_enqueue_image_ids_resolves_via_catalog(tmp_path: Path) -> None:

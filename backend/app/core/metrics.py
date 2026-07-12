@@ -127,6 +127,21 @@ TOKEN_REFRESH_FAIL_TOTAL = Counter(
     "Total token refresh failures.",
 )
 
+# Pixiv API egress plan outcomes (CF multi-base then residential).
+# via: cf | residential — result: ok | error (per attempt, not per logical op).
+PIXIV_API_EGRESS_TOTAL = Counter(
+    "new_pixiv_pixiv_api_egress_total",
+    "Pixiv API egress attempts by via (cf|residential) and result (ok|error).",
+    ["via", "result"],
+)
+
+# R2 prewarm best-effort enqueue outcomes (config skip + chunk HTTP).
+R2_PREWARM_TOTAL = Counter(
+    "new_pixiv_r2_prewarm_total",
+    "R2 prewarm enqueue outcomes by result (ok|failed_chunk|skipped_*|error).",
+    ["result"],
+)
+
 JOBS_STATUS_COUNT = Gauge(
     "new_pixiv_jobs_status_count",
     "Current jobs count by status (from SQLite).",
@@ -222,6 +237,18 @@ IMAGE_DELIVERY_PATHS: tuple[str, ...] = (
     "local_i_redirect",
 )
 
+PIXIV_API_EGRESS_VIAS: tuple[str, ...] = ("cf", "residential")
+PIXIV_API_EGRESS_RESULTS: tuple[str, ...] = ("ok", "error")
+
+R2_PREWARM_RESULTS: tuple[str, ...] = (
+    "ok",
+    "failed_chunk",
+    "skipped_disabled",
+    "skipped_no_secret",
+    "skipped_no_paths",
+    "error",
+)
+
 
 def _init_labelsets() -> None:
     for result in RANDOM_RESULTS:
@@ -253,6 +280,11 @@ def _init_labelsets() -> None:
     JOBS_CLAIM_TOTAL.inc(0)
     JOBS_FAILED_TOTAL.inc(0)
     TOKEN_REFRESH_FAIL_TOTAL.inc(0)
+    for via in PIXIV_API_EGRESS_VIAS:
+        for result in PIXIV_API_EGRESS_RESULTS:
+            PIXIV_API_EGRESS_TOTAL.labels(via=via, result=result).inc(0)
+    for result in R2_PREWARM_RESULTS:
+        R2_PREWARM_TOTAL.labels(result=result).inc(0)
     for status in JOB_STATUSES:
         JOBS_STATUS_COUNT.labels(status=status).set(0)
     for state in PROXY_STATES:
@@ -327,6 +359,31 @@ def observe_api_key_rate_limit(*, result: str, backend: str) -> None:
         backend_label = "memory"
     try:
         API_KEY_RATE_LIMIT_TOTAL.labels(result=result_label, backend=backend_label).inc()
+    except Exception:
+        pass
+
+
+def observe_pixiv_api_egress(*, via: str, result: str) -> None:
+    """Count one CF/residential Pixiv API egress attempt (best-effort; never raises)."""
+    via_label = (via or "").strip().lower() or "residential"
+    if via_label not in PIXIV_API_EGRESS_VIAS:
+        via_label = "residential"
+    result_label = (result or "").strip().lower() or "error"
+    if result_label not in PIXIV_API_EGRESS_RESULTS:
+        result_label = "error"
+    try:
+        PIXIV_API_EGRESS_TOTAL.labels(via=via_label, result=result_label).inc()
+    except Exception:
+        pass
+
+
+def observe_r2_prewarm(*, result: str) -> None:
+    """Count one R2 prewarm enqueue outcome (best-effort; never raises)."""
+    label = (result or "").strip().lower() or "error"
+    if label not in R2_PREWARM_RESULTS:
+        label = "error"
+    try:
+        R2_PREWARM_TOTAL.labels(result=label).inc()
     except Exception:
         pass
 

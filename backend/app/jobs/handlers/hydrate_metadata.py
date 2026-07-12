@@ -19,7 +19,7 @@ from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
 from app.core.failover import classify_pixiv_rate_limit, pixiv_rate_limit_backoff_seconds
-from app.core.metrics import TOKEN_REFRESH_FAIL_TOTAL
+from app.core.metrics import TOKEN_REFRESH_FAIL_TOTAL, observe_pixiv_api_egress
 from app.core.proxy_health import proxy_endpoint_fail_values_immediate, proxy_endpoint_ok_values
 from app.core.proxy_routing import invalidate_proxy_pool_caches
 from app.core.proxy_selector import iter_pixiv_api_egress
@@ -805,6 +805,7 @@ LIMIT 1;
                         )
                 except PixivOauthError as exc:
                     latency_ms = (float(time.monotonic()) - start_m) * 1000.0
+                    observe_pixiv_api_egress(via="cf" if via_cf else "residential", result="error")
                     if picked_proxy is not None:
                         if exc.status_code is not None and int(exc.status_code) < 500:
                             await _mark_proxy_ok(
@@ -829,6 +830,7 @@ LIMIT 1;
                     raise
                 except httpx.RequestError as exc:
                     latency_ms = (float(time.monotonic()) - start_m) * 1000.0
+                    observe_pixiv_api_egress(via="cf" if via_cf else "residential", result="error")
                     if picked_proxy is not None:
                         await _mark_proxy_fail(
                             int(picked_proxy.endpoint_id),
@@ -842,6 +844,7 @@ LIMIT 1;
                     continue
                 else:
                     latency_ms = (float(time.monotonic()) - start_m) * 1000.0
+                    observe_pixiv_api_egress(via="cf" if via_cf else "residential", result="ok")
                     if picked_proxy is not None:
                         await _mark_proxy_ok(
                             int(picked_proxy.endpoint_id),
@@ -926,6 +929,7 @@ LIMIT 1;
                         await client.aclose()
             except httpx.RequestError as exc:
                 latency_ms = (float(time.monotonic()) - start_m) * 1000.0
+                observe_pixiv_api_egress(via="cf" if via_cf else "residential", result="error")
                 if picked_proxy is not None:
                     await _mark_proxy_fail(
                         int(picked_proxy.endpoint_id),
@@ -955,6 +959,7 @@ LIMIT 1;
                     )
 
             if resp.status_code == 200:
+                observe_pixiv_api_egress(via="cf" if via_cf else "residential", result="ok")
                 if picked_proxy is not None:
                     await _set_token_proxy_override(
                         token_id=int(token_id),
@@ -971,6 +976,7 @@ LIMIT 1;
                     raise ValueError("Pixiv App API response invalid")
                 return data
 
+            observe_pixiv_api_egress(via="cf" if via_cf else "residential", result="error")
             http_exc = httpx.HTTPStatusError(
                 f"Pixiv App API error status={resp.status_code}",
                 request=resp.request,

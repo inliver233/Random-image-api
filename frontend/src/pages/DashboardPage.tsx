@@ -558,7 +558,10 @@ export function DashboardPage() {
                         : r2Prewarm.data.enabled_flag
                           ? "flag-on-not-ready"
                           : "off"}
-                      {!r2Prewarm.data.secret_configured && r2Prewarm.data.enabled_flag
+                      {r2Prewarm.data.enabled_flag && !r2Prewarm.data.url_configured
+                        ? " · no-url"
+                        : ""}
+                      {r2Prewarm.data.enabled_flag && !r2Prewarm.data.secret_configured
                         ? " · no-secret"
                         : ""}
                     </Tag>

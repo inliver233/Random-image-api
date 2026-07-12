@@ -94,6 +94,8 @@ def test_admin_token_test_refresh_success_rotates_refresh_token(tmp_path: Path, 
         assert body["ok"] is True
         assert body["expires_in"] == 3600
         assert body["user_id"] == "123"
+        assert body["via_cf"] is False
+        assert body.get("proxy") is None
         assert body["request_id"] == "req_test"
         assert resp.headers["X-Request-Id"] == "req_test"
 

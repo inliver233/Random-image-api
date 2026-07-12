@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.core.config import Settings, load_settings
 from app.core.env_parse import parse_bool_env
 from app.core.image_edge import is_edge_allowed_path, pximg_path_from_original_url
+from app.core.metrics import observe_r2_prewarm
 from app.db.catalog import CatalogStore, SqliteCatalogStore
 from app.db.session import create_sessionmaker
 
@@ -136,13 +137,16 @@ async def maybe_enqueue_r2_prewarm(
     try:
         s = settings if settings is not None else load_settings()
         if not r2_prewarm_enabled(s):
+            observe_r2_prewarm(result="skipped_disabled")
             return None
         base = r2_prewarm_url(s)
         if not base:
+            observe_r2_prewarm(result="skipped_disabled")
             return None
         secret = r2_prewarm_secret(s)
         if not secret:
             logger.warning("r2-prewarm ready but no secret (R2_PREWARM_SECRET / IMAGE_EDGE_SECRET)")
+            observe_r2_prewarm(result="skipped_no_secret")
             return None
 
         resolved: list[str] = normalize_prewarm_paths(paths)
@@ -161,9 +165,11 @@ async def maybe_enqueue_r2_prewarm(
         elif image_ids and not resolved:
             # Callers that only pass ids must inject engine for id→path mapping.
             logger.debug("r2-prewarm skipped: image_ids without engine and no paths")
+            observe_r2_prewarm(result="skipped_no_paths")
             return None
 
         if not resolved:
+            observe_r2_prewarm(result="skipped_no_paths")
             return None
 
         use_client = client
@@ -193,13 +199,16 @@ async def maybe_enqueue_r2_prewarm(
                         (resp.text or "")[:200],
                     )
                     failed_chunks += 1
+                    observe_r2_prewarm(result="failed_chunk")
                     continue
                 data = resp.json() if resp.content else {"ok": True}
                 last = data if isinstance(data, dict) else {"ok": True}
                 applied += len(chunk)
+                observe_r2_prewarm(result="ok")
             except Exception as exc:
                 logger.warning("r2-prewarm enqueue failed: %s", exc)
                 failed_chunks += 1
+                observe_r2_prewarm(result="failed_chunk")
                 continue
         if applied <= 0:
             return None
@@ -212,4 +221,5 @@ async def maybe_enqueue_r2_prewarm(
         return last
     except Exception as exc:
         logger.warning("r2-prewarm error: %s", exc)
+        observe_r2_prewarm(result="error")
         return None

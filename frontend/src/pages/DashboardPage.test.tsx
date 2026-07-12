@@ -294,6 +294,8 @@ describe("DashboardPage", () => {
     expect((await screen.findAllByText(/bases=0\s*·\s*no-secret/)).length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText(/cf_api_proxy=off/)).toBeInTheDocument();
     expect(await screen.findByText(/r2_prewarm=flag-on-not-ready/)).toBeInTheDocument();
+    // Mock has url_configured + missing secret → no-secret honesty suffix.
+    expect(await screen.findByText(/r2_prewarm=flag-on-not-ready\s*·\s*no-secret/)).toBeInTheDocument();
     expect(await screen.findByText(/engine=enabled-not-ready/)).toBeInTheDocument();
     expect(await screen.findByText("engine index empty")).toBeInTheDocument();
     expect(await screen.findByText(/circuit=open\s*~13s/)).toBeInTheDocument();

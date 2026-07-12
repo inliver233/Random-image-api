@@ -20,6 +20,7 @@ from app.core.admin_request import (
 )
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.errors import ApiError, ErrorCode
+from app.core.metrics import observe_pixiv_api_egress
 from app.core.proxy_selector import iter_pixiv_api_egress
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_config_cache import get_cached_runtime_config
@@ -271,8 +272,10 @@ async def delete_token(
     description=(
         "Live Pixiv OAuth refresh probe for one stored token. Egress uses "
         "`iter_pixiv_api_egress` (CF API proxy first when ready, then residential). "
-        "Does not enqueue jobs; returns success/failure + optional residential proxy ids. "
-        "Never returns refresh tokens. Parity with hydrate egress plan (contracts/cf-api-proxy.md)."
+        "Does not enqueue jobs; returns success/failure, `via_cf` (bool), and optional "
+        "residential `proxy` ids when the winning attempt was residential. "
+        "Never returns refresh tokens or CF secrets. Parity with hydrate egress plan "
+        "(contracts/cf-api-proxy.md)."
     ),
 )
 async def test_refresh_token(
@@ -320,6 +323,7 @@ async def test_refresh_token(
         now = iso_utc_ms()
         picked_proxy = None
         token = None
+        winning_via_cf = False
 
         try:
             runtime = await get_cached_runtime_config(engine)
@@ -334,6 +338,7 @@ async def test_refresh_token(
                 token_id=int(token_id),
                 residential_failover_attempts=0,
             ):
+                via_label = "cf" if attempt.via_cf else "residential"
                 try:
                     if attempt.via_cf:
                         token = await refresh_access_token(
@@ -352,6 +357,7 @@ async def test_refresh_token(
                             proxy=attempt.proxy_uri,
                         )
                 except PixivOauthError as exc:
+                    observe_pixiv_api_egress(via=via_label, result="error")
                     if exc.status_code is None or int(exc.status_code) >= 500:
                         last_exc = exc
                         # Soft fail-open: no residential + not CF → stop; else try next.
@@ -360,12 +366,15 @@ async def test_refresh_token(
                         continue
                     raise
                 except Exception as exc:
+                    observe_pixiv_api_egress(via=via_label, result="error")
                     last_exc = exc
                     if attempt.residential is None and not attempt.via_cf:
                         break
                     continue
                 else:
+                    observe_pixiv_api_egress(via=via_label, result="ok")
                     picked_proxy = attempt.residential
+                    winning_via_cf = bool(attempt.via_cf)
                     break
 
             if token is None:
@@ -438,9 +447,16 @@ async def test_refresh_token(
     if picked_proxy is not None:
         proxy_details = {"endpoint_id": str(picked_proxy.endpoint_id), "pool_id": str(picked_proxy.pool_id)}
 
-    return admin_ok(request, payload={"expires_in": int(token.expires_in),
-        "user_id": token.user_id,
-        "proxy": proxy_details}, request_id=rid)
+    return admin_ok(
+        request,
+        payload={
+            "expires_in": int(token.expires_in),
+            "user_id": token.user_id,
+            "via_cf": bool(winning_via_cf),
+            "proxy": proxy_details,
+        },
+        request_id=rid,
+    )
 
 
 @router.post(
