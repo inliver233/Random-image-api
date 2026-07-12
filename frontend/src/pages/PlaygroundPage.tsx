@@ -545,7 +545,14 @@ export function PlaygroundPage() {
             ) : m.isSuccess ? (
               <Space direction="vertical" size="middle" style={{ width: "100%" }}>
                 <Typography.Text type="secondary">请求ID: {m.data.request_id || "-"}</Typography.Text>
-                <Typography.Text type="secondary">请求链接: {m.data.url}</Typography.Text>
+                <Typography.Text type="secondary">
+                  {/* Split FE/API + key-required: show absolute, browser-openable URL. */}
+                  请求链接:{" "}
+                  {withPublicApiKeyQuery(
+                    resolvePublicApiUrl(m.data.url),
+                    form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+                  )}
+                </Typography.Text>
 
                 {m.data.kind === "json" ? (
                   <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>

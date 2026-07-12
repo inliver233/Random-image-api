@@ -279,7 +279,18 @@ def create_app() -> FastAPI:
         path = request.url.path
         if path.startswith("/admin") or path.startswith("/metrics"):
             return await call_next(request)
-        if path in {"/healthz", "/version", "/openapi.json", "/docs", "/status", "/status.json", "/wtf", "/api/docs", "/api/redoc"}:
+        if path in {
+            "/healthz",
+            "/version",
+            "/favicon.ico",
+            "/openapi.json",
+            "/docs",
+            "/status",
+            "/status.json",
+            "/wtf",
+            "/api/docs",
+            "/api/redoc",
+        }:
             return await call_next(request)
 
         rid = get_or_create_request_id(request)

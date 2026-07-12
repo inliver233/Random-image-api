@@ -186,6 +186,36 @@ def test_wtf_page_injects_public_api_key_required_flag(tmp_path: Path, monkeypat
         assert "wtf_public_api_key" in body
 
 
+def test_favicon_exempt_when_public_api_key_required(tmp_path: Path, monkeypatch) -> None:
+    """Browsers auto-request /favicon.ico; it must stay middleware-exempt like /healthz."""
+    db_path = tmp_path / "favicon_public_api_key.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("PUBLIC_API_KEY_REQUIRED", "true")
+    monkeypatch.setenv("PUBLIC_API_KEY_RPM", "0")
+    monkeypatch.setenv("PUBLIC_API_KEY_BURST", "0")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await app.state.engine.dispose()
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        fav = client.get("/favicon.ico")
+        assert fav.status_code == 204
+
+        # Non-exempt public routes still require a key.
+        missing = client.get("/random?format=json&attempts=1")
+        assert missing.status_code == 401
+
+
 def test_docs_page_documents_public_api_key(tmp_path: Path, monkeypatch) -> None:
     """/docs must explain X-API-Key + api_key query when enforcement is on."""
     db_path = tmp_path / "docs_public_api_key.db"

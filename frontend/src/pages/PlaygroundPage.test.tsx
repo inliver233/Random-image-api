@@ -110,6 +110,8 @@ describe("PlaygroundPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "开始请求" }));
     expect(await screen.findByText(/请求ID:\s*req_play_key/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalled();
+    // Displayed link must be browser-openable when key required (parity with Recommendation).
+    expect(await screen.findByText(/请求链接:.*api_key=debug-public-key-1234567890/)).toBeInTheDocument();
   });
 
   it("shows NO_MATCH hints in image mode and keeps message Chinese", async () => {
