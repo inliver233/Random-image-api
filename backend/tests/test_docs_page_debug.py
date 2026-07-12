@@ -25,6 +25,9 @@ def test_docs_html_documents_debug_engine_status() -> None:
     # R2 prewarm readiness on public status (parity with /healthz modules.r2_prewarm).
     assert "data.r2_prewarm" in html
     assert "modules.r2_prewarm" in html
+    # API key rate-limit honesty on public status (parity with /healthz modules.api_key_rate_limit).
+    assert "data.api_key_rate_limit" in html
+    assert "modules.api_key_rate_limit" in html
     # Catalog list + delivery + version links (parity with OpenAPI public summaries).
     assert 'href="https://example.test/tags"' in html
     assert 'href="https://example.test/authors"' in html
@@ -41,5 +44,6 @@ def test_docs_html_public_key_required_banner() -> None:
     assert "data.image_edge" in html
     assert "data.cf_api_proxy" in html
     assert "data.r2_prewarm" in html
+    assert "data.api_key_rate_limit" in html
     assert "/images" in html
     assert "/version" in html

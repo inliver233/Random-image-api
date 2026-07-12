@@ -93,6 +93,36 @@ def _r2_prewarm_public_snapshot(settings: Any) -> dict[str, Any]:
     }
 
 
+def _api_key_rate_limit_public_snapshot(request: Request, settings: Any) -> dict[str, Any]:
+    """Local API-key rate-limit backend honesty for public /status (no Redis probe / no URL)."""
+    requested = (
+        str(getattr(settings, "public_api_key_rate_limit_backend", "memory") or "memory").strip().lower()
+        if settings is not None
+        else "memory"
+    )
+    if requested not in {"memory", "redis"}:
+        requested = "memory"
+    redis_url_configured = (
+        bool(str(getattr(settings, "redis_url", "") or "").strip()) if settings is not None else False
+    )
+    limiter = getattr(request.app.state, "api_key_limiter", None)
+    backend = str(
+        getattr(limiter, "active_backend", None)
+        or getattr(limiter, "backend", "memory")
+        or "memory"
+    ).strip().lower()
+    if backend not in {"memory", "redis"}:
+        # Minimal harness without limiter → fold config like /healthz.
+        backend = requested if (requested != "redis" or redis_url_configured) else "memory"
+    return {
+        "backend": backend,
+        "requested": requested,
+        "redis_url_configured": redis_url_configured,
+        "required": bool(getattr(settings, "public_api_key_required", False)) if settings is not None else False,
+        "using_memory_fallback": requested == "redis" and backend == "memory",
+    }
+
+
 async def _query_gallery_stats(engine) -> dict[str, Any]:
     async def _op() -> dict[str, Any]:
         async with engine.connect() as conn:
@@ -227,6 +257,19 @@ def _build_status_html(
         r2_chip = "r2-prewarm: not ready · flag on"
     else:
         r2_chip = "r2-prewarm: off"
+
+    # API-key rate-limit chip (same fields as /healthz modules.api_key_rate_limit; no Redis URL/probe).
+    rl = payload.get("api_key_rate_limit") if isinstance(payload.get("api_key_rate_limit"), dict) else {}
+    rl_required = bool(rl.get("required"))
+    rl_backend = str(rl.get("backend") or "memory")
+    rl_requested = str(rl.get("requested") or "memory")
+    rl_fallback = bool(rl.get("using_memory_fallback"))
+    if not rl_required:
+        rl_chip = f"api-key-rl: off · {rl_backend}"
+    elif rl_fallback:
+        rl_chip = f"api-key-rl: required · {rl_requested}→{rl_backend}"
+    else:
+        rl_chip = f"api-key-rl: required · {rl_backend}"
 
     json_url = u("/status.json")
     docs_url = u("/docs")
@@ -489,6 +532,7 @@ def _build_status_html(
         <span class="chip" title="Image Edge config readiness (same as /healthz modules.image_edge; no secrets / no outbound edge probe)">{edge_chip}</span>
         <span class="chip" title="CF API proxy config readiness (same as /healthz modules.cf_api_proxy; no secrets / no outbound worker probe)">{cf_chip}</span>
         <span class="chip" title="R2 prewarm config readiness (same as /healthz modules.r2_prewarm ready; no secrets / no webhook probe)">{r2_chip}</span>
+        <span class="chip" title="Public API key rate-limit backend (same as /healthz modules.api_key_rate_limit; no Redis URL / no probe)">{rl_chip}</span>
       </div>
     </div>
 
@@ -645,6 +689,8 @@ async def status_json(request: Request) -> JSONResponse:
     payload["cf_api_proxy"] = _cf_api_proxy_public_snapshot(settings)
     # R2 prewarm config readiness (public subset of /healthz modules.r2_prewarm; no secrets / probe).
     payload["r2_prewarm"] = _r2_prewarm_public_snapshot(settings)
+    # API-key rate-limit backend honesty (same as /healthz modules.api_key_rate_limit; no Redis URL/probe).
+    payload["api_key_rate_limit"] = _api_key_rate_limit_public_snapshot(request, settings)
 
     try:
         payload.update(await _query_gallery_stats(engine))
@@ -681,6 +727,7 @@ async def status_page(request: Request) -> HTMLResponse:
     payload["image_edge"] = _image_edge_public_snapshot(settings)
     payload["cf_api_proxy"] = _cf_api_proxy_public_snapshot(settings)
     payload["r2_prewarm"] = _r2_prewarm_public_snapshot(settings)
+    payload["api_key_rate_limit"] = _api_key_rate_limit_public_snapshot(request, settings)
 
     try:
         payload.update(await _query_gallery_stats(engine))
