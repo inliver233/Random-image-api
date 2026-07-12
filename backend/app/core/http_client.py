@@ -172,19 +172,26 @@ async def acquire_proxy_client(
     transport: httpx.AsyncBaseTransport | None = None,
     pool: ProxyClientPool | None = None,
 ) -> tuple[httpx.AsyncClient, bool]:
-    """Return (client, owns_client). Pooled clients must not be closed by the caller."""
+    """Return (client, owns_client). Pooled / control-plane clients must not be closed by the caller.
+
+    Non-proxy (``proxy_uri`` empty):
+    - With ``transport``: short-lived owned client on that transport (tests / custom).
+    - Without transport: process control-plane singleton (CF hydrate/OAuth direct egress).
+    """
     uri = (proxy_uri or "").strip()
     if not uri:
-        # Non-proxy cold client — caller owns.
-        return (
-            httpx.AsyncClient(
-                transport=transport,
-                follow_redirects=True,
-                timeout=httpx.Timeout(float(timeout_s), connect=min(10.0, float(timeout_s))),
-                limits=_DEFAULT_LIMITS,
-            ),
-            True,
-        )
+        if transport is not None:
+            return (
+                httpx.AsyncClient(
+                    transport=transport,
+                    follow_redirects=True,
+                    timeout=httpx.Timeout(float(timeout_s), connect=min(10.0, float(timeout_s))),
+                    limits=_DEFAULT_LIMITS,
+                ),
+                True,
+            )
+        # CF-first / direct origin: reuse process control-plane client (do not aclose).
+        return get_control_plane_http_client(), False
     active_pool = pool if pool is not None else get_proxy_client_pool()
     client = await active_pool.get(uri, timeout_s=timeout_s, transport=transport)
     return client, False

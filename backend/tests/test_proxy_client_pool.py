@@ -71,12 +71,22 @@ def test_proxy_pool_evicts_lru() -> None:
     asyncio.run(_run())
 
 
-def test_acquire_proxy_client_owns_non_proxy() -> None:
+def test_acquire_proxy_client_non_proxy_reuses_control_plane() -> None:
     async def _run() -> None:
-        client, owns = await acquire_proxy_client(None, timeout_s=5.0)
-        assert owns is True
-        assert isinstance(client, httpx.AsyncClient)
-        await client.aclose()
+        # No transport → process control-plane singleton (CF hydrate / OAuth direct).
+        a, owns_a = await acquire_proxy_client(None, timeout_s=5.0)
+        b, owns_b = await acquire_proxy_client(None, timeout_s=5.0)
+        assert owns_a is False
+        assert owns_b is False
+        assert a is b
+        assert a is get_control_plane_http_client()
+
+        # Explicit transport still owns a short-lived client (tests / custom).
+        transport = httpx.MockTransport(lambda _req: httpx.Response(200))
+        owned, owns_owned = await acquire_proxy_client(None, timeout_s=5.0, transport=transport)
+        assert owns_owned is True
+        assert owned is not a
+        await owned.aclose()
 
         pooled, owns2 = await acquire_proxy_client("http://proxy.example:9", timeout_s=5.0)
         assert owns2 is False
