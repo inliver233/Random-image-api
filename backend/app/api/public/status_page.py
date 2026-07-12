@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from app.core.cf_api_proxy import load_cf_api_proxy_config_from_settings
 from app.core.coerce import clamp_float
 from app.core.image_edge import load_image_edge_config_from_settings
 from app.core.random_engine_client import engine_circuit_snapshot, random_engine_base_url
@@ -55,6 +56,23 @@ def _image_edge_public_snapshot(settings: Any) -> dict[str, Any]:
     return {
         "enabled_flag": enabled_flag,
         "ready": cfg is not None,
+        "base_url_count": int(base_url_count),
+    }
+
+
+def _cf_api_proxy_public_snapshot(settings: Any) -> dict[str, Any]:
+    """Local CF API proxy readiness for public /status (config only; no secrets / no worker probe)."""
+    enabled_flag = bool(getattr(settings, "cf_api_proxy_enabled", False)) if settings is not None else False
+    cfg = load_cf_api_proxy_config_from_settings(settings) if settings is not None else None
+    ready = bool(cfg is not None and cfg.ready)
+    if cfg is not None:
+        base_url_count = len(cfg.base_urls)
+    else:
+        raw_bases = list(getattr(settings, "cf_api_proxy_base_urls", None) or []) if settings is not None else []
+        base_url_count = len(raw_bases)
+    return {
+        "enabled_flag": enabled_flag,
+        "ready": ready,
         "base_url_count": int(base_url_count),
     }
 
@@ -167,6 +185,18 @@ def _build_status_html(
         edge_chip = f"image-edge: not ready · flag on · bases {edge_bases}"
     else:
         edge_chip = f"image-edge: off · bases {edge_bases}"
+
+    # CF API proxy readiness chip (config only; same shape as /healthz modules.cf_api_proxy).
+    cf = payload.get("cf_api_proxy") if isinstance(payload.get("cf_api_proxy"), dict) else {}
+    cf_ready = bool(cf.get("ready"))
+    cf_flag = bool(cf.get("enabled_flag"))
+    cf_bases = _as_nonneg_stat(cf.get("base_url_count"))
+    if cf_ready:
+        cf_chip = f"cf-api: ready · bases {cf_bases}"
+    elif cf_flag:
+        cf_chip = f"cf-api: not ready · flag on · bases {cf_bases}"
+    else:
+        cf_chip = f"cf-api: off · bases {cf_bases}"
 
     json_url = u("/status.json")
     docs_url = u("/docs")
@@ -427,6 +457,7 @@ def _build_status_html(
         <a class="chip" href="{wtf_url}"><strong>/wtf</strong> 瀑布流</a>
         <span class="chip" title="process-local dual-run circuit (same as /healthz modules.random_engine.circuit; no outbound probe)">{eng_chip}</span>
         <span class="chip" title="Image Edge config readiness (same as /healthz modules.image_edge; no secrets / no outbound edge probe)">{edge_chip}</span>
+        <span class="chip" title="CF API proxy config readiness (same as /healthz modules.cf_api_proxy; no secrets / no outbound worker probe)">{cf_chip}</span>
       </div>
     </div>
 
@@ -579,6 +610,8 @@ async def status_json(request: Request) -> JSONResponse:
     payload["random_engine"] = _random_engine_public_snapshot(settings)
     # Image Edge config readiness (same fields as /healthz modules.image_edge; no secrets / probe).
     payload["image_edge"] = _image_edge_public_snapshot(settings)
+    # CF API proxy config readiness (same fields as /healthz modules.cf_api_proxy; no secrets / probe).
+    payload["cf_api_proxy"] = _cf_api_proxy_public_snapshot(settings)
 
     try:
         payload.update(await _query_gallery_stats(engine))
@@ -613,6 +646,7 @@ async def status_page(request: Request) -> HTMLResponse:
     # Local dual-run circuit for HTML chip + DATA payload (no outbound probe).
     payload["random_engine"] = _random_engine_public_snapshot(settings)
     payload["image_edge"] = _image_edge_public_snapshot(settings)
+    payload["cf_api_proxy"] = _cf_api_proxy_public_snapshot(settings)
 
     try:
         payload.update(await _query_gallery_stats(engine))

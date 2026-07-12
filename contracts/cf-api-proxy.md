@@ -59,8 +59,11 @@ When disabled / not ready, `iter_pixiv_api_egress` yields residential-only attem
 
 ## Ops
 
-`/healthz` → `modules.cf_api_proxy`  
-Admin → `GET /admin/api/maintenance/cf-api-proxy`
+| Surface | Notes |
+| --- | --- |
+| `/healthz` → `modules.cf_api_proxy` | `enabled_flag`, `ready`, `base_url_count`, `has_secret` — config only, no outbound worker probe / secrets |
+| `/status.json` → `data.cf_api_proxy` | Public subset: `enabled_flag` / `ready` / `base_url_count` (no `has_secret`); `/status` HTML chip mirrors it |
+| `GET /admin/api/maintenance/cf-api-proxy` | Full readiness + `missing` list for Dashboard / Maintenance (never returns secret) |
 
 Deploy / probe (repo root):
 

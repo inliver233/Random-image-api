@@ -19,6 +19,9 @@ def test_docs_html_documents_debug_engine_status() -> None:
     # Image Edge readiness on public status (parity with /healthz modules.image_edge).
     assert "data.image_edge" in html
     assert "modules.image_edge" in html
+    # CF API proxy readiness on public status (parity with /healthz modules.cf_api_proxy).
+    assert "data.cf_api_proxy" in html
+    assert "modules.cf_api_proxy" in html
     # Catalog list + delivery + version links (parity with OpenAPI public summaries).
     assert 'href="https://example.test/tags"' in html
     assert 'href="https://example.test/authors"' in html
@@ -33,5 +36,6 @@ def test_docs_html_public_key_required_banner() -> None:
     assert "engine_status" in html
     assert "data.random_engine" in html
     assert "data.image_edge" in html
+    assert "data.cf_api_proxy" in html
     assert "/images" in html
     assert "/version" in html
