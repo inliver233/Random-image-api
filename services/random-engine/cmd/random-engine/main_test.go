@@ -521,6 +521,8 @@ func TestFilterOrientationNoWidthHeightFallback(t *testing.T) {
 func TestFilterByMultiplierAllowSQLSetParity(t *testing.T) {
 	// Python ai_type_allowed only adds NULL for unknown_ai — not ai_type=2.
 	// Python illust_type_allowed only adds NULL for unknown_illust_type — not illust_type=9.
+	// When allow set is complete ({0,1}+NULL / {0,1,2}+NULL), allowed_int_or_null_clause
+	// returns no filter so out-of-range values still sample.
 	ai1, ai0, aiOther := 1, 0, 2
 	illust, otherIllust := 0, 9
 	imNilAI := indexImage{ID: 1, IllustType: &illust} // AIType nil
@@ -529,13 +531,14 @@ func TestFilterByMultiplierAllowSQLSetParity(t *testing.T) {
 	imAIOther := indexImage{ID: 4, AIType: &aiOther, IllustType: &illust}
 	imIllustOther := indexImage{ID: 5, AIType: &ai0, IllustType: &otherIllust}
 	imNilIllust := indexImage{ID: 6, AIType: &ai0} // IllustType nil
+	all := []indexImage{imNilAI, imAI1, imAI0, imAIOther, imIllustOther, imNilIllust}
 
 	// Only unknown_ai + illust: SQL would keep ai_type IS NULL AND illust_type=0.
 	mults := map[string]float64{
 		"ai": 0, "non_ai": 0, "unknown_ai": 1,
 		"illust": 1, "manga": 0, "ugoira": 0, "unknown_illust_type": 0,
 	}
-	out := filterByMultiplierAllow([]indexImage{imNilAI, imAI1, imAI0, imAIOther, imIllustOther, imNilIllust}, mults)
+	out := filterByMultiplierAllow(all, mults)
 	if len(out) != 1 || out[0].ID != 1 {
 		t.Fatalf("want only nil-AI illust id=1, got %+v", out)
 	}
@@ -549,9 +552,15 @@ func TestFilterByMultiplierAllowSQLSetParity(t *testing.T) {
 		"ai": 0, "non_ai": 1, "unknown_ai": 0,
 		"illust": 0, "manga": 0, "ugoira": 0, "unknown_illust_type": 1,
 	}
-	out2 := filterByMultiplierAllow([]indexImage{imNilAI, imAI1, imAI0, imAIOther, imIllustOther, imNilIllust}, mults2)
+	out2 := filterByMultiplierAllow(all, mults2)
 	if len(out2) != 1 || out2[0].ID != 6 {
 		t.Fatalf("want only non_ai nil-illust id=6, got %+v", out2)
+	}
+
+	// Complete allow sets → open (no SQL clause): keep out-of-range too.
+	openAll := filterByMultiplierAllow(all, map[string]float64{})
+	if len(openAll) != 6 {
+		t.Fatalf("complete allow sets should keep all including out-of-range, got %d", len(openAll))
 	}
 
 	// All zero AI mults → empty (Python early return).

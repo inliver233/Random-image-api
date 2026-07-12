@@ -770,14 +770,16 @@ func pickFromScored(scored []scoredImg, pickMode string, limit int, rng *rand.Ra
 
 
 // filterByMultiplierAllow mirrors Python pick_by_quality ai_type_allowed /
-// illust_type_allowed SQL pre-filter (NOT imageMultiplier).
+// illust_type_allowed via allowed_int_or_null_clause (NOT imageMultiplier).
 //
-// Python only adds exact set members:
+// Python builds allow sets as:
 //   ai: 1 | non_ai: 0 | unknown_ai: NULL only
 //   illust: 0 | manga: 1 | ugoira: 2 | unknown_illust_type: NULL only
-// So non-0/1 ai_type (or non-0/1/2 illust_type) is SQL-excluded even when the
-// unknown_* multiplier is positive. imageMultiplier still maps those values to
-// unknown_* for scoring of already-sampled candidates — that is intentional.
+// Then allowed_int_or_null_clause returns NO clause when the set is "complete"
+// ({0,1}+NULL for AI, {0,1,2}+NULL for illust) — so out-of-range values still
+// sample. Partial sets filter exact members only (out-of-range excluded).
+// Empty allow-set → no rows. imageMultiplier still maps residual out-of-range
+// values to unknown_* for scoring after sample.
 func filterByMultiplierAllow(cands []indexImage, multipliers map[string]float64) []indexImage {
 	allowAI1 := weightOr(multipliers, "ai", 1.0) > 0
 	allowAI0 := weightOr(multipliers, "non_ai", 1.0) > 0
@@ -790,43 +792,51 @@ func filterByMultiplierAllow(cands []indexImage, multipliers map[string]float64)
 	if !(allowAI1 || allowAI0 || allowAINull) || !(allowIllust0 || allowIllust1 || allowIllust2 || allowIllustNull) {
 		return nil
 	}
+	// allowed_int_or_null_clause: complete {0,1}+NULL (AI) or {0,1,2}+NULL (illust)
+	// returns no SQL filter — keep every value including out-of-range.
+	aiOpen := allowAI0 && allowAI1 && allowAINull
+	illustOpen := allowIllust0 && allowIllust1 && allowIllust2 && allowIllustNull
 	out := make([]indexImage, 0, len(cands))
 	for _, im := range cands {
-		if im.AIType == nil {
-			if !allowAINull {
+		if !aiOpen {
+			if im.AIType == nil {
+				if !allowAINull {
+					continue
+				}
+			} else if *im.AIType == 1 {
+				if !allowAI1 {
+					continue
+				}
+			} else if *im.AIType == 0 {
+				if !allowAI0 {
+					continue
+				}
+			} else {
+				// Partial set: non-0/1 not in allow list (unknown_ai is NULL-only).
 				continue
 			}
-		} else if *im.AIType == 1 {
-			if !allowAI1 {
-				continue
-			}
-		} else if *im.AIType == 0 {
-			if !allowAI0 {
-				continue
-			}
-		} else {
-			// Non-0/1 is not in Python ai_type_allowed (unknown_ai only adds NULL).
-			continue
 		}
-		if im.IllustType == nil {
-			if !allowIllustNull {
+		if !illustOpen {
+			if im.IllustType == nil {
+				if !allowIllustNull {
+					continue
+				}
+			} else if *im.IllustType == 0 {
+				if !allowIllust0 {
+					continue
+				}
+			} else if *im.IllustType == 1 {
+				if !allowIllust1 {
+					continue
+				}
+			} else if *im.IllustType == 2 {
+				if !allowIllust2 {
+					continue
+				}
+			} else {
+				// Partial set: non-0/1/2 not in allow list.
 				continue
 			}
-		} else if *im.IllustType == 0 {
-			if !allowIllust0 {
-				continue
-			}
-		} else if *im.IllustType == 1 {
-			if !allowIllust1 {
-				continue
-			}
-		} else if *im.IllustType == 2 {
-			if !allowIllust2 {
-				continue
-			}
-		} else {
-			// Non-0/1/2 is not in Python illust_type_allowed.
-			continue
 		}
 		out = append(out, im)
 	}
