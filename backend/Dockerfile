@@ -16,6 +16,14 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# Build metadata for GET /version (D6). Override via compose build.args or deploy/.env at runtime.
+ARG APP_VERSION=dev
+ARG APP_COMMIT=
+ARG APP_BUILD_TIME=
+ENV APP_VERSION=${APP_VERSION} \
+    APP_COMMIT=${APP_COMMIT} \
+    APP_BUILD_TIME=${APP_BUILD_TIME}
+
 RUN python -m pip install --no-cache-dir --upgrade pip
 
 COPY requirements.txt /app/requirements.txt

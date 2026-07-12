@@ -3,6 +3,11 @@ services:
     build:
       context: ..
       dockerfile: backend/Dockerfile
+      args:
+        # D6: bake /version metadata when building release images
+        APP_VERSION: ${APP_VERSION:-dev}
+        APP_COMMIT: ${APP_COMMIT:-}
+        APP_BUILD_TIME: ${APP_BUILD_TIME:-}
     env_file:
       - .env
     ports:
@@ -44,6 +49,10 @@ services:
     build:
       context: ..
       dockerfile: backend/Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        APP_COMMIT: ${APP_COMMIT:-}
+        APP_BUILD_TIME: ${APP_BUILD_TIME:-}
     env_file:
       - .env
     command: ["python", "-m", "app.worker"]

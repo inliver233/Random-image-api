@@ -22,9 +22,12 @@ _EDGE_CFG_CACHE_MAX = 32
 
 # Process-local soft cooldown for multi-base image edge.
 # Public 302 prefers sticky when healthy; cooling sticky is demoted via ordered helpers.
+# Aligned with CF API pool P0-5: exponential consecutive-fail backoff + success clear.
 _IMAGE_EDGE_BASE_COOLDOWN_S = 30.0
+_IMAGE_EDGE_BASE_COOLDOWN_MAX_S = 300.0
 _image_edge_base_lock = threading.Lock()
 _image_edge_base_cool_until: dict[str, float] = {}
+_image_edge_base_fail_streak: dict[str, int] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +213,7 @@ def reset_image_edge_base_cooldown_for_tests() -> None:
     """Clear process image-edge base cooldown map (unit tests only)."""
     with _image_edge_base_lock:
         _image_edge_base_cool_until.clear()
+        _image_edge_base_fail_streak.clear()
 
 
 def normalize_image_edge_base_url(base: str) -> str:
@@ -235,12 +239,14 @@ def record_image_edge_base_outcome(
     *,
     ok: bool,
     cooldown_s: float = _IMAGE_EDGE_BASE_COOLDOWN_S,
+    max_cooldown_s: float = _IMAGE_EDGE_BASE_COOLDOWN_MAX_S,
     now: float | None = None,
 ) -> None:
     """Record image-edge worker base success/failure for process-local demotion.
 
-    Success clears cooldown. Failure opens/extends cooldown so ordered lists and public
-    302 signing demote that base (prefer next hot base). Best-effort; never raises.
+    Success clears cooldown + fail streak. Failure increments streak and applies
+    exponential cooldown: base * 2^(streak-1), capped at max_cooldown_s.
+    Best-effort; never raises.
     """
     try:
         b = normalize_image_edge_base_url(base)
@@ -250,8 +256,14 @@ def record_image_edge_base_outcome(
         with _image_edge_base_lock:
             if ok:
                 _image_edge_base_cool_until.pop(b, None)
+                _image_edge_base_fail_streak.pop(b, None)
                 return
-            cool = max(1.0, float(cooldown_s))
+            streak = int(_image_edge_base_fail_streak.get(b) or 0) + 1
+            _image_edge_base_fail_streak[b] = streak
+            base_cool = max(1.0, float(cooldown_s))
+            cap = max(base_cool, float(max_cooldown_s))
+            exp = min(16, max(0, streak - 1))
+            cool = min(cap, base_cool * float(2**exp))
             prev = float(_image_edge_base_cool_until.get(b) or 0.0)
             _image_edge_base_cool_until[b] = max(prev, t + cool)
     except Exception:

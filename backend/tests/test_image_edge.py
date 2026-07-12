@@ -321,6 +321,28 @@ def test_image_edge_base_cooldown_demotes_failed_base() -> None:
     reset_image_edge_base_cooldown_for_tests()
 
 
+def test_image_edge_base_cooldown_exponential_streak() -> None:
+    from app.core.image_edge import (
+        is_image_edge_base_cooling,
+        record_image_edge_base_outcome,
+        reset_image_edge_base_cooldown_for_tests,
+    )
+
+    reset_image_edge_base_cooldown_for_tests()
+    base = "https://a.example.com"
+    t0 = 2_000.0
+    record_image_edge_base_outcome(base, ok=False, cooldown_s=10.0, max_cooldown_s=80.0, now=t0)
+    assert is_image_edge_base_cooling(base, now=t0 + 9.0) is True
+    assert is_image_edge_base_cooling(base, now=t0 + 11.0) is False
+    record_image_edge_base_outcome(base, ok=False, cooldown_s=10.0, max_cooldown_s=80.0, now=t0 + 20.0)
+    assert is_image_edge_base_cooling(base, now=t0 + 20.0 + 19.0) is True
+    assert is_image_edge_base_cooling(base, now=t0 + 20.0 + 21.0) is False
+    record_image_edge_base_outcome(base, ok=True, now=t0 + 100.0)
+    record_image_edge_base_outcome(base, ok=False, cooldown_s=10.0, max_cooldown_s=80.0, now=t0 + 100.0)
+    assert is_image_edge_base_cooling(base, now=t0 + 100.0 + 11.0) is False
+    reset_image_edge_base_cooldown_for_tests()
+
+
 def test_resolve_image_edge_signed_candidates_orders_sticky_first() -> None:
     from app.core.image_edge import (
         pick_image_edge_base_url,

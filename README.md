@@ -94,6 +94,8 @@
 
 Admin → **CF Worker** 一页部署默认：register + secret + 启用业务语义（runtime overlay，无需手改 env 重启）。
 
+旧生产接管（F3）：`scripts/data/legacy-migrate-checklist.md` + `scripts/data/migrate_legacy_catalog.py`（SQLite 拷贝 / CSV / PG 流 / token 加密导入）。冷库 `x_restrict` 多为 NULL 时先关 `default_r18_strict` 或 hydrate。
+
 1. 准备环境变量
 
 ```bash
@@ -115,8 +117,13 @@ docker compose -f deploy/docker-compose.yml up -d --build
 # 生产向（Postgres 一等公民；先改 DATABASE_URL 为 postgresql+asyncpg://…）
 docker compose -f deploy/docker-compose.yml --profile postgres up -d --build
 
-# 多实例共享限流/去重（可选）
+# 多实例共享限流/去重（可选 · F4）
 docker compose -f deploy/docker-compose.yml --profile postgres --profile redis up -d --build
+# 并在 deploy/.env 设置：
+#   REDIS_URL=redis://redis:6379/0
+#   PUBLIC_API_KEY_RATE_LIMIT_BACKEND=redis
+#   RECENT_DEDUP_BACKEND=redis
+# Redis 不可用时 fail-open 到进程 memory，不挡主路径。JOB_QUEUE redis/nats 仍未实现。
 ```
 
 4. 访问
