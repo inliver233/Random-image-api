@@ -994,6 +994,8 @@ func filterImages(st *engineState, filters map[string]any) []indexImage {
 			}
 		}
 		if orientation != "" && orientation != "any" {
+			// Align Python orientation_where_clause: Image.orientation == N only.
+			// Do not derive from width/height — null orientation never matches in SQL.
 			wantOri := 0
 			switch orientation {
 			case "portrait":
@@ -1004,30 +1006,12 @@ func filterImages(st *engineState, filters map[string]any) []indexImage {
 				wantOri = 3
 			}
 			if wantOri != 0 {
-				if im.Orientation != nil {
-					if *im.Orientation != wantOri {
-						continue
-					}
-				} else if im.Width != nil && im.Height != nil {
-					w, h := *im.Width, *im.Height
-					ok := false
-					switch wantOri {
-					case 1:
-						ok = h > w
-					case 2:
-						ok = w > h
-					case 3:
-						ok = w == h
-					}
-					if !ok {
-						continue
-					}
-				} else {
+				if im.Orientation == nil || *im.Orientation != wantOri {
 					continue
 				}
 			}
 		}
-		if minW > 0 && (im.Width == nil || *im.Width < minW) {
+				if minW > 0 && (im.Width == nil || *im.Width < minW) {
 			continue
 		}
 		if minH > 0 && (im.Height == nil || *im.Height < minH) {

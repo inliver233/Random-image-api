@@ -500,3 +500,20 @@ func TestImageMultiplierUnknownAIType(t *testing.T) {
 		t.Fatal("nil AIType should be unknown_ai")
 	}
 }
+
+func TestFilterOrientationNoWidthHeightFallback(t *testing.T) {
+	// Python: Image.orientation == N; null orientation never matches even if dims imply portrait.
+	w, h := 100, 200
+	ori := 1
+	imNilOri := indexImage{ID: 1, Width: &w, Height: &h, RandomKey: 0.1}
+	imOri := indexImage{ID: 2, Width: &w, Height: &h, Orientation: &ori, RandomKey: 0.2}
+	st := &engineState{
+		byKey:    []indexImage{imNilOri, imOri},
+		byID:     map[int64]int{1: 0, 2: 1},
+		tagIndex: map[string]map[int64]struct{}{},
+	}
+	out := filterImages(st, map[string]any{"orientation": "portrait", "r18": 2})
+	if len(out) != 1 || out[0].ID != 2 {
+		t.Fatalf("want only explicit orientation=1 id=2, got %+v", out)
+	}
+}
