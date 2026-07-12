@@ -9,7 +9,7 @@ import { dash } from "../admin/format";
 import { QueryState } from "../admin/QueryState";
 import { missingLabel } from "../admin/missingFields";
 import { useActionAlerts } from "../admin/useActionAlerts";
-import { apiJson } from "../api/client";
+import { apiJson, resolvePublicApiUrl } from "../api/client";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ImageItem = {
@@ -190,7 +190,13 @@ export function ImagesPage() {
           <Button
             type="link"
             size="small"
-            onClick={() => window.open(row.proxy_path || `/i/${row.id}.${row.ext}`, "_blank", "noopener,noreferrer")}
+            onClick={() =>
+              window.open(
+                resolvePublicApiUrl(row.proxy_path || `/i/${row.id}.${row.ext}`),
+                "_blank",
+                "noopener,noreferrer",
+              )
+            }
           >
             #{value}
           </Button>

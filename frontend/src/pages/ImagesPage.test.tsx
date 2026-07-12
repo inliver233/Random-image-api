@@ -1,8 +1,9 @@
 ﻿import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as client from "../api/client";
 import { ImagesPage } from "./ImagesPage";
 
 function makeClient() {
@@ -10,6 +11,12 @@ function makeClient() {
 }
 
 describe("ImagesPage", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
@@ -72,5 +79,27 @@ describe("ImagesPage", () => {
     expect(await screen.findByText("Y")).toBeInTheDocument();
     expect(await screen.findByText("插画")).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:\s*req_images/)).toBeInTheDocument();
+  });
+
+  it("opens image proxy via resolvePublicApiUrl (split FE/API deploys)", async () => {
+    const openSpy = vi.fn();
+    vi.stubGlobal("open", openSpy);
+    vi.spyOn(client, "resolvePublicApiUrl").mockImplementation(
+      (pathOrUrl: string) => `https://api.example.com${pathOrUrl}`,
+    );
+
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <ImagesPage />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "#1" }));
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://api.example.com/i/1.jpg",
+      "_blank",
+      "noopener,noreferrer",
+    );
   });
 });
