@@ -96,9 +96,11 @@ def test_stream_url_sets_pixiv_referer_header_by_default(monkeypatch) -> None:
 
 
 def test_stream_url_closes_on_consumer_cancel(monkeypatch) -> None:
+    """Owned transport client is closed on cancel; upstream stream always closed."""
     client_closed = False
     orig_aclose = httpx.AsyncClient.aclose
     blocking_stream: _BlockingStream | None = None
+    transport = httpx.MockTransport(lambda _req: httpx.Response(200))
 
     async def fake_send(self, request: httpx.Request, **kwargs):  # type: ignore[no-untyped-def]
         assert blocking_stream is not None
@@ -120,7 +122,12 @@ def test_stream_url_closes_on_consumer_cancel(monkeypatch) -> None:
     async def _run() -> None:
         nonlocal blocking_stream
         blocking_stream = _BlockingStream()
-        resp = await stream_url("https://example.test/slow.bin", cache_control="no-store")
+        # Inject transport so path owns the client (control-plane path must not aclose).
+        resp = await stream_url(
+            "https://example.test/slow.bin",
+            cache_control="no-store",
+            transport=transport,
+        )
         first_received = asyncio.Event()
 
         async def _consume() -> None:

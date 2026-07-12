@@ -28,8 +28,8 @@ async def stream_url(
     Connection reuse rules:
     - If ``proxy`` is set: process proxy client pool (httpx binds proxy at client level).
     - Else if shared ``client`` is provided: reuse it (do NOT close on completion).
-    - Else if ``transport`` is provided: build a short-lived client on that transport.
-    - Else: cold client (legacy path).
+    - Else: ``acquire_proxy_client(None)`` — control-plane singleton, or owned
+      client when ``transport`` is injected (tests).
     """
     owns_client = False
     shared_client = client is not None and not proxy
@@ -37,18 +37,11 @@ async def stream_url(
     if shared_client:
         assert client is not None
         active_client = client
-    elif proxy:
+    else:
         active_client, owns_client = await acquire_proxy_client(
             proxy,
             timeout_s=timeout_s,
             transport=transport,
-        )
-    else:
-        owns_client = True
-        active_client = httpx.AsyncClient(
-            transport=transport,
-            follow_redirects=True,
-            timeout=httpx.Timeout(timeout_s, connect=10.0),
         )
 
     request_headers: dict[str, str] = {}
