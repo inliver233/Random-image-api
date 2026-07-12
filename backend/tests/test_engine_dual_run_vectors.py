@@ -181,15 +181,25 @@ def test_dual_run_vector_quality_with_filters() -> None:
 def test_dual_run_vector_merge_anti_repeat_excludes() -> None:
     from app.core.random_engine_pick import merge_engine_exclude_ids
 
-    class _Ctx:
+    class _Strict:
         anti_repeat_enabled = True
+        dedup_strict = True
         recent_exclude_image_ids = [10, 11, 7]
 
-    merged = merge_engine_exclude_ids(pick_ctx=_Ctx(), exclude_image_ids={7, 8})
+    merged = merge_engine_exclude_ids(pick_ctx=_Strict(), exclude_image_ids={7, 8})
     assert merged == {7, 8, 10, 11}
+
+    class _Soft:
+        anti_repeat_enabled = True
+        dedup_strict = False
+        recent_exclude_image_ids = [10, 11, 7]
+
+    # Non-strict dual-run: recent ids stay soft (quality.recent_*), not hard filters.
+    assert merge_engine_exclude_ids(pick_ctx=_Soft(), exclude_image_ids={7, 8}) == {7, 8}
 
     class _Off:
         anti_repeat_enabled = False
+        dedup_strict = True
         recent_exclude_image_ids = [99]
 
     assert merge_engine_exclude_ids(pick_ctx=_Off(), exclude_image_ids=[1]) == {1}
