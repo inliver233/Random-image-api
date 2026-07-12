@@ -51,6 +51,8 @@ def _build_docs_html(*, base_url: str, public_api_key_required: bool = False) ->
         "complex": u("/random?r18=1&illust_type=illust&orientation=portrait&min_pixels=2500000&min_bookmarks=2&min_comments=5&included_tags=loli"),
         "tags_api": u("/tags"),
         "authors_api": u("/authors"),
+        "images_api": u("/images"),
+        "version_api": u("/version"),
         "swagger": u("/api/docs"),
         "openapi": u("/openapi.json"),
         "curl_header": (
@@ -65,7 +67,7 @@ def _build_docs_html(*, base_url: str, public_api_key_required: bool = False) ->
         auth_banner = (
             '<div class="note" style="margin-top:12px;">'
             "<strong>当前部署已开启 PUBLIC_API_KEY_REQUIRED：</strong>"
-            "公开接口（/random、/feed、/i、/tags、/authors 等）需要 API Key；"
+            "公开接口（/random、/feed、/i、/tags、/authors、/images、/version 等）需要 API Key；"
             "/docs、/status、/wtf 页面本身可直接访问。"
             "</div>"
         )
@@ -495,7 +497,13 @@ def _build_docs_html(*, base_url: str, public_api_key_required: bool = False) ->
         示例：<a href="{examples["rec_tune"]}">{examples["rec_tune"]}</a>
       </div>
       <div class="footer">
-        其它接口：<a href="{examples["tags_api"]}">/tags</a>（标签列表）、<a href="{examples["authors_api"]}">/authors</a>（作者列表）。<br/>
+        其它接口：
+        <a href="{examples["tags_api"]}">/tags</a>（标签列表）、
+        <a href="{examples["authors_api"]}">/authors</a>（作者列表）、
+        <a href="{examples["images_api"]}">/images</a>（图片列表 / <code>/images/&#123;id&#125;</code> 详情）、
+        <code>/i/&#123;id&#125;.&#123;ext&#125;</code>（出图 / Image Edge 302）、
+        <a href="{examples["version_api"]}">/version</a>（构建信息）。
+        完整字段见 OpenAPI summary。<br/>
         OpenAPI：<a href="{examples["openapi"]}">/openapi.json</a>，Swagger：<a href="{examples["swagger"]}">/api/docs</a>。<br/>
       </div>
     </section>
