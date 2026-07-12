@@ -368,6 +368,11 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             getattr(settings, "cf_api_proxy_secret", "") or ""
         ).strip():
             missing.append("CF_API_PROXY_SECRET")
+        # Dual-run engine is open without secret; prod must not ship that surface.
+        if bool(getattr(settings, "random_engine_enabled", False)) and not str(
+            getattr(settings, "random_engine_secret", "") or ""
+        ).strip():
+            missing.append("RANDOM_ENGINE_SECRET")
         if missing:
             raise ValueError(f"Missing required env vars for prod: {', '.join(missing)}")
 

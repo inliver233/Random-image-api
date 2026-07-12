@@ -4,7 +4,6 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from app.core.image_edge import ImageEdgeConfig
 from app.core.origin_stream import prepare_origin_stream
 
 
@@ -29,6 +28,7 @@ def test_prepare_origin_stream_mirror_skips_proxy() -> None:
 def test_prepare_origin_stream_skips_residential_when_edge_ready() -> None:
     async def _run() -> None:
         settings = SimpleNamespace(
+            residential_egress_emergency_only=True,
             image_edge_enabled=True,
             image_edge_secret="s" * 16,
             image_edge_base_urls=["https://img.example"],
@@ -54,6 +54,7 @@ def test_prepare_origin_stream_skips_residential_when_edge_ready() -> None:
 def test_prepare_origin_stream_uses_residential_when_edge_not_ready() -> None:
     async def _run() -> None:
         settings = SimpleNamespace(
+            residential_egress_emergency_only=True,
             image_edge_enabled=False,
             image_edge_secret="",
             image_edge_base_urls=[],
@@ -85,12 +86,12 @@ def test_prepare_origin_stream_allow_residential_false_forces_direct() -> None:
     async def _run() -> None:
         with patch("app.core.origin_stream.select_proxy_uri_for_url", new_callable=AsyncMock) as select:
             with patch(
-                "app.core.origin_stream.load_image_edge_config_from_settings",
-                return_value=None,
+                "app.core.egress_policy.image_edge_is_ready",
+                return_value=False,
             ):
                 url, proxy = await prepare_origin_stream(
                     engine=object(),
-                    settings=SimpleNamespace(),
+                    settings=SimpleNamespace(residential_egress_emergency_only=True),
                     runtime=object(),
                     origin_url="https://i.pximg.net/img-original/img/a.jpg",
                     use_mirror=False,
@@ -106,16 +107,10 @@ def test_prepare_origin_stream_allow_residential_false_forces_direct() -> None:
 
 def test_prepare_origin_stream_allow_residential_true_even_if_edge_ready() -> None:
     async def _run() -> None:
-        cfg = ImageEdgeConfig(
-            enabled=True,
-            base_urls=["https://img.example"],
-            secret="s" * 16,
-            sign_ttl_seconds=3600,
-        )
         picked = SimpleNamespace(uri="http://proxy.example:1")
         with patch(
-            "app.core.origin_stream.load_image_edge_config_from_settings",
-            return_value=cfg,
+            "app.core.egress_policy.image_edge_is_ready",
+            return_value=True,
         ):
             with patch(
                 "app.core.origin_stream.select_proxy_uri_for_url",
@@ -124,12 +119,39 @@ def test_prepare_origin_stream_allow_residential_true_even_if_edge_ready() -> No
             ) as select:
                 _url, proxy = await prepare_origin_stream(
                     engine=object(),
-                    settings=SimpleNamespace(),
+                    settings=SimpleNamespace(residential_egress_emergency_only=True),
                     runtime=object(),
                     origin_url="https://i.pximg.net/img-original/img/a.jpg",
                     use_mirror=False,
                     mirror_host=None,
                     allow_residential_proxy=True,
+                )
+                assert proxy == picked.uri
+                select.assert_awaited_once()
+
+    asyncio.run(_run())
+
+
+def test_prepare_origin_stream_force_residential_emergency_when_edge_ready() -> None:
+    async def _run() -> None:
+        picked = SimpleNamespace(uri="http://proxy.example:9")
+        with patch(
+            "app.core.egress_policy.image_edge_is_ready",
+            return_value=True,
+        ):
+            with patch(
+                "app.core.origin_stream.select_proxy_uri_for_url",
+                new_callable=AsyncMock,
+                return_value=picked,
+            ) as select:
+                _url, proxy = await prepare_origin_stream(
+                    engine=object(),
+                    settings=SimpleNamespace(residential_egress_emergency_only=True),
+                    runtime=object(),
+                    origin_url="https://i.pximg.net/img-original/img/a.jpg",
+                    use_mirror=False,
+                    mirror_host=None,
+                    force_residential_emergency=True,
                 )
                 assert proxy == picked.uri
                 select.assert_awaited_once()

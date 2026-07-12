@@ -1,4 +1,5 @@
 import pytest
+from cryptography.fernet import Fernet
 
 from app.core.config import load_settings
 from app.core.crypto import FieldEncryptor
@@ -62,6 +63,25 @@ def test_load_settings_job_queue_backend() -> None:
 def test_load_settings_prod_requires_secrets() -> None:
     with pytest.raises(ValueError):
         load_settings({"APP_ENV": "prod"})
+
+
+def test_load_settings_prod_requires_engine_secret_when_enabled() -> None:
+    base = {
+        "APP_ENV": "prod",
+        "SECRET_KEY": "prod-secret-key-long-enough",
+        "FIELD_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
+        "ADMIN_PASSWORD": "prod-admin-pass",
+        "PIXIV_OAUTH_CLIENT_ID": "cid",
+        "PIXIV_OAUTH_CLIENT_SECRET": "csec",
+        "PIXIV_OAUTH_HASH_SECRET": "hsec",
+        "RANDOM_ENGINE_URL": "http://127.0.0.1:8091",
+        "RANDOM_ENGINE_ENABLED": "true",
+    }
+    with pytest.raises(ValueError, match="RANDOM_ENGINE_SECRET"):
+        load_settings({**base, "RANDOM_ENGINE_SECRET": ""})
+    s = load_settings({**base, "RANDOM_ENGINE_SECRET": "engine-secret"})
+    assert s.random_engine_enabled is True
+    assert s.random_engine_secret == "engine-secret"
 
 
 def test_load_settings_dev_auto_generates_field_encryption_key(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
