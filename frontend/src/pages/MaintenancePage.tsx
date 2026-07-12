@@ -628,7 +628,7 @@ export function MaintenancePage() {
           日常部署请用侧栏 <Typography.Text strong>CF Worker</Typography.Text> 页（一点部署 + 默认启用业务）。
           本卡为高级：env/runtime 成员、探针 GET{" "}
           <Typography.Text code>{"{base}/healthz"}</Typography.Text>
-          （失败 ~30s 进程冷却）。Deploy 默认会 runtime 启用业务（OR 环境变量 flag）。
+          （失败进程内指数冷却，成功清零）。Deploy 默认会 runtime 启用业务（OR 环境变量 flag）。
         </Typography.Paragraph>
 
         <ActionAlerts
@@ -811,9 +811,11 @@ export function MaintenancePage() {
         </Space>
       </Card>
 
-      <Card title="R2 Prewarm（Mode B2 钩子）">
+      <Card title="R2 Prewarm（可选 · 图片对象缓存 · 非必须）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          只读配置状态。hydrate/import/heal 写库后 BFF 将 catalog image_ids 映射为 pximg paths，best-effort POST{" "}
+          <Typography.Text strong>非出图主路径</Typography.Text>
+          ：主路径是 img-worker → i.pximg.net。本卡为可选 Mode B2 钩子（对象缓存预热）。hydrate/import/heal
+          写库后 BFF 将 catalog image_ids 映射为 pximg paths，best-effort POST{" "}
           <Typography.Text code>{'{ "paths": [...] }'}</Typography.Text> +{" "}
           <Typography.Text code>X-Prewarm-Secret</Typography.Text> 到{" "}
           <Typography.Text code>R2_PREWARM_URL/v1/prewarm</Typography.Text>

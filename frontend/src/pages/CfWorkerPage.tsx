@@ -157,6 +157,32 @@ export function CfWorkerPage() {
     },
   });
 
+  const setForceResidential = useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiJson<{ ok: true; force_residential_emergency?: boolean; request_id: string }>(
+        "/admin/api/cf-workers/egress-policy",
+        {
+          method: "POST",
+          body: JSON.stringify({ force_residential_emergency: enabled }),
+        },
+      ),
+    onMutate: () => {
+      alerts.clear();
+    },
+    onSuccess: (data, enabled) => {
+      alerts.setSuccess(
+        enabled
+          ? "已开启进程内强制住宅应急（不持久；非公开出图主路径）"
+          : "已关闭进程内强制住宅应急",
+        data.request_id,
+      );
+      void queryClient.invalidateQueries({ queryKey: ["admin", "cf-workers", "pool"] });
+    },
+    onError: (err) => {
+      alerts.setErrorMessage(messageFromError(err) || "更新出口策略失败", requestIdFromError(err));
+    },
+  });
+
   const pool = poolQuery.data;
   const policy = pool?.egress_policy;
 
@@ -312,12 +338,33 @@ export function CfWorkerPage() {
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label="住宅策略">
-                {policy?.residential_egress_emergency_only === false ? (
-                  <Tag color="orange">emergency-only OFF</Tag>
-                ) : (
-                  <Tag color="green">emergency-only ON</Tag>
-                )}
-                {policy?.force_residential_emergency ? <Tag color="red">强制住宅</Tag> : null}
+                <Space wrap>
+                  {policy?.residential_egress_emergency_only === false ? (
+                    <Tag color="orange">emergency-only OFF</Tag>
+                  ) : (
+                    <Tag color="green">emergency-only ON</Tag>
+                  )}
+                  {policy?.force_residential_emergency ? (
+                    <Tag color="red">强制住宅 ON</Tag>
+                  ) : (
+                    <Tag>强制住宅 off</Tag>
+                  )}
+                  <Switch
+                    checkedChildren="应急开"
+                    unCheckedChildren="应急关"
+                    checked={Boolean(policy?.force_residential_emergency)}
+                    loading={setForceResidential.isPending}
+                    onChange={(checked) => {
+                      if (checked) {
+                        const ok = window.confirm(
+                          "开启进程内强制住宅应急？仅影响本 BFF 进程、不持久化，且不是公开出图主路径。",
+                        );
+                        if (!ok) return;
+                      }
+                      setForceResidential.mutate(checked);
+                    }}
+                  />
+                </Space>
               </Descriptions.Item>
             </Descriptions>
           ) : null}
@@ -327,7 +374,7 @@ export function CfWorkerPage() {
           type="info"
           showIcon
           message="主路径说明"
-          description="用户出图：签名 URL → img-worker → i.pximg.net。后台补全/Token：api-worker allowlist。住宅/EasyProxies 仅应急，不在本页配置。"
+          description="用户出图：签名 URL → img-worker → i.pximg.net。后台补全/Token：api-worker allowlist。住宅/EasyProxies 仅应急；上表「进程强制住宅」为一键应急开关（进程本地、不改 env）。"
         />
       </Card>
 

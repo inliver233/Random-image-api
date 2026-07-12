@@ -20,11 +20,14 @@ DEFAULT_CF_API_PROXY_HOSTS = frozenset(
     }
 )
 
-# Process-local soft cooldown after CF base transport/5xx failures (not DB; not residential).
+# Process-local soft cooldown after CF base transport/5xx/gate failures (not DB; not residential).
 # Sticky pick still prefers a healthy sticky base; cooling bases are demoted to the end.
+# P0-5 health: consecutive-fail exponential backoff (proxy_health-inspired), success clears streak.
 _CF_BASE_COOLDOWN_S = 30.0
+_CF_BASE_COOLDOWN_MAX_S = 300.0
 _cf_base_lock = threading.Lock()
 _cf_base_cool_until: dict[str, float] = {}
+_cf_base_fail_streak: dict[str, int] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +100,7 @@ def reset_cf_base_cooldown_for_tests() -> None:
     """Clear process CF base cooldown map (unit tests only)."""
     with _cf_base_lock:
         _cf_base_cool_until.clear()
+        _cf_base_fail_streak.clear()
 
 
 def normalize_cf_proxy_base_url(base: str) -> str:
@@ -174,12 +178,14 @@ def record_cf_base_outcome(
     *,
     ok: bool,
     cooldown_s: float = _CF_BASE_COOLDOWN_S,
+    max_cooldown_s: float = _CF_BASE_COOLDOWN_MAX_S,
     now: float | None = None,
 ) -> None:
     """Record CF worker base success/failure for process-local demotion.
 
-    Success clears cooldown. Failure opens/extends cooldown so the next candidate
-    list demotes that base. Best-effort; never raises.
+    Success clears cooldown + fail streak (decay). Failure increments streak and
+    applies exponential cooldown: base * 2^(streak-1), capped at max_cooldown_s.
+    Best-effort; never raises.
     """
     try:
         b = normalize_cf_proxy_base_url(base_or_request_url)
@@ -193,8 +199,15 @@ def record_cf_base_outcome(
         with _cf_base_lock:
             if ok:
                 _cf_base_cool_until.pop(b, None)
+                _cf_base_fail_streak.pop(b, None)
                 return
-            cool = max(1.0, float(cooldown_s))
+            streak = int(_cf_base_fail_streak.get(b) or 0) + 1
+            _cf_base_fail_streak[b] = streak
+            base_cool = max(1.0, float(cooldown_s))
+            cap = max(base_cool, float(max_cooldown_s))
+            # streak 1 → base, 2 → 2x, 3 → 4x … until cap
+            exp = min(16, max(0, streak - 1))
+            cool = min(cap, base_cool * float(2**exp))
             prev = float(_cf_base_cool_until.get(b) or 0.0)
             _cf_base_cool_until[b] = max(prev, t + cool)
     except Exception:

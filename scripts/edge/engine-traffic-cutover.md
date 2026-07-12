@@ -25,7 +25,7 @@ Ops-only progressive dual-run for Go `random-engine`. Python SQLite pick remains
 | `RANDOM_ENGINE_TIMEOUT_MS` | Pick RTT budget (default 800); miss → Python |
 | `RANDOM_ENGINE_SECRET` | `X-Engine-Secret` when set |
 
-Deploy/register of CF workers is **independent** and never flips these flags.
+CF Worker deploy (Admin) is **independent** of Engine flags — it auto-enables CF egress runtime overlay, not `RANDOM_ENGINE_*`.
 
 ## Recommended ramp
 

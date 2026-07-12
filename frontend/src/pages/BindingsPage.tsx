@@ -337,7 +337,7 @@ export function BindingsPage() {
         type="warning"
         showIcon
         message="绑定服务补全/OAuth 出口，不服务公开 /random 出图"
-        description="令牌主代理/覆盖代理仅用于 Pixiv App API 补全与 OAuth 等控制面出口；公开图片主路径走 CF Image Edge（或本地 /i）。勿把住宅池当作用户出图主池。"
+        description="控制面默认出口：CF api-worker 池 ready 时 Token/补全走 via_cf，不依赖本页住宅绑定。本页住宅绑定仅应急/遗留；公开出图走 CF img-worker（或本地 /i）。一键应急住宅见侧栏 CF Worker 页进程强制开关。"
       />
 
       <Alert

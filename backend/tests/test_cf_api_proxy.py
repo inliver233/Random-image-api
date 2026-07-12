@@ -229,6 +229,46 @@ def test_order_cf_bases_for_failover_and_extract() -> None:
     assert demoted[-1] == "https://hot.example.com"
 
 
+def test_cf_base_cooldown_exponential_streak_and_success_clear() -> None:
+    """P0-5: consecutive fails → 10/20/40… capped; success resets streak to base cool."""
+    reset_cf_base_cooldown_for_tests()
+    base = "https://a.example.com"
+    t0 = 1_000.0
+    # streak 1 → 10s
+    record_cf_base_outcome(base, ok=False, cooldown_s=10.0, max_cooldown_s=100.0, now=t0)
+    assert is_cf_base_cooling(base, now=t0 + 9.0) is True
+    assert is_cf_base_cooling(base, now=t0 + 11.0) is False
+    # streak 2 → 20s
+    record_cf_base_outcome(base, ok=False, cooldown_s=10.0, max_cooldown_s=100.0, now=t0 + 20.0)
+    assert is_cf_base_cooling(base, now=t0 + 20.0 + 19.0) is True
+    assert is_cf_base_cooling(base, now=t0 + 20.0 + 21.0) is False
+    # streak 3 → 40s
+    record_cf_base_outcome(base, ok=False, cooldown_s=10.0, max_cooldown_s=100.0, now=t0 + 50.0)
+    assert is_cf_base_cooling(base, now=t0 + 50.0 + 39.0) is True
+    assert is_cf_base_cooling(base, now=t0 + 50.0 + 41.0) is False
+    # success clears streak
+    record_cf_base_outcome(base, ok=True, now=t0 + 200.0)
+    assert is_cf_base_cooling(base, now=t0 + 200.0) is False
+    # next fail is streak 1 again (10s, not 80s)
+    record_cf_base_outcome(base, ok=False, cooldown_s=10.0, max_cooldown_s=100.0, now=t0 + 200.0)
+    assert is_cf_base_cooling(base, now=t0 + 200.0 + 9.0) is True
+    assert is_cf_base_cooling(base, now=t0 + 200.0 + 11.0) is False
+
+
+def test_cf_base_cooldown_respects_max_cap() -> None:
+    reset_cf_base_cooldown_for_tests()
+    base = "https://cap.example.com"
+    t0 = 5_000.0
+    for i in range(8):
+        record_cf_base_outcome(
+            base, ok=False, cooldown_s=30.0, max_cooldown_s=120.0, now=t0 + float(i)
+        )
+    # 30 * 2^7 would be 3840 without cap; cool window must stay at 120s from last fail
+    last = t0 + 7.0
+    assert is_cf_base_cooling(base, now=last + 119.0) is True
+    assert is_cf_base_cooling(base, now=last + 121.0) is False
+
+
 def test_should_failover_cf_attempt_gates_and_business_4xx() -> None:
     """Worker gate 401/403/429 + 5xx/transport failover; Pixiv business 4xx does not thrash."""
     assert should_failover_cf_attempt(None) is True
