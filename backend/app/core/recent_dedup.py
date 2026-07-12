@@ -196,6 +196,11 @@ class RedisRecentDedup:
     _list_cache_at: float = field(default=0.0, repr=False)
     _refresh_inflight: bool = field(default=False, repr=False)
 
+    @property
+    def active_backend(self) -> str:
+        """Runtime store after connect fail-open (sticky until process restart)."""
+        return "memory" if self._connect_failed else "redis"
+
     def _images_key(self) -> str:
         return f"{self.key_prefix}images"
 

@@ -258,7 +258,13 @@ async def api_key_rate_limit_status(
         bool(str(getattr(settings, "redis_url", "") or "").strip()) if settings is not None else False
     )
     limiter = getattr(request.app.state, "api_key_limiter", None)
-    active_backend = str(getattr(limiter, "backend", "memory") or "memory").lower() if limiter is not None else "memory"
+    # Prefer active_backend (runtime fail-open) over static backend label on Redis wrappers.
+    if limiter is not None:
+        active_backend = str(
+            getattr(limiter, "active_backend", None) or getattr(limiter, "backend", "memory") or "memory"
+        ).lower()
+    else:
+        active_backend = "memory"
     if active_backend not in {"memory", "redis"}:
         active_backend = "memory"
     return admin_ok(
@@ -291,7 +297,9 @@ async def modular_ports_status(
     recent = getattr(request.app.state, "recent_dedup", None)
     catalog_backend = str(getattr(catalog, "backend", "sqlite") or "sqlite")
     tag_backend = str(getattr(tag_store, "backend", "sqlite") or "sqlite")
-    recent_active = str(getattr(recent, "backend", "memory") or "memory").lower()
+    recent_active = str(
+        getattr(recent, "active_backend", None) or getattr(recent, "backend", "memory") or "memory"
+    ).lower()
     if recent_active not in {"memory", "redis"}:
         recent_active = "memory"
     recent_cfg = (

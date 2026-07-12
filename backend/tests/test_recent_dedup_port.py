@@ -69,6 +69,7 @@ def test_redis_recent_dedup_fails_open_when_client_unavailable() -> None:
     """Without a live Redis, get/record fail open to process-local memory."""
     clear_recent()
     store = RedisRecentDedup(redis_url="redis://127.0.0.1:1/0")  # nothing listening
+    assert store.active_backend == "redis"
     store.record(
         now=1000.0,
         image_id=42,
@@ -80,6 +81,10 @@ def test_redis_recent_dedup_fails_open_when_client_unavailable() -> None:
     images, authors = store.get_lists(1000.0, window_s=60.0, max_images=100, max_authors=50)
     assert 42 in images
     assert 9 in authors
+    # record/get_lists dual-write locally and fire-and-forget Redis; force connect attempt.
+    assert store._get_client() is None
+    assert store.active_backend == "memory"
+    assert store.backend == "redis"
     store.clear()
     images2, authors2 = store.get_lists(1000.0, window_s=60.0, max_images=100, max_authors=50)
     assert images2 == []

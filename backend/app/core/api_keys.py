@@ -232,9 +232,23 @@ class RedisApiKeyRateLimiter:
     _client: Any = field(default=None, repr=False)
     _script: Any = field(default=None, repr=False)
     _fallback: ApiKeyRateLimiter = field(init=False, repr=False)
+    # True after redis import/connect/eval fails open to process-local memory.
+    # Cleared on a successful Redis EVAL so status can recover.
+    _using_memory_fallback: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self._fallback = ApiKeyRateLimiter(rpm=int(self.rpm), burst=int(self.burst), backend="memory")
+
+    @property
+    def active_backend(self) -> str:
+        """Runtime store: redis when EVAL works, memory while fail-open."""
+        return "memory" if self._using_memory_fallback else "redis"
+
+    def _mark_memory_fallback(self) -> None:
+        self._using_memory_fallback = True
+
+    def _mark_redis_ok(self) -> None:
+        self._using_memory_fallback = False
 
     async def _get_client(self) -> Any | None:
         if self._client is not None:
@@ -243,6 +257,7 @@ class RedisApiKeyRateLimiter:
             import redis.asyncio as redis_async  # type: ignore[import-not-found]
         except Exception as exc:
             log.warning("api_key_rate_limit_redis_import_failed err=%s", type(exc).__name__)
+            self._mark_memory_fallback()
             return None
         try:
             client = redis_async.from_url(
@@ -258,6 +273,7 @@ class RedisApiKeyRateLimiter:
             return client
         except Exception as exc:
             log.warning("api_key_rate_limit_redis_connect_failed err=%s", type(exc).__name__)
+            self._mark_memory_fallback()
             return None
 
     async def allow(self, api_key_id: int) -> bool:
@@ -273,9 +289,11 @@ class RedisApiKeyRateLimiter:
             client = await asyncio.wait_for(self._get_client(), timeout=_REDIS_RL_CALL_TIMEOUT_S)
         except Exception as exc:
             log.warning("api_key_rate_limit_redis_client_timeout err=%s", type(exc).__name__)
+            self._mark_memory_fallback()
             return await self._fallback.allow(api_key_id_i)
         if client is None:
             # Fail open to process-local bucket so Redis outage does not 500 public API.
+            self._mark_memory_fallback()
             return await self._fallback.allow(api_key_id_i)
 
         key = f"{self.key_prefix}{api_key_id_i}"
@@ -293,9 +311,11 @@ class RedisApiKeyRateLimiter:
                 ),
                 timeout=_REDIS_RL_CALL_TIMEOUT_S,
             )
+            self._mark_redis_ok()
             return int(allowed or 0) == 1
         except Exception as exc:
             log.warning("api_key_rate_limit_redis_eval_failed err=%s", type(exc).__name__)
+            self._mark_memory_fallback()
             return await self._fallback.allow(api_key_id_i)
 
     async def aclose(self) -> None:

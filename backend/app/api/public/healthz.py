@@ -136,8 +136,11 @@ async def healthz(request: Request) -> Any:
         if rl_backend not in {"memory", "redis"}:
             rl_backend = "memory"
         redis_url_configured = bool(str(getattr(settings, "redis_url", "") or "").strip()) if settings is not None else False
+        _limiter = getattr(request.app.state, "api_key_limiter", None)
         rl_active = str(
-            getattr(getattr(request.app.state, "api_key_limiter", None), "backend", "memory") or "memory"
+            getattr(_limiter, "active_backend", None)
+            or getattr(_limiter, "backend", "memory")
+            or "memory"
         ).strip().lower()
         if rl_active not in {"memory", "redis"}:
             # No limiter on app.state (minimal healthz harness) → fold config like before.
@@ -157,8 +160,11 @@ async def healthz(request: Request) -> Any:
         )
         if recent_dedup_requested not in {"memory", "redis"}:
             recent_dedup_requested = "memory"
+        _recent = getattr(request.app.state, "recent_dedup", None)
         recent_dedup_active = str(
-            getattr(getattr(request.app.state, "recent_dedup", None), "backend", "memory") or "memory"
+            getattr(_recent, "active_backend", None)
+            or getattr(_recent, "backend", "memory")
+            or "memory"
         ).strip().lower()
         if recent_dedup_active not in {"memory", "redis"}:
             recent_dedup_active = "memory"

@@ -64,9 +64,13 @@ def test_redis_limiter_falls_back_when_client_unavailable() -> None:
             burst=1,
             redis_url="redis://127.0.0.1:1/0",  # nothing listening
         )
+        assert limiter.active_backend == "redis"
         # First allow creates local fallback bucket; second is limited.
         assert await limiter.allow(42) is True
         assert await limiter.allow(42) is False
+        # Runtime honesty: status consumers must see memory while fail-open.
+        assert limiter.active_backend == "memory"
+        assert limiter.backend == "redis"  # configured label unchanged
         await limiter.aclose()
 
     asyncio.run(_run())
@@ -100,6 +104,7 @@ def test_redis_limiter_budgeted_when_eval_hangs() -> None:
         # Hard budget is ~0.15s; leave headroom for scheduling.
         assert elapsed < 1.0, f"allow hung too long: {elapsed:.3f}s"
         assert elapsed >= float(api_keys_mod._REDIS_RL_CALL_TIMEOUT_S) * 0.5
+        assert limiter.active_backend == "memory"
         # Second call uses memory fallback bucket (burst=1) → limited.
         assert await limiter.allow(7) is False
         await limiter.aclose()
