@@ -100,7 +100,7 @@ def test_status_html_shows_modular_port_chips(tmp_path: Path, monkeypatch) -> No
         resp = client.get("/status")
         assert resp.status_code == 200
         text = resp.text
-        assert "job-queue: sqlite" in text
+        assert "job-queue: sqlite · implemented" in text
         assert "recent-dedup: memory" in text
         assert "job_queue" in text
         assert "recent_dedup" in text

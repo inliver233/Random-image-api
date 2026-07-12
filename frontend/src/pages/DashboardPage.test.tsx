@@ -303,6 +303,36 @@ describe("DashboardPage", () => {
     expect(await screen.findByText(/请求ID:.*req_modular/)).toBeInTheDocument();
   });
 
+  it("surfaces r2 no-url when flag on without URL", async () => {
+    const baseFetch = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/admin/api/maintenance/r2-prewarm")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              enabled_flag: true,
+              ready: false,
+              url_configured: false,
+              secret_configured: false,
+              request_id: "req_r2_no_url",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return baseFetch(input, init);
+      }),
+    );
+
+    renderDashboard();
+
+    expect(
+      await screen.findByText(/r2_prewarm=flag-on-not-ready\s*·\s*no-url\s*·\s*no-secret/),
+    ).toBeInTheDocument();
+  });
+
   it("navigates to import", async () => {
     renderDashboard();
 

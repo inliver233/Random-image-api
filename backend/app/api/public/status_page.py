@@ -323,10 +323,12 @@ def _build_status_html(
     jq = payload.get("job_queue") if isinstance(payload.get("job_queue"), dict) else {}
     jq_backend = str(jq.get("backend") or "sqlite")
     jq_requested = str(jq.get("requested") or "sqlite")
+    jq_implemented = bool(jq.get("implemented", True))
     if jq_backend == jq_requested:
         jq_chip = f"job-queue: {jq_backend}"
     else:
         jq_chip = f"job-queue: {jq_requested}→{jq_backend}"
+    jq_chip += " · implemented" if jq_implemented else " · not-implemented"
 
     # Recent dedup chip (memory default; redis fail-open).
     rd = payload.get("recent_dedup") if isinstance(payload.get("recent_dedup"), dict) else {}
