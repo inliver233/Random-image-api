@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -34,6 +36,36 @@ class EasyProxiesAuthResult:
     token: str
 
 
+@asynccontextmanager
+async def _easy_proxies_client(
+    *,
+    transport: httpx.BaseTransport | None,
+    timeout_s: float,
+    headers: dict[str, str] | None = None,
+) -> AsyncIterator[httpx.AsyncClient]:
+    """Mock transport → short-lived owned client; else process control-plane singleton.
+
+    Worker auto-refresh and import jobs call auth+export back-to-back; reusing the
+    process control-plane client avoids two cold TLS handshakes per cycle. Tests
+    that inject MockTransport keep an owned client so the transport is not shared.
+    """
+    if transport is not None:
+        async with httpx.AsyncClient(
+            transport=transport,
+            timeout=httpx.Timeout(timeout_s, connect=min(10.0, float(timeout_s))),
+            follow_redirects=True,
+            headers=headers or {},
+        ) as client:
+            yield client
+        return
+
+    from app.core.http_client import get_control_plane_http_client
+
+    client = get_control_plane_http_client()
+    # Do not aclose — process singleton closed on worker/API shutdown.
+    yield client
+
+
 async def easy_proxies_auth(
     *,
     base_url: str,
@@ -47,12 +79,12 @@ async def easy_proxies_auth(
         raise ValueError("password is required")
 
     url = urljoin(base_url_n, "api/auth")
-    async with httpx.AsyncClient(
-        transport=transport,
-        timeout=httpx.Timeout(timeout_s, connect=10.0),
-        follow_redirects=True,
-    ) as client:
-        resp = await client.post(url, json={"password": password})
+    async with _easy_proxies_client(transport=transport, timeout_s=timeout_s) as client:
+        resp = await client.post(
+            url,
+            json={"password": password},
+            timeout=httpx.Timeout(timeout_s, connect=min(10.0, float(timeout_s))),
+        )
 
     if resp.status_code != 200:
         raise EasyProxiesError("easy_proxies auth failed", status_code=resp.status_code)
@@ -83,13 +115,18 @@ async def easy_proxies_export(
     if bearer_token:
         headers["Authorization"] = f"Bearer {bearer_token}"
 
-    async with httpx.AsyncClient(
+    async with _easy_proxies_client(
         transport=transport,
-        timeout=httpx.Timeout(timeout_s, connect=10.0),
-        follow_redirects=True,
+        timeout_s=timeout_s,
         headers=headers,
     ) as client:
-        resp = await client.get(url)
+        # Control-plane singleton has no per-call default headers; pass Authorization
+        # on the request so we do not mutate the shared client.
+        resp = await client.get(
+            url,
+            headers=headers or None,
+            timeout=httpx.Timeout(timeout_s, connect=min(10.0, float(timeout_s))),
+        )
 
     if resp.status_code != 200:
         raise EasyProxiesError("easy_proxies export failed", status_code=resp.status_code)
