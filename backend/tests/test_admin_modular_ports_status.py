@@ -27,6 +27,12 @@ def test_admin_maintenance_openapi_documents_dual_run_and_cleanup() -> None:
     assert cleanup_op.get("summary") == "Cleanup request logs"
     assert "dry_run" in str(cleanup_op.get("description") or "")
 
+    ports_op = paths["/admin/api/maintenance/modular-ports"]["get"]
+    assert ports_op.get("summary") == "Modular ports status"
+    ports_desc = str(ports_op.get("description") or "")
+    for needle in ("catalog", "tags", "job_queue", "recent_dedup", "random_service", "random_pick"):
+        assert needle in ports_desc
+
 
 def test_admin_modular_ports_status_defaults(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "admin_modular_ports.db"

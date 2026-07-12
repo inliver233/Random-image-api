@@ -296,12 +296,22 @@ async def api_key_rate_limit_status(
     )
 
 
-@router.get("/maintenance/modular-ports")
+@router.get(
+    "/maintenance/modular-ports",
+    summary="Modular ports status",
+    description=(
+        "Read-only Phase-4 port backends (no secrets, no outbound probes). "
+        "Returns active labels for `catalog`, `tags`, `random_service`, `random_pick`, "
+        "plus honesty for `job_queue` (`backend`/`requested`/`implemented` — redis/nats "
+        "fail at settings load) and `recent_dedup` "
+        "(`configured_backend`/`active_backend`/`using_memory_fallback`). "
+        "Parity with `/healthz` `modules.*` and public `/status.json` `data.*` port chips."
+    ),
+)
 async def modular_ports_status(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
-    """Read-only Phase-4 port backends (catalog / job queue / recent dedup). No secrets."""
     _ = _claims
     rid = get_or_create_request_id(request)
     settings = getattr(request.app.state, "settings", None)
