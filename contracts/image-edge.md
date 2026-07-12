@@ -64,7 +64,7 @@ BFF R2 prewarm enqueue counters: Prometheus `new_pixiv_r2_prewarm_total{result=.
 | `skipped_no_paths` | no allowlisted paths after resolve |
 | `error` | unexpected outer failure |
 
-When Image Edge is **ready** (`IMAGE_EDGE_ENABLED` + secret + base URLs), public local cascade **skips residential pool selection** and fetches origin direct (or mirror if `pixiv_cat`/`proxy` override). Residential remains for control-plane hydrate and when edge is not configured.
+When Image Edge is **ready** (`IMAGE_EDGE_ENABLED` + secret + base URLs), public local cascade **skips residential pool selection** and fetches origin direct (or mirror if `pixiv_cat`/`proxy` override). With `RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true` (default), residential is emergency-only even on the local cascade; force via `force_residential_emergency` / explicit `allow_residential_proxy`. Env bases merge with runtime-registered members (`cf_pool.image.base_urls` / `POST /admin/api/cf-workers/register|deploy`).
 
 ## Signing (Python / any language)
 

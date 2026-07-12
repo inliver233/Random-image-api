@@ -39,7 +39,14 @@ def load_cf_api_proxy_config_from_settings(settings: Settings | None) -> CfApiPr
     if settings is None:
         return None
     enabled = bool(getattr(settings, "cf_api_proxy_enabled", False))
-    base_urls = list(getattr(settings, "cf_api_proxy_base_urls", None) or [])
+    env_bases = list(getattr(settings, "cf_api_proxy_base_urls", None) or [])
+    # Merge ops-registered runtime bases (ds2api-style pool members) with env CSV.
+    try:
+        from app.core.cf_pool_overlay import merge_api_bases_with_overlay
+
+        base_urls = merge_api_bases_with_overlay(env_bases)
+    except Exception:
+        base_urls = list(env_bases)
     secret = str(getattr(settings, "cf_api_proxy_secret", "") or "").strip()
     if not enabled or not base_urls:
         return None

@@ -16,10 +16,12 @@ def test_egress_attempt_count_formula() -> None:
     assert egress_attempt_count(cf_candidate_count=0, residential_failover_attempts=0) == 1
     assert egress_attempt_count(cf_candidate_count=2, residential_failover_attempts=0) == 3
     assert egress_attempt_count(cf_candidate_count=2, residential_failover_attempts=2) == 5
+    assert egress_attempt_count(cf_candidate_count=2, residential_failover_attempts=2, include_residential=False) == 2
 
 
 def test_iter_pixiv_api_egress_cf_first_then_residential() -> None:
-    settings = SimpleNamespace()
+    # Legacy transition: emergency_only=False keeps residential after CF.
+    settings = SimpleNamespace(residential_egress_emergency_only=False)
     runtime = SimpleNamespace()
     engine = object()
     residential = ProxyUri(uri="http://u:p@10.0.0.1:8080", endpoint_id=3, pool_id=1)
@@ -68,6 +70,42 @@ def test_iter_pixiv_api_egress_cf_first_then_residential() -> None:
     assert attempts[3].via_cf is False
 
 
+def test_iter_pixiv_api_egress_skips_residential_when_cf_ready_emergency_only() -> None:
+    settings = SimpleNamespace(residential_egress_emergency_only=True)
+    residential = ProxyUri(uri="http://u:p@10.0.0.1:8080", endpoint_id=3, pool_id=1)
+
+    async def _run() -> list[EgressAttempt]:
+        with (
+            patch(
+                "app.core.proxy_selector.resolve_pixiv_api_cf_candidates",
+                return_value=[
+                    ("https://cf-a.example/p/app-api.pixiv.net/v1", {"X-Proxy-Secret": "s"}),
+                ],
+            ),
+            patch(
+                "app.core.proxy_selector.select_proxy_uri_for_url",
+                new_callable=AsyncMock,
+                return_value=residential,
+            ) as select,
+        ):
+            out = [
+                a
+                async for a in iter_pixiv_api_egress(
+                    object(),  # type: ignore[arg-type]
+                    settings,  # type: ignore[arg-type]
+                    SimpleNamespace(),  # type: ignore[arg-type]
+                    url="https://app-api.pixiv.net/v1/illust/detail",
+                    residential_failover_attempts=2,
+                )
+            ]
+            select.assert_not_called()
+            return out
+
+    attempts = asyncio.run(_run())
+    assert len(attempts) == 1
+    assert attempts[0].via_cf is True
+
+
 def test_iter_pixiv_api_egress_residential_only_when_cf_empty() -> None:
     async def _run() -> list[EgressAttempt]:
         with (
@@ -82,7 +120,7 @@ def test_iter_pixiv_api_egress_residential_only_when_cf_empty() -> None:
                 a
                 async for a in iter_pixiv_api_egress(
                     object(),  # type: ignore[arg-type]
-                    SimpleNamespace(),  # type: ignore[arg-type]
+                    SimpleNamespace(residential_egress_emergency_only=True),  # type: ignore[arg-type]
                     SimpleNamespace(),  # type: ignore[arg-type]
                     url="https://oauth.secure.pixiv.net/auth/token",
                     residential_failover_attempts=0,

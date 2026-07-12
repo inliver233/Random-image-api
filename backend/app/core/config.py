@@ -69,6 +69,8 @@ class Settings:
     cf_api_proxy_enabled: bool
     cf_api_proxy_base_urls: list[str]
     cf_api_proxy_secret: str
+    # When True (default), residential is emergency-only if CF/edge is ready (mandate).
+    residential_egress_emergency_only: bool
 
     @property
     def is_prod(self) -> bool:
@@ -297,6 +299,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     # Flag stays true with bases so admin can report missing secret; ready requires secret separately.
     if not cf_api_proxy_base_urls:
         cf_api_proxy_enabled = False
+    # Mandate default: residential emergency-only when CF/edge ready. Opt out for transition.
+    residential_egress_emergency_only = parse_bool_env(
+        "RESIDENTIAL_EGRESS_EMERGENCY_ONLY", default=True, env=env
+    )
 
     settings = Settings(
         app_env=app_env,
@@ -338,6 +344,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         cf_api_proxy_enabled=cf_api_proxy_enabled,
         cf_api_proxy_base_urls=cf_api_proxy_base_urls,
         cf_api_proxy_secret=cf_api_proxy_secret,
+        residential_egress_emergency_only=residential_egress_emergency_only,
     )
 
     if settings.is_prod:

@@ -49,6 +49,19 @@ Override via Worker `ALLOWED_HOSTS` CSV.
 
 When disabled / not ready, `iter_pixiv_api_egress` yields residential-only attempts via `select_proxy_uri_for_url`.
 
+When **ready** and `RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true` (default), residential tries are **skipped** after CF candidates (mandate: residential near-zero). Opt out with `RESIDENTIAL_EGRESS_EMERGENCY_ONLY=false` or `force_residential_emergency` on the iterator.
+
+### Runtime pool overlay (ops register / deploy)
+
+Env CSV bases merge with runtime-registered bases (`cf_pool.api.base_urls` in `runtime_settings`, process overlay in `cf_pool_overlay`):
+
+| Surface | Notes |
+| --- | --- |
+| `GET /admin/api/cf-workers/pool` | env + runtime + merged members + egress policy |
+| `POST /admin/api/cf-workers/register` | add runtime base (`kind=api\|image`, `base_url`) |
+| `POST /admin/api/cf-workers/unregister` | remove runtime base |
+| `POST /admin/api/cf-workers/deploy` | CF API upload of **hardened** `edge/api-worker` or `edge/img-worker`, enable workers.dev, optional auto-register — **does not** flip enable flags; never stores CF API token |
+
 ## Security rules
 
 - No open `?url=` proxy

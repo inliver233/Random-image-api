@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.cf_api_proxy import resolve_pixiv_api_cf_candidates
 from app.core.config import Settings
+from app.core.egress_policy import allow_residential_pixiv_api_egress
 from app.core.proxy_routing import ProxyUri, select_proxy_uri_for_url
 from app.core.runtime_settings import RuntimeConfig
 
@@ -39,11 +40,15 @@ async def iter_pixiv_api_egress(
     url: str,
     token_id: int | None = None,
     residential_failover_attempts: int = 0,
+    force_residential_emergency: bool = False,
 ) -> AsyncIterator[EgressAttempt]:
-    """Yield CF multi-base candidates first, then residential picks.
+    """Yield CF multi-base candidates first, then residential picks when allowed.
 
-    Residential count is ``max(1, residential_failover_attempts + 1)`` so a single
-    direct (no-proxy) try still runs when pools are empty and fail-open.
+    Residential is skipped when CF is ready and ``RESIDENTIAL_EGRESS_EMERGENCY_ONLY``
+    (default True) unless ``force_residential_emergency`` is set.
+
+    When residential is allowed, try count is ``max(1, residential_failover_attempts + 1)``
+    so a single direct (no-proxy) try still runs when pools are empty and fail-open.
     Each residential yield re-selects so blacklist updates apply mid-failover.
     """
     raw = (url or "").strip()
@@ -58,6 +63,13 @@ async def iter_pixiv_api_egress(
             extra_headers=dict(cf_headers or {}),
             residential=None,
         )
+
+    if not allow_residential_pixiv_api_egress(
+        settings,
+        cf_candidate_count=len(cf_candidates),
+        force_emergency=force_residential_emergency,
+    ):
+        return
 
     residential_tries = max(1, int(residential_failover_attempts) + 1)
     for _ in range(residential_tries):
@@ -80,6 +92,8 @@ def egress_attempt_count(
     *,
     cf_candidate_count: int,
     residential_failover_attempts: int,
+    include_residential: bool = True,
 ) -> int:
-    """Total tries for a CF-first + residential failover plan (pure helper for tests)."""
-    return max(0, int(cf_candidate_count)) + max(1, int(residential_failover_attempts) + 1)
+    """Total tries for a CF-first + optional residential failover plan (pure helper)."""
+    residential = max(1, int(residential_failover_attempts) + 1) if include_residential else 0
+    return max(0, int(cf_candidate_count)) + residential

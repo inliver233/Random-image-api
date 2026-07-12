@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from unittest.mock import AsyncMock, patch
+
+from fastapi.testclient import TestClient
+
+from app.core.cf_pool_overlay import reset_overlay_for_tests
+from app.core.cf_worker_deploy import CfWorkerDeployResult
+from app.core.security import create_jwt
+from app.db.models.base import Base
+from app.main import create_app
+
+
+def _prepare(tmp_path: Path, monkeypatch, *, name: str) -> object:
+    db_path = tmp_path / f"{name}.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
+    monkeypatch.delenv("CF_API_PROXY_ENABLED", raising=False)
+    monkeypatch.delenv("IMAGE_EDGE_ENABLED", raising=False)
+    reset_overlay_for_tests()
+    app = create_app()
+
+    async def _migrate() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_migrate())
+    return app
+
+
+def test_cf_workers_pool_and_register(tmp_path: Path, monkeypatch) -> None:
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_pool")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        resp = client.get("/admin/api/cf-workers/pool", headers=headers)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert "api" in body and "image" in body
+        assert body["egress_policy"]["residential_egress_emergency_only"] is True
+
+        reg = client.post(
+            "/admin/api/cf-workers/register",
+            headers=headers,
+            json={"kind": "api", "base_url": "https://api-a.example.workers.dev/"},
+        )
+        assert reg.status_code == 200
+        rbody = reg.json()
+        assert rbody["registered"] is True
+        assert rbody["base_url"] == "https://api-a.example.workers.dev"
+        assert "https://api-a.example.workers.dev" in rbody["runtime_base_urls"]
+
+        pool = client.get("/admin/api/cf-workers/pool", headers=headers).json()
+        assert "https://api-a.example.workers.dev" in pool["api"]["merged_base_urls"]
+
+        un = client.post(
+            "/admin/api/cf-workers/unregister",
+            headers=headers,
+            json={"kind": "api", "base_url": "https://api-a.example.workers.dev"},
+        )
+        assert un.status_code == 200
+        assert un.json()["unregistered"] is True
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_deploy_registers_without_leaking_token(tmp_path: Path, monkeypatch) -> None:
+    result = CfWorkerDeployResult(
+        kind="api",
+        worker_name="ria-api-a",
+        worker_host="ria-api-a.acct.workers.dev",
+        base_url="https://ria-api-a.acct.workers.dev",
+        secrets_set=["PROXY_SECRET"],
+        deployed=True,
+    )
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_deploy")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        with patch(
+            "app.api.admin.cf_workers.deploy_cf_worker",
+            new_callable=AsyncMock,
+            return_value=result,
+        ) as deploy:
+            resp = client.post(
+                "/admin/api/cf-workers/deploy",
+                headers=headers,
+                json={
+                    "kind": "api",
+                    "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
+                    "account_id": "0123456789abcdef0123456789abcdef",
+                    "worker_name": "ria-api-a",
+                    "proxy_secret": "proxy-secret-value",
+                },
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["deployed"] is True
+            assert body["base_url"] == "https://ria-api-a.acct.workers.dev"
+            assert body["registered"] is True
+            assert "PROXY_SECRET" in body["secrets_set"]
+            raw = resp.text
+            assert "cf-token-abcdefghijklmnopqrstuvwxyz" not in raw
+            assert "proxy-secret-value" not in raw
+            deploy.assert_awaited_once()
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_deploy_validation(tmp_path: Path, monkeypatch) -> None:
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_validation")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        resp = client.post(
+            "/admin/api/cf-workers/deploy",
+            headers=headers,
+            json={
+                "kind": "api",
+                "api_token": "short",
+                "account_id": "not-hex",
+                "worker_name": "Bad_Name",
+            },
+        )
+        assert resp.status_code == 400
+    reset_overlay_for_tests()

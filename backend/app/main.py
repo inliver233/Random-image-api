@@ -123,6 +123,16 @@ def create_app() -> FastAPI:
 
             app.state.random_engine_warm_task = asyncio.create_task(_warm_engine())
 
+        # Best-effort: load CF pool runtime overlay (ops-registered bases).
+        engine_for_pool = getattr(app.state, "engine", None)
+        if engine_for_pool is not None:
+            try:
+                from app.core.cf_pool_overlay import reload_overlay_from_engine
+
+                await reload_overlay_from_engine(engine_for_pool)
+            except Exception:
+                pass
+
         try:
             yield
         finally:

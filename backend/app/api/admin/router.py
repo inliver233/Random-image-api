@@ -6,6 +6,7 @@ from app.api.admin.auth import router as auth_router
 from app.api.admin.api_keys import router as api_keys_router
 from app.api.admin.audit import router as audit_router
 from app.api.admin.bindings import router as bindings_router
+from app.api.admin.cf_workers import router as cf_workers_router
 from app.api.admin.hydration_runs import router as hydration_runs_router
 from app.api.admin.images import router as images_router
 from app.api.admin.imports import router as imports_router
@@ -23,6 +24,7 @@ router.include_router(auth_router)
 router.include_router(api_keys_router)
 router.include_router(audit_router)
 router.include_router(bindings_router)
+router.include_router(cf_workers_router)
 router.include_router(hydration_runs_router)
 router.include_router(images_router)
 router.include_router(imports_router)

@@ -1,0 +1,85 @@
+from __future__ import annotations
+
+import threading
+from typing import Any
+
+from app.core.cf_pool_registry import (
+    RUNTIME_KEY_API_BASES,
+    RUNTIME_KEY_IMAGE_BASES,
+    merge_base_url_lists,
+    parse_base_urls_payload,
+)
+from app.core.logging import get_logger
+
+log = get_logger(__name__)
+
+_lock = threading.RLock()
+_api_bases: list[str] = []
+_image_bases: list[str] = []
+
+
+def get_api_overlay_bases() -> list[str]:
+    with _lock:
+        return list(_api_bases)
+
+
+def get_image_overlay_bases() -> list[str]:
+    with _lock:
+        return list(_image_bases)
+
+
+def set_api_overlay_bases(bases: list[str] | None) -> list[str]:
+    merged = merge_base_url_lists(bases or [])
+    with _lock:
+        global _api_bases
+        _api_bases = list(merged)
+        return list(_api_bases)
+
+
+def set_image_overlay_bases(bases: list[str] | None) -> list[str]:
+    merged = merge_base_url_lists(bases or [])
+    with _lock:
+        global _image_bases
+        _image_bases = list(merged)
+        return list(_image_bases)
+
+
+def merge_api_bases_with_overlay(env_bases: list[str] | None) -> list[str]:
+    return merge_base_url_lists(env_bases or [], get_api_overlay_bases())
+
+
+def merge_image_bases_with_overlay(env_bases: list[str] | None) -> list[str]:
+    return merge_base_url_lists(env_bases or [], get_image_overlay_bases())
+
+
+def apply_runtime_values_to_overlay(values: dict[str, Any] | None) -> None:
+    """Load overlay from runtime_settings values dict (startup / after write)."""
+    values = values or {}
+    api = parse_base_urls_payload(values.get(RUNTIME_KEY_API_BASES))
+    image = parse_base_urls_payload(values.get(RUNTIME_KEY_IMAGE_BASES))
+    set_api_overlay_bases(api)
+    set_image_overlay_bases(image)
+    log.info(
+        "cf_pool_overlay_loaded api_bases=%s image_bases=%s",
+        len(api),
+        len(image),
+    )
+
+
+async def reload_overlay_from_engine(engine: Any) -> None:
+    """Best-effort load from DB runtime_settings."""
+    if engine is None:
+        return
+    try:
+        from app.core.runtime_settings import fetch_runtime_settings
+
+        values = await fetch_runtime_settings(engine)
+        apply_runtime_values_to_overlay(values)
+    except Exception:
+        log.warning("cf_pool_overlay_reload_failed", exc_info=True)
+
+
+def reset_overlay_for_tests() -> None:
+    """Test helper: clear process overlay."""
+    set_api_overlay_bases([])
+    set_image_overlay_bases([])

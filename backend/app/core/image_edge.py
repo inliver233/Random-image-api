@@ -52,7 +52,13 @@ def load_image_edge_config_from_settings(settings: Settings) -> ImageEdgeConfig 
     secret_previous = str(getattr(settings, "image_edge_secret_previous", "") or "").strip()
     if secret_previous and secret_previous == secret:
         secret_previous = ""
-    base_urls = list(getattr(settings, "image_edge_base_urls", None) or [])
+    env_bases = list(getattr(settings, "image_edge_base_urls", None) or [])
+    try:
+        from app.core.cf_pool_overlay import merge_image_bases_with_overlay
+
+        base_urls = merge_image_bases_with_overlay(env_bases)
+    except Exception:
+        base_urls = list(env_bases)
     ttl = int(getattr(settings, "image_edge_sign_ttl_seconds", 604800) or 604800)
     ttl = max(60, min(ttl, 31_536_000))
     cache_key = (enabled, secret, secret_previous, tuple(base_urls), ttl)
