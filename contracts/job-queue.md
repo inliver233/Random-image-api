@@ -52,5 +52,9 @@ Wire-up reads settings (not raw `os.environ` at call sites):
 
 ## Ops
 
-`/healthz` → `modules.job_queue.backend` from `app.state.job_queue` (sqlite until a real alternate ships).
-Admin → `GET /admin/api/maintenance/modular-ports` → `job_queue.backend` / `requested` / `implemented` / `using_sqlite_fallback` (always false under fail-loud settings).
+`/healthz` → `modules.job_queue`:
+- `backend` = active port from `app.state.job_queue` (`sqlite` / `memory`)
+- `requested` = `Settings.job_queue_backend` (`JOB_QUEUE_BACKEND`)
+- `implemented` = true for `sqlite`/`memory` (redis/nats rejected at settings load — no silent sqlite fallback)
+
+Admin → `GET /admin/api/maintenance/modular-ports` → same honesty shape: `job_queue.backend` / `requested` / `implemented` (no `using_sqlite_fallback` field; fail-loud settings never silently fall back).
