@@ -45,6 +45,54 @@ function fixtureFor(url: string, mode: FixtureMode): Response {
       request_id: "req_cf",
     });
   }
+  if (url.includes("/admin/api/cf-workers/probe")) {
+    return json({
+      ok: true,
+      probed: true,
+      kind: "all",
+      timeout_s: 3,
+      api: {
+        results: mode === "ready" ? [{ base_url: "https://api-proxy.example.com", ok: true, status_code: 200 }] : [],
+        summary: mode === "ready" ? { total: 1, ok: 1, fail: 0 } : { total: 0, ok: 0, fail: 0 },
+      },
+      image: {
+        results: mode === "ready" ? [{ base_url: "https://img.example.com", ok: true, status_code: 200 }] : [],
+        summary: mode === "ready" ? { total: 1, ok: 1, fail: 0 } : { total: 0, ok: 0, fail: 0 },
+      },
+      note: "Probe never enables flags",
+      request_id: "req_probe",
+    });
+  }
+  if (url.includes("/admin/api/cf-workers/pool")) {
+    return json({
+      ok: true,
+      api: {
+        env_base_urls: mode === "ready" ? ["https://api-proxy.example.com"] : [],
+        runtime_base_urls: [],
+        merged_base_urls: mode === "ready" ? ["https://api-proxy.example.com"] : [],
+        members:
+          mode === "ready"
+            ? [{ kind: "api", base_url: "https://api-proxy.example.com", source: "env" }]
+            : [],
+      },
+      image: {
+        env_base_urls: mode === "ready" ? ["https://img.example.com"] : [],
+        runtime_base_urls: [],
+        merged_base_urls: mode === "ready" ? ["https://img.example.com"] : [],
+        members:
+          mode === "ready" ? [{ kind: "image", base_url: "https://img.example.com", source: "env" }] : [],
+      },
+      egress_policy: {
+        residential_egress_emergency_only: true,
+        cf_api_proxy_ready: mode === "ready",
+        image_edge_ready: mode === "ready",
+        pixiv_api_allows_residential_when_cf_ready: mode !== "ready",
+        image_origin_allows_residential_when_edge_ready: mode !== "ready",
+      },
+      note: "Deploy/register does not flip flags",
+      request_id: "req_pool",
+    });
+  }
   if (url.includes("/admin/api/maintenance/r2-prewarm")) {
     if (mode === "ready") {
       return json({
@@ -240,6 +288,10 @@ describe("MaintenancePage", () => {
     // Dual-run circuit honesty (row + readiness tags both show circuit=closed)
     expect(screen.getAllByText("circuit=closed").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("failures=0")).toBeInTheDocument();
+    // CF pool card (empty pool + residential demotion honesty)
+    expect(screen.getByText("CF Worker 池（成员 + 探针）")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "探针全部 healthz" })).toBeInTheDocument();
+    expect(screen.getAllByText("（空）").length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders ready modular ports and R2 when fully configured", async () => {
@@ -260,6 +312,29 @@ describe("MaintenancePage", () => {
     // R2 ready tag (multiple "ready" tags exist across cards)
     expect(screen.getAllByText("ready").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText("双跑切流风险")).not.toBeInTheDocument();
+    // CF pool shows merged bases when ready (URLs also appear on Image Edge / CF API cards)
+    expect(screen.getAllByText("https://api-proxy.example.com").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("https://img.example.com").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("CF Worker 池（成员 + 探针）")).toBeInTheDocument();
+  });
+
+  it("probes CF pool healthz and shows summary", async () => {
+    stubFetch("ready");
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <MaintenancePage />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("CF Worker 池（成员 + 探针）")).toBeInTheDocument();
+    const probeBtn = await screen.findByRole("button", { name: "探针全部 healthz" });
+    fireEvent.click(probeBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/探针完成：api ok=1\/1；image ok=1\/1/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/最近探针 API/)).toBeInTheDocument();
   });
 
   it("surfaces pick_probe on compare-filters success", async () => {

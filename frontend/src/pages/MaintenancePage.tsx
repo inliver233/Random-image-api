@@ -157,6 +157,53 @@ type R2PrewarmStatusResponse = {
   request_id: string;
 };
 
+type CfPoolMember = {
+  kind?: string;
+  base_url?: string;
+  source?: string;
+};
+
+type CfPoolSide = {
+  env_base_urls?: string[];
+  runtime_base_urls?: string[];
+  merged_base_urls?: string[];
+  members?: CfPoolMember[];
+};
+
+type CfWorkersPoolResponse = {
+  ok: true;
+  api?: CfPoolSide;
+  image?: CfPoolSide;
+  egress_policy?: {
+    residential_egress_emergency_only?: boolean;
+    cf_api_proxy_ready?: boolean;
+    image_edge_ready?: boolean;
+    pixiv_api_allows_residential_when_cf_ready?: boolean;
+    image_origin_allows_residential_when_edge_ready?: boolean;
+  };
+  note?: string;
+  request_id: string;
+};
+
+type CfProbeResult = {
+  base_url?: string;
+  ok?: boolean;
+  status_code?: number | null;
+  error?: string | null;
+  latency_ms?: number | null;
+};
+
+type CfWorkersProbeResponse = {
+  ok: true;
+  probed?: boolean;
+  kind?: string;
+  timeout_s?: number;
+  api?: { results?: CfProbeResult[]; summary?: { total?: number; ok?: number; fail?: number } };
+  image?: { results?: CfProbeResult[]; summary?: { total?: number; ok?: number; fail?: number } };
+  note?: string;
+  request_id: string;
+};
+
 type ApiKeyRateLimitStatusResponse = {
   ok: true;
   required: boolean;
@@ -192,8 +239,10 @@ export function MaintenancePage() {
   const [form] = Form.useForm<CleanupFormValues>();
   const alerts = useActionAlerts();
   const engineAlerts = useActionAlerts();
+  const cfPoolAlerts = useActionAlerts();
   const queryClient = useQueryClient();
   const [compareResult, setCompareResult] = React.useState<RandomEngineCompareResponse | null>(null);
+  const [probeResult, setProbeResult] = React.useState<CfWorkersProbeResponse | null>(null);
 
   const imageEdgeStatus = useQuery({
     queryKey: ["admin", "maintenance", "image-edge"],
@@ -204,6 +253,12 @@ export function MaintenancePage() {
   const cfApiProxyStatus = useQuery({
     queryKey: ["admin", "maintenance", "cf-api-proxy"],
     queryFn: () => apiJson<CfApiProxyStatusResponse>("/admin/api/maintenance/cf-api-proxy"),
+    refetchInterval: 30_000,
+  });
+
+  const cfWorkersPool = useQuery({
+    queryKey: ["admin", "cf-workers", "pool"],
+    queryFn: () => apiJson<CfWorkersPoolResponse>("/admin/api/cf-workers/pool"),
     refetchInterval: 30_000,
   });
 
@@ -307,6 +362,30 @@ export function MaintenancePage() {
     },
   });
 
+  const probeCfPool = useMutation({
+    mutationFn: () =>
+      apiJson<CfWorkersProbeResponse>("/admin/api/cf-workers/probe", {
+        method: "POST",
+        body: JSON.stringify({ kind: "all" }),
+      }),
+    onMutate: () => {
+      cfPoolAlerts.clear();
+      setProbeResult(null);
+    },
+    onSuccess: (data) => {
+      setProbeResult(data);
+      const apiSum = data.api?.summary;
+      const imgSum = data.image?.summary;
+      const apiPart = `api ok=${apiSum?.ok ?? 0}/${apiSum?.total ?? 0}`;
+      const imgPart = `image ok=${imgSum?.ok ?? 0}/${imgSum?.total ?? 0}`;
+      cfPoolAlerts.setSuccess(`探针完成：${apiPart}；${imgPart}`, data.request_id);
+      void queryClient.invalidateQueries({ queryKey: ["admin", "cf-workers", "pool"] });
+    },
+    onError: (err) => {
+      cfPoolAlerts.setError(err);
+    },
+  });
+
   const engine = engineStatus.data;
   const health = engine?.health && typeof engine.health === "object" ? engine.health : null;
   const indexSize =
@@ -347,6 +426,20 @@ export function MaintenancePage() {
   const edge = imageEdgeStatus.data;
   const cfApi = cfApiProxyStatus.data;
   const r2 = r2PrewarmStatus.data;
+  const cfPool = cfWorkersPool.data;
+  const egressPolicy = cfPool?.egress_policy;
+  const formatPoolBases = (side?: CfPoolSide): string => {
+    const merged = side?.merged_base_urls ?? [];
+    if (!merged.length) return "（空）";
+    return merged.join(", ");
+  };
+  const formatPoolSources = (side?: CfPoolSide): string => {
+    const members = side?.members ?? [];
+    if (!members.length) return "—";
+    return members
+      .map((m) => `${m.base_url ?? "?"} (${m.source ?? "?"})`)
+      .join("; ");
+  };
 
   return (
     <Space direction="vertical" size="middle" style={{ width: "100%" }}>
@@ -423,6 +516,93 @@ export function MaintenancePage() {
         <Button onClick={() => void cfApiProxyStatus.refetch()} loading={cfApiProxyStatus.isFetching}>
           刷新状态
         </Button>
+      </Card>
+
+      <Card title="CF Worker 池（成员 + 探针）">
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          env CSV 与 runtime 注册成员合并后的出口池。探针 GET{" "}
+          <Typography.Text code>{"{base}/healthz"}</Typography.Text>
+          ，失败会写入进程内 ~30s 冷却；不翻转{" "}
+          <Typography.Text code>CF_API_PROXY_ENABLED</Typography.Text> /{" "}
+          <Typography.Text code>IMAGE_EDGE_ENABLED</Typography.Text>
+          。本页不收集 Cloudflare API Token（deploy 走 API/CLI）。
+        </Typography.Paragraph>
+
+        <ActionAlerts
+          message={cfPoolAlerts.message}
+          requestId={cfPoolAlerts.requestId}
+          errorMessage={cfPoolAlerts.errorMessage}
+          errorRequestId={cfPoolAlerts.errorRequestId}
+        />
+
+        <QueryState query={cfWorkersPool}>
+          {cfPool ? (
+            <Descriptions size="small" column={1} bordered style={{ maxWidth: 720, marginBottom: 16 }}>
+              <Descriptions.Item label="API 合并 bases">{formatPoolBases(cfPool.api)}</Descriptions.Item>
+              <Descriptions.Item label="API 成员来源">{formatPoolSources(cfPool.api)}</Descriptions.Item>
+              <Descriptions.Item label="Image 合并 bases">{formatPoolBases(cfPool.image)}</Descriptions.Item>
+              <Descriptions.Item label="Image 成员来源">{formatPoolSources(cfPool.image)}</Descriptions.Item>
+              <Descriptions.Item label="住宅紧急-only">
+                {egressPolicy?.residential_egress_emergency_only === false ? (
+                  <Tag color="orange">OFF</Tag>
+                ) : (
+                  <Tag color="green">ON</Tag>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="CF API ready">
+                {egressPolicy?.cf_api_proxy_ready ? (
+                  <Tag color="green">ready</Tag>
+                ) : (
+                  <Tag color="orange">not ready</Tag>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="Image Edge ready">
+                {egressPolicy?.image_edge_ready ? (
+                  <Tag color="green">ready</Tag>
+                ) : (
+                  <Tag color="orange">not ready</Tag>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="CF ready 时仍允许住宅 API">
+                {egressPolicy?.pixiv_api_allows_residential_when_cf_ready ? (
+                  <Tag color="orange">allowed</Tag>
+                ) : (
+                  <Tag>demoted</Tag>
+                )}
+              </Descriptions.Item>
+            </Descriptions>
+          ) : null}
+        </QueryState>
+
+        {probeResult ? (
+          <Descriptions size="small" column={1} bordered style={{ maxWidth: 720, marginBottom: 16 }}>
+            <Descriptions.Item label="最近探针 API">
+              ok={probeResult.api?.summary?.ok ?? 0}/{probeResult.api?.summary?.total ?? 0}
+              {probeResult.api?.results?.length
+                ? ` · ${probeResult.api.results
+                    .map((r) => `${r.base_url ?? "?"} ${r.ok ? "ok" : "fail"}`)
+                    .join("; ")}`
+                : ""}
+            </Descriptions.Item>
+            <Descriptions.Item label="最近探针 Image">
+              ok={probeResult.image?.summary?.ok ?? 0}/{probeResult.image?.summary?.total ?? 0}
+              {probeResult.image?.results?.length
+                ? ` · ${probeResult.image.results
+                    .map((r) => `${r.base_url ?? "?"} ${r.ok ? "ok" : "fail"}`)
+                    .join("; ")}`
+                : ""}
+            </Descriptions.Item>
+          </Descriptions>
+        ) : null}
+
+        <Space wrap>
+          <Button onClick={() => void cfWorkersPool.refetch()} loading={cfWorkersPool.isFetching}>
+            刷新池
+          </Button>
+          <Button type="primary" onClick={() => probeCfPool.mutate()} loading={probeCfPool.isPending}>
+            探针全部 healthz
+          </Button>
+        </Space>
       </Card>
 
       <Card title="R2 Prewarm（Mode B2 钩子）">

@@ -55,6 +55,15 @@ async def iter_pixiv_api_egress(
     if not raw:
         return
 
+    # Multi-process: refresh runtime-registered CF pool members on a short TTL
+    # so register/deploy on one BFF is visible here without restart.
+    try:
+        from app.core.cf_pool_overlay import ensure_overlay_fresh
+
+        await ensure_overlay_fresh(engine)
+    except Exception:
+        pass
+
     cf_candidates = resolve_pixiv_api_cf_candidates(settings=settings, url=raw)
     for cf_url, cf_headers in cf_candidates:
         yield EgressAttempt(

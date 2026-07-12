@@ -166,6 +166,8 @@ Backend note: pure edge **302** does **not** call `mark_image_ok` (bytes not ver
 
 Prod enable gate: `IMAGE_EDGE_ENABLED` requires `IMAGE_EDGE_SECRET` in prod; bases may be env CSV and/or runtime overlay after boot (env CSV alone is not required).
 
+Multi-process overlay freshness: image runtime members (`cf_pool.image.base_urls`) reload via the same ~5s TTL / force-refresh path as API (`ensure_overlay_fresh` on egress + admin pool/probe). Image-edge settings cache is cleared on overlay apply.
+
 ### Secret rotation (zero-downtime)
 
 1. Deploy Worker with `IMAGE_EDGE_SECRET=<new>` and `IMAGE_EDGE_SECRET_PREVIOUS=<old>` (both secrets via `wrangler secret put`).

@@ -15,6 +15,7 @@ from app.core.admin_request import (
     parse_required_str,
 )
 from app.core.cf_pool_overlay import (
+    ensure_overlay_fresh,
     get_api_overlay_bases,
     get_image_overlay_bases,
     set_api_overlay_bases,
@@ -87,6 +88,7 @@ async def cf_workers_pool(
 ) -> dict[str, Any]:
     _ = _claims
     rid = get_or_create_request_id(request)
+    await ensure_overlay_fresh(_engine(request), force=True)
     settings = _settings(request)
     env_api = _env_api_bases(settings)
     env_img = _env_image_bases(settings)
@@ -369,6 +371,8 @@ async def cf_workers_probe(
         timeout_s = 3.0
     timeout_s = max(0.5, min(timeout_s, 15.0))
 
+    # Force-refresh so multi-process peers probe current runtime membership.
+    await ensure_overlay_fresh(_engine(request), force=True)
     settings = _settings(request)
     env_api = _env_api_bases(settings)
     env_img = _env_image_bases(settings)

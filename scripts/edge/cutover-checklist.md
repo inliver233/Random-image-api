@@ -51,4 +51,6 @@ See [`engine-traffic-cutover.md`](./engine-traffic-cutover.md) for traffic% ramp
 - Admin deploy uses **this repo’s** workers only — not ds2api open reverse proxy.
 - Never store CF API tokens in runtime_settings / logs.
 - Real multi-base CF deploy still needs a CF account (code path ready; flags stay default-off).
-- BFF process-local base cooldown (~30s after 5xx/transport or admin probe hard fail) demotes sticky dead members within a process for API + image ordered lists; public image 302 stays sticky-only; multi-process still needs ops/probe.
+- BFF process-local base cooldown (~30s after 5xx/transport or admin probe hard fail) demotes sticky dead members within a process for API + image ordered lists; public image 302 stays sticky-only.
+- Multi-process pool membership: runtime overlay reloads from `runtime_settings` on ~5s TTL (`ensure_overlay_fresh` on egress) and force-refresh on admin `GET …/pool` + `POST …/probe`. Register/deploy on one BFF is visible on peers without restart; cooldown maps stay process-local.
+- Admin FE: Maintenance → **CF Worker 池（成员 + 探针）** shows merged members + egress policy + healthz probe (no CF token form).

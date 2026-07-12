@@ -65,6 +65,8 @@ Env CSV bases merge with runtime-registered bases (`cf_pool.api.base_urls` in `r
 
 Prod enable gate: `CF_API_PROXY_ENABLED` requires `CF_API_PROXY_SECRET` in prod; bases may be env CSV and/or runtime overlay after boot (env CSV alone is not required).
 
+**Multi-process overlay freshness:** process memory overlay is reloaded from `runtime_settings` on a short TTL (~5s) via `ensure_overlay_fresh` before CF candidate resolution (`iter_pixiv_api_egress`). Admin `GET …/pool` and `POST …/probe` force-refresh so peers see register/deploy without restart. Cooldown maps remain process-local.
+
 ## Security rules
 
 - No open `?url=` proxy
