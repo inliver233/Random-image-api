@@ -577,12 +577,25 @@ export function PlaygroundPage() {
                         form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
                       );
                       return (
-                        <Typography.Text type="secondary">
-                          代理链接:{" "}
-                          <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
-                            {openable}
-                          </Typography.Link>
-                        </Typography.Text>
+                        <Space direction="vertical" size="small" style={{ width: "100%" }}>
+                          <Typography.Text type="secondary">
+                            代理链接:{" "}
+                            <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
+                              {openable}
+                            </Typography.Link>
+                          </Typography.Text>
+                          <Space wrap>
+                            <Button size="small" onClick={async () => copyText(openable)}>
+                              复制代理链接
+                            </Button>
+                            <Button
+                              size="small"
+                              onClick={() => window.open(openable, "_blank", "noopener,noreferrer")}
+                            >
+                              打开代理链接
+                            </Button>
+                          </Space>
+                        </Space>
                       );
                     })()}
                     <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
@@ -596,22 +609,37 @@ export function PlaygroundPage() {
                   </>
                 ) : (
                   <>
-                    <Typography.Text>
-                      跳转地址:{" "}
-                      {(() => {
-                        if (!m.data.location) return "（未提供）";
-                        // Location may be /i/... or edge URL; browser open needs ?api_key= when required.
-                        const openable = withPublicApiKeyQuery(
-                          resolvePublicApiUrl(m.data.location),
-                          form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
-                        );
-                        return (
-                          <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
-                            {openable}
-                          </Typography.Link>
-                        );
-                      })()}
-                    </Typography.Text>
+                    {(() => {
+                      if (!m.data.location) {
+                        return <Typography.Text>跳转地址: （未提供）</Typography.Text>;
+                      }
+                      // Location may be /i/... or edge URL; browser open needs ?api_key= when required.
+                      const openable = withPublicApiKeyQuery(
+                        resolvePublicApiUrl(m.data.location),
+                        form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+                      );
+                      return (
+                        <Space direction="vertical" size="small" style={{ width: "100%" }}>
+                          <Typography.Text>
+                            跳转地址:{" "}
+                            <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
+                              {openable}
+                            </Typography.Link>
+                          </Typography.Text>
+                          <Space wrap>
+                            <Button size="small" onClick={async () => copyText(openable)}>
+                              复制跳转地址
+                            </Button>
+                            <Button
+                              size="small"
+                              onClick={() => window.open(openable, "_blank", "noopener,noreferrer")}
+                            >
+                              打开跳转地址
+                            </Button>
+                          </Space>
+                        </Space>
+                      );
+                    })()}
                     {m.data.note ? <Alert type="info" showIcon message={m.data.note} /> : null}
                   </>
                 )}

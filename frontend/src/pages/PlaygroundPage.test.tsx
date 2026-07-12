@@ -128,6 +128,14 @@ describe("PlaygroundPage", () => {
     });
     const copied = String(writeText.mock.calls[0]?.[0] || "");
     expect(copied).toContain("api_key=debug-public-key-1234567890");
+
+    writeText.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "复制代理链接" }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalled();
+    });
+    expect(String(writeText.mock.calls[0]?.[0] || "")).toContain("/i/1.jpg");
+    expect(String(writeText.mock.calls[0]?.[0] || "")).toContain("api_key=debug-public-key-1234567890");
   });
 
   it("shows NO_MATCH hints in image mode and keeps message Chinese", async () => {
@@ -192,5 +200,23 @@ describe("PlaygroundPage", () => {
     const locLink = await screen.findByRole("link", { name: /\/i\/9\.jpg.*api_key=debug-public-key-1234567890/ });
     expect(locLink.getAttribute("href") || "").toContain("/i/9.jpg");
     expect(locLink.getAttribute("href") || "").toContain("api_key=debug-public-key-1234567890");
+
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: { writeText },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "复制跳转地址" }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalled();
+    });
+    expect(String(writeText.mock.calls[0]?.[0] || "")).toContain("/i/9.jpg");
+    expect(String(writeText.mock.calls[0]?.[0] || "")).toContain("api_key=debug-public-key-1234567890");
+
+    const openSpy = vi.fn();
+    vi.stubGlobal("open", openSpy);
+    fireEvent.click(screen.getByRole("button", { name: "打开跳转地址" }));
+    expect(openSpy).toHaveBeenCalled();
+    expect(String(openSpy.mock.calls[0]?.[0] || "")).toContain("api_key=debug-public-key-1234567890");
   });
 });
