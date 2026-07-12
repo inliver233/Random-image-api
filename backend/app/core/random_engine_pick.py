@@ -667,14 +667,11 @@ async def pick_with_strategy(
         }
     elif skip_engine:
         # Sticky Python path after first dual-run attempt (/feed top-up, stream retry).
-        # Only count when dual-run is configured; default-off must not spam skipped_sticky
-        # on every feed top-up while RANDOM_ENGINE_ENABLED=0.
+        # Debug only — do not observe skipped_sticky per top-up item (N× spam under partial
+        # TRAFFIC_PERCENT / partial batch). Batch path already recorded the dual-run decision
+        # (ok / unavailable / skipped_traffic / circuit). Default-off stays silent.
         engine_configured = bool(getattr(settings, "random_engine_enabled", False)) and bool(engine_url)
         if engine_configured:
-            try:
-                observe_random_engine_pick(status="skipped_sticky")
-            except Exception:
-                pass
             debug_base = {
                 **debug_base,
                 "engine_status": "skipped_sticky",

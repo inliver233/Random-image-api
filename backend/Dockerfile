@@ -26,6 +26,10 @@ RUN mkdir -p /app/data /app/web
 COPY backend/app /app/app
 COPY backend/alembic.ini /app/alembic.ini
 COPY backend/alembic /app/alembic
+# Admin CF deploy (POST /admin/api/cf-workers/deploy) loads hardened Worker sources from edge/.
+# Only src modules are required (index.js + pure.js); keep image small.
+COPY edge/api-worker/src /app/edge/api-worker/src
+COPY edge/img-worker/src /app/edge/img-worker/src
 COPY --from=frontend-build /frontend/dist /app/web/dist
 
 EXPOSE 8000

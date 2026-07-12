@@ -215,9 +215,23 @@ class RandomPickContext:
         if settings is None or httpx_client is None:
             return [], None
         engine_url = random_engine_base_url(settings)
-        # Traffic roll is independent of pick seed (self.rng).
-        if not engine_url or not should_route_pick_to_engine(settings):
+        if not engine_url:
             return [], None
+        # Traffic roll is independent of pick seed (self.rng).
+        # One skipped_traffic metric for the batch decision (G1 ramp honesty). eng_meta is
+        # non-None so /feed sticky-skips dual-run on Python top-up (no N× TRAFFIC re-rolls).
+        if not should_route_pick_to_engine(settings):
+            try:
+                observe_random_engine_pick(status="skipped_traffic")
+            except Exception:
+                pass
+            return [], {
+                "engine": True,
+                "engine_url": engine_url,
+                "engine_status": "skipped_traffic",
+                "picked_by": "python",
+                "batch": True,
+            }
         if not engine_circuit_allow():
             try:
                 observe_random_engine_pick(status="skipped_circuit")

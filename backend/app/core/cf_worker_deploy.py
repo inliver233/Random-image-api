@@ -72,8 +72,39 @@ class CfWorkerDeployError(RuntimeError):
 
 
 def repo_root_from_backend() -> Path:
-    """backend/app/core → repo root."""
-    return Path(__file__).resolve().parents[3]
+    """Resolve monorepo root that contains ``edge/*/src`` worker scripts.
+
+    Layouts:
+    - Dev checkout: ``backend/app/core/this.py`` → parents[3] = repo root
+    - Docker image (``WORKDIR /app``, ``COPY backend/app /app/app``): parents[2] = ``/app``
+      with ``edge/**/src`` copied beside ``app/``
+    Override: ``EDGE_WORKER_ROOT`` or ``REPO_ROOT`` (absolute/relative dir).
+    """
+    import os
+
+    for key in ("EDGE_WORKER_ROOT", "REPO_ROOT"):
+        raw = (os.environ.get(key) or "").strip()
+        if not raw:
+            continue
+        p = Path(raw).expanduser().resolve()
+        if p.is_dir():
+            return p
+
+    here = Path(__file__).resolve()
+    candidates: list[Path] = []
+    # Prefer docker /app when edge scripts live there; else monorepo root.
+    if len(here.parents) > 2:
+        candidates.append(here.parents[2])
+    if len(here.parents) > 3:
+        candidates.append(here.parents[3])
+    for cand in candidates:
+        probe = cand / "edge" / "api-worker" / "src" / "index.js"
+        if probe.is_file():
+            return cand
+    # Historical fallback (dev monorepo even if edge missing — error surfaces on load).
+    if len(here.parents) > 3:
+        return here.parents[3]
+    return here.parents[2]
 
 
 def resolve_worker_script_path(kind: WorkerKind, *, root: Path | None = None) -> Path:

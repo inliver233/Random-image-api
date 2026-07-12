@@ -58,7 +58,9 @@ See [`engine-traffic-cutover.md`](./engine-traffic-cutover.md) for traffic% ramp
 - Never store CF API tokens in runtime_settings / logs.
 - Real multi-base CF deploy still needs a CF account (code path ready; flags stay default-off).
 - BFF process-local base cooldown (~30s after 5xx/transport or admin probe hard fail) demotes sticky dead members within a process for API + image ordered lists **and public sign/302** (prefer first hot ordered base).
-- Multi-process pool membership: runtime overlay reloads from `runtime_settings` on ~5s TTL (`ensure_overlay_fresh` / `ensure_image_edge_overlay_fresh` on feed + random JSON/stream + `/i`) and force-refresh on admin pool/probe/maintenance status. Register/deploy on one BFF is visible on peers without restart; cooldown maps stay process-local.
+- Multi-process pool membership: runtime overlay reloads from `runtime_settings` on ~5s TTL (`ensure_overlay_fresh` / `ensure_image_edge_overlay_fresh` on feed + random JSON/stream + `/i` **before** hydrate readiness) and force-refresh on admin pool/probe/maintenance status. Register/deploy on one BFF is visible on peers without restart; cooldown maps stay process-local.
+- Docker/Admin deploy: image copies `edge/*/src` (index.js + pure.js); root resolution prefers `EDGE_WORKER_ROOT`/`REPO_ROOT`, else first of parents[2] (`/app`) / parents[3] (monorepo) that contains edge scripts.
+- Engine G1 metrics: `/feed` batch traffic miss → one `skipped_traffic`; top-up sticky-skips dual-run without N× `skipped_sticky` counters.
 - Admin FE: Maintenance → **CF Worker 池（成员 + 探针）** shows merged members + egress policy + register/unregister form + healthz probe (no CF token form).
 - Emergency residential: FE force Switch or `POST /admin/api/cf-workers/egress-policy` `{"force_residential_emergency":true}` (process-local). Durable policy remains `RESIDENTIAL_EGRESS_EMERGENCY_ONLY` env.
 - Admin deploy does **not** attach R2 bucket bindings — use wrangler/dashboard for Mode B/B2 R2 (`r2_binding=false` in deploy response).

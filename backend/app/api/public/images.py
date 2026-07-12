@@ -12,7 +12,10 @@ from app.core.image_delivery import (
     normalize_image_ext,
     should_mark_image_ok,
 )
-from app.core.image_edge import load_image_edge_config_from_settings
+from app.core.image_edge import (
+    ensure_image_edge_overlay_fresh,
+    load_image_edge_config_from_settings,
+)
 from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.public_json import public_cursor_list_json, public_ok_json, serialize_public_image
 from app.core.public_list_filters import parse_public_list_filters
@@ -170,6 +173,9 @@ async def proxy_image(
         # Skip tag SQL when edge is ready and client prefers edge — edge 302 only needs
         # cheap opportunistic hydrate for metadata holes (tags checked only on local stream).
         settings = getattr(request.app.state, "settings", None)
+        # Multi-process: refresh runtime image pool before readiness/hydrate branch
+        # (deliver_* also refreshes before sign; this avoids false edge_ready=false).
+        await ensure_image_edge_overlay_fresh(engine)
         runtime = await resolve_runtime_for_request(request, engine)
         resolved = resolve_proxy_mirror(
             runtime=runtime,

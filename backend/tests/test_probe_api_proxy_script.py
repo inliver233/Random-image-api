@@ -59,3 +59,22 @@ def test_summarize_matrix_not_ready_on_health_fail() -> None:
     summary = probe.summarize_matrix(rows)
     assert summary["all_healthz_ok"] is False
     assert summary["ready_for_cf_api_proxy_flag"] is False
+
+
+def test_summarize_matrix_not_ready_when_secret_not_configured() -> None:
+    """healthz ok:true with empty PROXY_SECRET must block CF_API_PROXY_ENABLED cutover."""
+    probe = _load_probe()
+    rows = [
+        {
+            "healthz": {"service_ok": True, "secret_configured": False},
+            "proxy": {"pass": False},
+        },
+        {
+            "healthz": {"service_ok": True, "secret_configured": True},
+            "proxy": {"pass": True, "elapsed_ms": 12.0},
+        },
+    ]
+    summary = probe.summarize_matrix(rows)
+    assert summary["all_healthz_ok"] is True
+    assert summary["secret_configured_ok"] == 1
+    assert summary["ready_for_cf_api_proxy_flag"] is False

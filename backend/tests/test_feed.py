@@ -235,6 +235,92 @@ def test_feed_topup_skips_engine_after_batch(tmp_path: Path, monkeypatch) -> Non
     assert all(skip_flags), f"top-up must skip_engine=True, got {skip_flags}"
 
 
+def test_feed_traffic_miss_one_skipped_metric_and_sticky_topup(tmp_path: Path, monkeypatch) -> None:
+    """Partial TRAFFIC_PERCENT: one skipped_traffic for batch, top-up sticky-skips dual-run."""
+    clear_recent()
+    db_path = tmp_path / "feed_traffic.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("RANDOM_ENGINE_ENABLED", "true")
+    monkeypatch.setenv("RANDOM_ENGINE_BASE_URL", "http://engine.test")
+    monkeypatch.setenv("RANDOM_ENGINE_TRAFFIC_PERCENT", "0")
+
+    app = create_app()
+    observed: list[str] = []
+    skip_flags: list[bool] = []
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            for i in range(4):
+                session.add(
+                    Image(
+                        illust_id=400 + i,
+                        page_index=0,
+                        ext="jpg",
+                        original_url=f"https://example.test/traffic/{i}.jpg",
+                        proxy_path=f"/i/{i + 1}.jpg",
+                        # ck_images_random_key: must be in [0, 1)
+                        random_key=0.15 * (i + 1),
+                        x_restrict=0,
+                        status=1,
+                    )
+                )
+            await session.commit()
+        await app.state.engine.dispose()
+
+    asyncio.run(_seed())
+
+    def _observe(*, status: str, **_k):  # type: ignore[no-untyped-def]
+        observed.append(str(status))
+
+    async def _spy_pick_with_strategy(*_a, skip_engine: bool = False, **_k):  # type: ignore[no-untyped-def]
+        skip_flags.append(bool(skip_engine))
+        from app.core.random_engine_pick import pick_with_strategy as real
+
+        return await real(*_a, skip_engine=True, **_k)
+
+    # try_engine_batch imports observe from metrics at call time; pick path uses engine_pick binding.
+    monkeypatch.setattr("app.core.metrics.observe_random_engine_pick", _observe)
+    monkeypatch.setattr("app.core.random_engine_pick.observe_random_engine_pick", _observe)
+    monkeypatch.setattr(
+        "app.core.random_pick_context.pick_with_strategy",
+        _spy_pick_with_strategy,
+    )
+    monkeypatch.setattr(
+        "app.core.random_engine_client.should_route_pick_to_engine",
+        lambda _s: False,
+    )
+    monkeypatch.setattr(
+        "app.core.random_engine_client.random_engine_base_url",
+        lambda _s: "http://engine.test",
+    )
+
+    with TestClient(app) as client:
+        resp = client.get(
+            "/feed",
+            params={"limit": 3, "strategy": "random", "debug": "1"},
+            headers={"X-Request-Id": "req_feed_traffic"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["data"]["count"] == 3
+        dbg = body["data"]["debug"]
+        assert dbg["engine_status"] == "skipped_traffic"
+        assert dbg["topup_skip_engine"] is True
+        assert dbg["batch_count"] == 0
+        assert dbg["topup_count"] == 3
+
+    assert observed.count("skipped_traffic") == 1, observed
+    assert "skipped_sticky" not in observed
+    assert skip_flags and all(skip_flags), f"top-up must sticky-skip, got {skip_flags}"
+
+
 def test_feed_limit_validation_and_no_match(tmp_path: Path, monkeypatch) -> None:
     clear_recent()
     db_path = tmp_path / "feed_empty.db"

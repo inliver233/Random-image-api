@@ -181,10 +181,13 @@ async def feed_images(
             _append_item(image, items)
 
         # Python loop: full path when engine off/failed, or top-up when engine returned partial.
-        # After one engine batch attempt, top-up must not re-hit dual-run N times.
+        # Sticky-skip dual-run only after a *real* batch attempt (ok/unavailable/circuit/…).
+        # Traffic miss still returns eng_meta with skipped_traffic (one metric); top-up stays
+        # sticky-skip so we do not re-roll TRAFFIC_PERCENT N times per /feed. Dual-run off
+        # leaves eng_meta None → skip_engine_topup False but engine not configured (no spam).
         remaining = limit_i - len(items)
         if remaining > 0:
-            skip_engine_topup = True  # batch already tried (or dual-run off → no-op skip)
+            skip_engine_topup = isinstance(eng_meta, dict)
             for _ in range(remaining):
                 image, _debug = await pick_ctx.pick(
                     session=session,
@@ -216,12 +219,13 @@ async def feed_images(
                 status = raw_status.strip()
         debug_out = {
             "batch": True,
-            # None eng_meta ⇒ dual-run not routed (disabled / no URL / traffic miss).
+            # None eng_meta ⇒ dual-run not configured (disabled / no URL).
+            # Traffic miss returns eng_meta with engine_status=skipped_traffic.
             "engine_status": status or "skipped_not_routed",
             "batch_count": int(batch_count),
             "topup_count": int(topup_count),
-            # Feed always sticky-skips engine on Python top-up after one batch attempt.
-            "topup_skip_engine": True,
+            # Sticky top-up when batch returned any eng_meta (including skipped_traffic).
+            "topup_skip_engine": isinstance(eng_meta, dict),
         }
         if isinstance(eng_meta, dict):
             picked_by = eng_meta.get("picked_by")

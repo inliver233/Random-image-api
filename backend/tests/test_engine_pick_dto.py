@@ -199,8 +199,9 @@ def test_pick_with_strategy_skip_engine_bypasses_engine(monkeypatch) -> None:
         assert meta.get("picked_by") == "python"
         assert meta.get("engine_status") == "skipped_sticky"
         assert engine_calls == []
+        # sticky is debug-only: batch path already observed dual-run decision (no N× spam).
         assert "skipped_traffic" not in observed
-        assert observed.count("skipped_sticky") == 1
+        assert "skipped_sticky" not in observed
 
     asyncio.run(_run())
 

@@ -345,11 +345,12 @@ def resolve_image_edge_signed_candidates(
     original_url: str,
     now: int | None = None,
 ) -> list[str]:
-    """Ordered signed edge URLs: sticky base first, then remaining bases (deduped).
+    """Ordered signed edge URLs: sticky base first when healthy, cooling bases last.
 
     Empty when edge is not ready or ``original_url`` is not a pximg path.
-    Default public 302 / ``urls.proxy`` still use the sticky primary only; prefer this
-    when callers need multi-deploy diversity (ops probe, alternate URL lists).
+    Public 302 / ``urls.proxy`` use the first ordered (hot) base via
+    ``sign_image_edge_path`` / ``build_image_edge_url``; this helper returns the full
+    multi-base candidate list for ops/probe callers.
     """
     if settings is None:
         return []
@@ -392,8 +393,9 @@ def resolve_image_edge_redirect_url(
 ) -> str | None:
     """Return absolute signed edge URL for 302, or None to keep local stream/proxy.
 
-    Sticky multi-base only (same as ``build_image_edge_url``). For ordered multi-base
-    signed candidates see ``resolve_image_edge_signed_candidates``.
+    Uses ordered multi-base selection (sticky first when healthy; cooling demoted) via
+    ``build_image_edge_url`` / ``sign_image_edge_path``. For full candidate lists see
+    ``resolve_image_edge_signed_candidates``.
     Callers on multi-process BFFs should ``await ensure_image_edge_overlay_fresh(engine)`` first.
     """
     cfg = load_image_edge_config_from_settings(settings)
