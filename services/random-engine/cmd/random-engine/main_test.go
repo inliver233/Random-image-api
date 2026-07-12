@@ -478,3 +478,25 @@ func TestImageMultiplierMatchesQualityLogitGate(t *testing.T) {
 		t.Fatal("qualityLogit should skip zero mult")
 	}
 }
+
+func TestImageMultiplierUnknownAIType(t *testing.T) {
+	// Python: ai_type not in {0,1} → unknown_ai (not non_ai).
+	other := 2
+	im := indexImage{AIType: &other}
+	mults := map[string]float64{"ai": 0.5, "non_ai": 0.0, "unknown_ai": 1.25}
+	got := imageMultiplier(im, mults)
+	if math.Abs(got-1.25) > 1e-9 {
+		t.Fatalf("want unknown_ai 1.25, got %v", got)
+	}
+	zero := 0
+	one := 1
+	if math.Abs(imageMultiplier(indexImage{AIType: &zero}, mults)-0.0) > 1e-9 {
+		t.Fatal("non_ai should apply 0")
+	}
+	if math.Abs(imageMultiplier(indexImage{AIType: &one}, mults)-0.5) > 1e-9 {
+		t.Fatal("ai should apply 0.5")
+	}
+	if math.Abs(imageMultiplier(indexImage{}, mults)-1.25) > 1e-9 {
+		t.Fatal("nil AIType should be unknown_ai")
+	}
+}

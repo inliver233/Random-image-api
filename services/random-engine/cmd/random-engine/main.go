@@ -783,13 +783,17 @@ func filterByMultiplierAllow(cands []indexImage, multipliers map[string]float64)
 
 // imageMultiplier computes the product of AI + illust-type multipliers (defaults 1).
 func imageMultiplier(im indexImage, multipliers map[string]float64) float64 {
+	// Align Python multiplier_for_image: ai 1 / non_ai 0 / else unknown_ai;
+	// illust 0 / manga 1 / ugoira 2 / else unknown_illust_type.
 	mult := 1.0
 	if im.AIType == nil {
 		mult *= weightOr(multipliers, "unknown_ai", 1.0)
 	} else if *im.AIType == 1 {
 		mult *= weightOr(multipliers, "ai", 1.0)
-	} else {
+	} else if *im.AIType == 0 {
 		mult *= weightOr(multipliers, "non_ai", 1.0)
+	} else {
+		mult *= weightOr(multipliers, "unknown_ai", 1.0)
 	}
 	if im.IllustType == nil {
 		mult *= weightOr(multipliers, "unknown_illust_type", 1.0)
