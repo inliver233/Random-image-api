@@ -165,7 +165,7 @@ Backend note: pure edge **302** does **not** call `mark_image_ok` (bytes not ver
 | `resolve_image_edge_signed_candidates(settings, original_url)` | Signs once per ordered base; empty when edge not ready / non-pximg |
 | Public 302 / `urls.proxy` | Sticky primary only (clients cannot walk a candidate list on a single Location) |
 | `POST /admin/api/cf-workers/probe` (`kind=image\|all`) | Outbound `GET {base}/healthz` for image pool; `base_urls` override requires `kind=image` (not `all`); records image-edge base cooldown on hard fail; never enables `IMAGE_EDGE_ENABLED` |
-| Admin pool lifecycle | Shared with API: `register` / `unregister` (soft), `deploy` (default `enable_business=true` → runtime secret+enabled overlay OR env), optional `delete-script` (CF API hard delete; Token never stored). See `contracts/cf-api-proxy.md` runtime overlay table. |
+| Admin pool lifecycle | Shared with API: `register` / `unregister` (soft), `deploy` (**image default `enable_business=true`** → runtime secret+enabled overlay OR env; **api default `enable_business=false`** opt-in), optional `delete-script` (CF API hard delete; Token never stored). Public image path is the only surface that defaults to self-built CF. See `contracts/cf-api-proxy.md` runtime overlay table. |
 
 Prod enable gate: `IMAGE_EDGE_ENABLED` **or** runtime `cf_pool.image.enabled` requires secret for ready; bases may be env CSV and/or runtime overlay after boot (env CSV alone is not required).
 

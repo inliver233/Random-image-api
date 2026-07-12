@@ -1,13 +1,18 @@
 # CF API Proxy Port (Cloudflare Worker egress pool)
 
-Status: **Phase 5 — primary hydrate/OAuth egress (optional flag)**
+Status: **Phase 5 — optional hydrate/OAuth egress (not product default)**
+
+Product default split:
+
+- **Public image path** (`/random`, catalog image read, Image Edge): default **on** after image deploy — self-built img-worker only.
+- **Pixiv business API path** (OAuth refresh, hydrate, official metadata): default **does not depend on** CF API proxy. Deploy api-worker registers the pool; business enable is **opt-in** (`enable_business=true` or `CF_API_PROXY_ENABLED` / runtime `cf_pool.api.enabled`). Residential (or direct egress plan) remains the normal path until ops enables CF API.
 
 Implementation:
 
 - Worker: `edge/api-worker`
 - Python client: `backend/app/core/cf_api_proxy.py`
-- Egress plan (CF-first + residential): `backend/app/core/proxy_selector.py` → `iter_pixiv_api_egress`
-- Wiring: hydrate OAuth refresh + illust detail use the shared plan; residential proxy pool is fallback
+- Egress plan (CF-first when ready + residential last-resort): `backend/app/core/proxy_selector.py` → `iter_pixiv_api_egress`
+- Wiring: hydrate OAuth refresh + illust detail use the shared plan; when CF API not ready, residential-only
 
 ## URL
 
@@ -60,7 +65,7 @@ Env CSV bases merge with runtime-registered bases (`cf_pool.api.base_urls` in `r
 | `GET /admin/api/cf-workers/pool` | env + runtime + merged members + egress policy + process-local `base_cooldown` |
 | `POST /admin/api/cf-workers/register` | add runtime base (`kind=api\|image`, `base_url`) |
 | `POST /admin/api/cf-workers/unregister` | remove runtime base only (does **not** delete CF script; env bases untouched) |
-| `POST /admin/api/cf-workers/deploy` | CF API upload of **hardened** `edge/api-worker` or `edge/img-worker`, enable workers.dev, auto-register (default), **default `enable_business=true`** writes runtime secret + enabled overlay (OR with env); never stores CF API token; advanced `enable_business=false` = deploy-only |
+| `POST /admin/api/cf-workers/deploy` | CF API upload of **hardened** `edge/api-worker` or `edge/img-worker`, enable workers.dev, auto-register (default). **Kind-split defaults:** `kind=image` → `enable_business=true` (public Image Edge); `kind=api` → `enable_business=false` (API path opt-in). Explicit body overrides. When enabled, writes runtime secret + enabled overlay (OR with env). Never stores CF API token. |
 | `POST /admin/api/cf-workers/delete-script` | optional hard teardown: CF API DELETE worker script; Token never stored; optional `unregister_pool` when `kind`+`base_url` provided |
 | `POST /admin/api/cf-workers/probe` | outbound `GET {base}/healthz` for merged pool (or body `base_urls`); optional `kind=api\|image\|all` (default all), `timeout_s`; `base_urls` override requires `kind=api` or `kind=image` (not `all`); records process-local base cooldown on hard fail — **never** flips enable flags |
 | `GET /admin/api/cf-workers/egress-policy` | residential emergency-only + process-local `force_residential_emergency` |

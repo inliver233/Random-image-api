@@ -655,10 +655,10 @@ export function MaintenancePage() {
             children: (
               <>
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          日常部署请用侧栏 <Typography.Text strong>CF Worker</Typography.Text> 页（一点部署 + 默认启用业务）。
+          日常部署请用侧栏 <Typography.Text strong>CF Worker</Typography.Text> 页（出图默认启用业务；API 默认仅入池）。
           本折叠为高级：env/runtime 成员、探针 GET{" "}
           <Typography.Text code>{"{base}/healthz"}</Typography.Text>
-          （失败进程内指数冷却，成功清零）。Deploy 默认会 runtime 启用业务（OR 环境变量 flag）。
+          （失败进程内指数冷却，成功清零）。Image Edge 默认 runtime 启用；CF API 业务需显式开启（OR 环境变量 flag）。
         </Typography.Paragraph>
 
         <ActionAlerts

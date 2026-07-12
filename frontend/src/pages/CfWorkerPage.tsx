@@ -94,9 +94,9 @@ type ProbeResponse = {
 const USAGE_STEPS = [
   "创建具有 Workers 编辑权限的 CF API 令牌",
   "填写账户 ID 与 Worker 名称（出图建议 -img 后缀、API 建议 -api；image/api 禁止同名以免互相覆盖）",
-  "选择类型：API 出口 或 出图边缘，点击部署",
+  "选择类型：出图边缘（默认启用业务）或 API 出口（默认仅入池、不启用业务），点击部署",
   "成功后自动加入本系统对应出口池，无需手写 BASE_URLS",
-  "补全/Token 走 api-worker；用户出图默认本域 200，字节上游经 img-worker 反代 i.pximg.net（非住宅；redirect=1 才 302 到 workers.dev）",
+  "公开出图默认本域 200，字节上游经自建 img-worker 反代 i.pximg.net（redirect=1 才 302）；Pixiv OAuth/hydrate 默认不依赖 CF API 反代，需要时再勾选「部署后启用业务」",
   "多 Worker 名 = 多出口节点；「注销」仅摘本系统池、不需 Token；「删除脚本」走 CF API 硬删 Worker，须重填 API Token + 账户 ID（Token 不落库）",
 ];
 
@@ -179,7 +179,7 @@ export function CfWorkerPage() {
           account_id: values.account_id,
           worker_name: values.worker_name,
           register: values.register !== false,
-          enable_business: values.enable_business !== false,
+          enable_business: Boolean(values.enable_business),
           proxy_secret: values.kind === "api" ? values.proxy_secret || undefined : undefined,
           image_edge_secret:
             values.kind === "image" ? values.image_edge_secret || undefined : undefined,
@@ -436,9 +436,9 @@ export function CfWorkerPage() {
         CF Worker
       </Typography.Title>
       <Typography.Paragraph type="secondary">
-        一页部署本仓硬化 Cloudflare Worker：API 出口（hydrate/Token）与出图边缘（img-worker →{" "}
+        一页部署本仓硬化 Cloudflare Worker：出图边缘（img-worker →{" "}
         <Typography.Text code>i.pximg.net</Typography.Text>
-        ）。成功后默认自动入池并启用业务语义；CF API Token 不落库。
+        ，公开出图默认启用）与 API 出口（hydrate/Token，默认仅入池、不启用业务）。CF API Token 不落库。
       </Typography.Paragraph>
 
       <ActionAlerts
@@ -479,8 +479,12 @@ export function CfWorkerPage() {
             <Select
               options={[
                 { value: "image", label: "出图边缘 (img-worker → i.pximg.net)" },
-                { value: "api", label: "API 出口 (hydrate / Token)" },
+                { value: "api", label: "API 出口 (hydrate / Token，可选)" },
               ]}
+              onChange={(value) => {
+                // Product default: image on, api off (ops can still flip the switch).
+                form.setFieldsValue({ enable_business: value === "image" });
+              }}
             />
           </Form.Item>
           <Form.Item
@@ -547,8 +551,17 @@ export function CfWorkerPage() {
               <Input.Password autoComplete="off" placeholder="与 BFF 共享的 HMAC 密钥" />
             </Form.Item>
           )}
-          <Form.Item name="enable_business" label="部署后启用业务" valuePropName="checked">
-            <Switch checkedChildren="启用" unCheckedChildren="仅部署" />
+          <Form.Item
+            name="enable_business"
+            label="部署后启用业务"
+            valuePropName="checked"
+            extra={
+              kind === "api"
+                ? "API 默认关闭：OAuth/hydrate 不依赖 CF API 反代；需要时再打开"
+                : "出图默认开启：公开 /random 与入库读图走自建 Image Edge"
+            }
+          >
+            <Switch checkedChildren="启用" unCheckedChildren="仅入池" />
           </Form.Item>
           <Form.Item name="register" label="注册进出口池" valuePropName="checked" hidden>
             <Switch />

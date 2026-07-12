@@ -206,9 +206,11 @@ async def cf_workers_pool(
             },
             "egress_policy": policy,
             "note": (
-                "Deploy (default enable_business=true) auto-registers + enables runtime business "
-                "flags (OR with env CF_API_PROXY_ENABLED / IMAGE_EDGE_ENABLED). "
-                "Secrets never returned here. Residential is emergency-only when CF ready "
+                "Deploy defaults split by kind: image enable_business=true (public Image Edge); "
+                "api enable_business=false (Pixiv OAuth/hydrate does not depend on CF API by default). "
+                "Explicit enable_business overrides. Runtime flags OR env "
+                "CF_API_PROXY_ENABLED / IMAGE_EDGE_ENABLED. Secrets never returned here. "
+                "Residential is emergency-only when CF ready "
                 "(RESIDENTIAL_EGRESS_EMERGENCY_ONLY, default true). "
                 "base_cooldown is process-local exponential demotion (base 30s, cap 300s); "
                 "not shared across multi-replica."
@@ -415,13 +417,15 @@ async def cf_workers_delete_script(
     "/cf-workers/deploy",
     summary="Deploy CF Worker via Cloudflare API and register into pool",
     description=(
-        "ds2api-style one-shot deploy: upload **this repo's** hardened Worker script "
-        "(api-worker or img-worker), enable workers.dev, register base into runtime pool, "
-        "and **default-enable** business egress (runtime flag OR env). "
+        "One-shot deploy: upload **this repo's** hardened Worker script "
+        "(api-worker or img-worker), enable workers.dev, register base into runtime pool. "
+        "**Default enable_business is kind-split:** "
+        "image → true (public Image Edge / /random bytes via self-built img-worker); "
+        "api → false (Pixiv OAuth/hydrate/metadata default does **not** depend on CF API proxy; "
+        "set enable_business=true to opt in). "
         "Requires api_token, account_id, worker_name, kind. "
         "api: proxy_secret (or uses CF_API_PROXY_SECRET). "
         "image: image_edge_secret (or uses IMAGE_EDGE_SECRET). "
-        "Body enable_business=false for deploy-only (advanced). "
         "Never stores CF API token. Does **not** copy ds2api open whole-site proxy script."
     ),
 )
@@ -439,9 +443,11 @@ async def cf_workers_deploy(
     account_id = parse_required_str(data.get("account_id"), field="account_id", max_len=64)
     worker_name = parse_required_str(data.get("worker_name"), field="worker_name", max_len=63)
     register = parse_bool(data.get("register"), default=True)
-    # Living spec: deploy success → default enable business ready semantics.
-    # Advanced: enable_business=false for "deploy only" (old conservative path).
-    enable_business = parse_bool(data.get("enable_business"), default=True)
+    # Product default split (goal):
+    # - Public image path: default enable self-built CF image edge after deploy.
+    # - Pixiv business API path: default do NOT enable CF API proxy (opt-in).
+    default_enable_business = kind == "image"
+    enable_business = parse_bool(data.get("enable_business"), default=default_enable_business)
 
     settings = _settings(request)
     # Reuse env secret, then process overlay, else generate once (returned only in this response).
@@ -597,9 +603,10 @@ async def cf_workers_deploy(
         "r2_binding": bool(getattr(result, "r2_binding", False)),
         "r2_note": str(getattr(result, "r2_note", "") or ""),
         "cutover_hint": (
-            "默认已自动 register + enable 业务语义；可直接探针 healthz。"
+            "出图 (image)：默认 register + enable Image Edge（公开 /random、入库读图）。"
+            " API (api)：默认只 register、不 enable 业务（OAuth/hydrate 不依赖 CF API；"
+            " 需要时 enable_business=true 或 CF_API_PROXY_ENABLED）。"
             " 若 secret_generated=true，请立即保存 generated_secret（仅此响应回显一次）。"
-            " 高级：enable_business=false 仅上传脚本。"
             " 出图主路径：img-worker → i.pximg.net。"
         ),
     }

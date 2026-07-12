@@ -73,7 +73,8 @@ def test_cf_workers_pool_and_register(tmp_path: Path, monkeypatch) -> None:
     reset_overlay_for_tests()
 
 
-def test_cf_workers_deploy_registers_without_leaking_token(tmp_path: Path, monkeypatch) -> None:
+def test_cf_workers_deploy_api_default_does_not_enable_business(tmp_path: Path, monkeypatch) -> None:
+    """API deploy defaults enable_business=false (Pixiv API path does not depend on CF)."""
     result = CfWorkerDeployResult(
         kind="api",
         worker_name="ria-api-a",
@@ -82,7 +83,7 @@ def test_cf_workers_deploy_registers_without_leaking_token(tmp_path: Path, monke
         secrets_set=["PROXY_SECRET"],
         deployed=True,
     )
-    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_deploy")
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_deploy_api_default")
     token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
     with TestClient(app) as client:
         headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
@@ -100,6 +101,7 @@ def test_cf_workers_deploy_registers_without_leaking_token(tmp_path: Path, monke
                     "account_id": "0123456789abcdef0123456789abcdef",
                     "worker_name": "ria-api-a",
                     "proxy_secret": "proxy-secret-value",
+                    # no enable_business → api default false
                 },
             )
             assert resp.status_code == 200
@@ -107,9 +109,8 @@ def test_cf_workers_deploy_registers_without_leaking_token(tmp_path: Path, monke
             assert body["deployed"] is True
             assert body["base_url"] == "https://ria-api-a.acct.workers.dev"
             assert body["registered"] is True
-            # Living spec: deploy defaults to auto-enable business egress.
-            assert body["business_enabled"] is True
-            assert body["ready"] is True
+            assert body["business_enabled"] is False
+            assert body["ready"] is False
             assert "PROXY_SECRET" in body["secrets_set"]
             assert "message" in body and body["message"]
             raw = resp.text
@@ -117,15 +118,114 @@ def test_cf_workers_deploy_registers_without_leaking_token(tmp_path: Path, monke
             assert "proxy-secret-value" not in raw
             deploy.assert_awaited_once()
 
-            # Pool + maintenance status should reflect runtime enable without env flag.
+            pool = client.get("/admin/api/cf-workers/pool", headers=headers).json()
+            assert pool["api"]["runtime_enabled"] is False
+            assert "https://ria-api-a.acct.workers.dev" in pool["api"]["merged_base_urls"]
+            status = client.get("/admin/api/maintenance/cf-api-proxy", headers=headers).json()
+            assert status["enabled_flag"] is False
+            assert status["runtime_enabled_flag"] is False
+            assert status["ready"] is False
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_deploy_api_opt_in_enable_business(tmp_path: Path, monkeypatch) -> None:
+    """API path can still enable CF proxy when ops sets enable_business=true."""
+    result = CfWorkerDeployResult(
+        kind="api",
+        worker_name="ria-api-on",
+        worker_host="ria-api-on.acct.workers.dev",
+        base_url="https://ria-api-on.acct.workers.dev",
+        secrets_set=["PROXY_SECRET"],
+        deployed=True,
+    )
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_deploy_api_opt_in")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        with patch(
+            "app.api.admin.cf_workers.deploy_cf_worker",
+            new_callable=AsyncMock,
+            return_value=result,
+        ) as deploy:
+            resp = client.post(
+                "/admin/api/cf-workers/deploy",
+                headers=headers,
+                json={
+                    "kind": "api",
+                    "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
+                    "account_id": "0123456789abcdef0123456789abcdef",
+                    "worker_name": "ria-api-on",
+                    "proxy_secret": "proxy-secret-value",
+                    "enable_business": True,
+                },
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["deployed"] is True
+            assert body["registered"] is True
+            assert body["business_enabled"] is True
+            assert body["ready"] is True
+            raw = resp.text
+            assert "cf-token-abcdefghijklmnopqrstuvwxyz" not in raw
+            assert "proxy-secret-value" not in raw
+            deploy.assert_awaited_once()
+
             pool = client.get("/admin/api/cf-workers/pool", headers=headers).json()
             assert pool["api"]["runtime_enabled"] is True
-            assert "https://ria-api-a.acct.workers.dev" in pool["api"]["merged_base_urls"]
             status = client.get("/admin/api/maintenance/cf-api-proxy", headers=headers).json()
             assert status["enabled_flag"] is True
             assert status["runtime_enabled_flag"] is True
             assert status["ready"] is True
             assert status["has_secret"] is True
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_deploy_image_default_enables_business(tmp_path: Path, monkeypatch) -> None:
+    """Image deploy defaults enable_business=true (public Image Edge)."""
+    result = CfWorkerDeployResult(
+        kind="image",
+        worker_name="ria-img-a",
+        worker_host="ria-img-a.acct.workers.dev",
+        base_url="https://ria-img-a.acct.workers.dev",
+        secrets_set=["IMAGE_EDGE_SECRET"],
+        deployed=True,
+    )
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_deploy_image_default")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        with patch(
+            "app.api.admin.cf_workers.deploy_cf_worker",
+            new_callable=AsyncMock,
+            return_value=result,
+        ) as deploy:
+            resp = client.post(
+                "/admin/api/cf-workers/deploy",
+                headers=headers,
+                json={
+                    "kind": "image",
+                    "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
+                    "account_id": "0123456789abcdef0123456789abcdef",
+                    "worker_name": "ria-img-a",
+                    "image_edge_secret": "image-edge-secret-value",
+                    # no enable_business → image default true
+                },
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["deployed"] is True
+            assert body["registered"] is True
+            assert body["business_enabled"] is True
+            assert body["ready"] is True
+            assert "IMAGE_EDGE_SECRET" in body["secrets_set"]
+            raw = resp.text
+            assert "cf-token-abcdefghijklmnopqrstuvwxyz" not in raw
+            assert "image-edge-secret-value" not in raw
+            deploy.assert_awaited_once()
+
+            pool = client.get("/admin/api/cf-workers/pool", headers=headers).json()
+            assert pool["image"]["runtime_enabled"] is True
+            assert "https://ria-img-a.acct.workers.dev" in pool["image"]["merged_base_urls"]
     reset_overlay_for_tests()
 
 
@@ -155,6 +255,7 @@ def test_cf_workers_deploy_auto_generates_secret_once(tmp_path: Path, monkeypatc
                     "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
                     "account_id": "0123456789abcdef0123456789abcdef",
                     "worker_name": "ria-api-gen",
+                    "enable_business": True,
                     # no proxy_secret → auto-generate
                 },
             )
@@ -177,16 +278,16 @@ def test_cf_workers_deploy_auto_generates_secret_once(tmp_path: Path, monkeypatc
     reset_overlay_for_tests()
 
 
-def test_cf_workers_deploy_enable_business_false_skips_enable(tmp_path: Path, monkeypatch) -> None:
+def test_cf_workers_deploy_image_enable_business_false_skips_enable(tmp_path: Path, monkeypatch) -> None:
     result = CfWorkerDeployResult(
-        kind="api",
-        worker_name="ria-api-off",
-        worker_host="ria-api-off.acct.workers.dev",
-        base_url="https://ria-api-off.acct.workers.dev",
-        secrets_set=["PROXY_SECRET"],
+        kind="image",
+        worker_name="ria-img-off",
+        worker_host="ria-img-off.acct.workers.dev",
+        base_url="https://ria-img-off.acct.workers.dev",
+        secrets_set=["IMAGE_EDGE_SECRET"],
         deployed=True,
     )
-    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_deploy_no_enable")
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_deploy_image_no_enable")
     token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
     with TestClient(app) as client:
         headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
@@ -199,11 +300,11 @@ def test_cf_workers_deploy_enable_business_false_skips_enable(tmp_path: Path, mo
                 "/admin/api/cf-workers/deploy",
                 headers=headers,
                 json={
-                    "kind": "api",
+                    "kind": "image",
                     "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
                     "account_id": "0123456789abcdef0123456789abcdef",
-                    "worker_name": "ria-api-off",
-                    "proxy_secret": "proxy-secret-value",
+                    "worker_name": "ria-img-off",
+                    "image_edge_secret": "image-edge-secret-value",
                     "enable_business": False,
                 },
             )
@@ -213,8 +314,8 @@ def test_cf_workers_deploy_enable_business_false_skips_enable(tmp_path: Path, mo
             assert body["registered"] is True
             assert body["business_enabled"] is False
             pool = client.get("/admin/api/cf-workers/pool", headers=headers).json()
-            assert pool["api"]["runtime_enabled"] is False
-            assert "https://ria-api-off.acct.workers.dev" in pool["api"]["merged_base_urls"]
+            assert pool["image"]["runtime_enabled"] is False
+            assert "https://ria-img-off.acct.workers.dev" in pool["image"]["merged_base_urls"]
     reset_overlay_for_tests()
 
 

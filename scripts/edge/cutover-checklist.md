@@ -1,12 +1,16 @@
 # CF Worker pool cutover checklist
 
-Ops-only. **Default path (Admin FE / deploy API):** one-page deploy → auto register + persist secret + **auto-enable business** (`cf_pool.*.enabled` runtime overlay, OR with env flags). Advanced: set `enable_business=false` to upload script only without flipping business semantics.
+Ops-only. **Default path (Admin FE / deploy API) is kind-split:**
+
+- **image:** one-page deploy → auto register + persist secret + **auto-enable** Image Edge (`cf_pool.image.enabled`, OR env).
+- **api:** one-page deploy → auto register (+ secret for Worker upload) but **does not enable** CF API business by default. Pixiv OAuth/hydrate does not depend on CF API until opt-in (`enable_business=true` / `CF_API_PROXY_ENABLED` / runtime enable).
 
 ## Goals
 
-- Hydrate / OAuth / illust detail: `via_cf` ≫ residential
-- Public images: `edge_redirect` ≫ `local_stream_residential`
-- Residential: emergency-only when CF ready (`RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true`, default)
+- Public images: same-origin **edge_stream** (H0) when Image Edge ready; `redirect=1` only for edge_redirect
+- Pixiv business API: residential (or direct plan) by default; CF API proxy **optional** when ops enables it
+- When CF API **is** ready: CF-first then residential last-resort (TOKEN-2)
+- Residential: emergency-only happy path when CF/image ready (`RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true`, default)
 - Origin for img-worker: **`i.pximg.net`** (not open whole-site proxy)
 - Multi-base: sticky pick + process-local **exponential** cooldown on failed bases (API + image pools; base 30s × 2^(streak-1), cap 300s). Inspect via `GET /admin/api/cf-workers/pool` → `base_cooldown`
 - Cold catalog (mostly `x_restrict` NULL): set `default_r18_strict=false` or hydrate before expecting default `/random` (see `scripts/legacy/legacy-migrate-checklist.md`)
@@ -14,18 +18,19 @@ Ops-only. **Default path (Admin FE / deploy API):** one-page deploy → auto reg
 ## Product path (recommended)
 
 1. Admin → **CF Worker** page (`/admin/cf-worker`)
-2. Fill CF API token + account_id + worker_name; kind = `image` or `api`
-3. Leave secrets empty unless rotating — deploy reuses env/runtime or **auto-generates** once (`generated_secret` in response only)
-4. Keep **部署后启用业务** on (default) → register + runtime enable without process restart
-5. Probe healthz; accept ready tags on pool status
-6. Residential stays emergency-only; Proxies page is legacy/emergency only
-7. Teardown: runtime **注销** = leave CF script; **删除脚本** = CF API DELETE (needs Token again; never stored) + optional pool unregister
+2. Prefer deploy **kind=image** first (public delivery)
+3. Fill CF API token + account_id + worker_name; leave secrets empty unless rotating — deploy reuses env/runtime or **auto-generates** once (`generated_secret` in response only)
+4. **出图:** leave **部署后启用业务** on (default) → register + runtime Image Edge without restart
+5. **API:** leave **部署后启用业务** off (default) unless you intentionally want CF API egress; then probe + enable
+6. Probe healthz; accept ready tags on pool status for the pools you enabled
+7. Proxies page is legacy/emergency only for image origin; API may still use residential when CF API off
+8. Teardown: runtime **注销** = leave CF script; **删除脚本** = CF API DELETE (needs Token again; never stored) + optional pool unregister
 
-## API egress pool (`edge/api-worker`) — advanced / env
+## API egress pool (`edge/api-worker`) — opt-in / env
 
-1. Deploy ≥2 bases (wrangler or Admin):
+1. Deploy ≥1–2 bases (wrangler or Admin):
    - `.\scripts\edge\deploy-api-worker.ps1 -Name ria-api-a`
-   - Or `POST /admin/api/cf-workers/deploy` with CF API token (default `enable_business=true`)
+   - Or `POST /admin/api/cf-workers/deploy` with CF API token (**default `enable_business=false`** for kind=api)
 2. Probe matrix:
    ```text
    python scripts/edge/probe-api-proxy.py --bases https://a,https://b --secret $SECRET --healthz --proxy-path --out api-proxy-matrix.json
@@ -38,8 +43,8 @@ Ops-only. **Default path (Admin FE / deploy API):** one-page deploy → auto reg
    - Env: `CF_API_PROXY_BASE_URLS` + `CF_API_PROXY_SECRET` + optional `CF_API_PROXY_ENABLED=true`
    - And/or Admin register / deploy (runtime overlay `cf_pool.api.*`)
 4. Inspect: `GET /admin/api/cf-workers/pool`, `GET /admin/api/maintenance/cf-api-proxy`
-5. Enable (if not already via deploy): env `CF_API_PROXY_ENABLED=true` **or** runtime `cf_pool.api.enabled`
-6. Accept: `new_pixiv_pixiv_api_egress_total{via="cf"}` dominates
+5. **Enable (opt-in):** env `CF_API_PROXY_ENABLED=true` **or** deploy with `enable_business=true` **or** runtime `cf_pool.api.enabled`
+6. Accept when enabled: `new_pixiv_pixiv_api_egress_total{via="cf"}` dominates happy path
 7. Rollback:
    - Soft: env false + clear runtime enable / Admin CF Worker 页「注销」或 `POST …/unregister`（不删 CF 脚本）
    - Hard (optional): form Token+Account →「删除脚本」或 `POST …/delete-script`（CF API DELETE；Token 不落库；可 `unregister_pool`）

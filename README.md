@@ -88,11 +88,11 @@
 | 目录/任务库 | SQLite（`DATABASE_URL` 默认） | **Postgres**（`postgresql+asyncpg://…`）+ 终端 jobs 清理 |
 | 共享限流/去重 | 进程内存 | **Redis**（多实例时） |
 | 热选图 | Python pick | **Go Random Engine** 双跑切流 |
-| 出图字节 | 本地 `/i` 兼容 | **CF img-worker → i.pximg.net**（HMAC 签名 URL） |
-| 补全/OAuth 出口 | 住宅应急 | **CF api-worker** 池 |
-| 住宅/EasyProxies | 可用 | **仅应急**（`RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true`） |
+| 出图字节 | 本地 `/i` 兼容 | **CF img-worker → i.pximg.net**（公开出图默认；本域 200 + 上游 CF） |
+| 补全/OAuth 出口 | 住宅 / 直连计划 | **可选** CF api-worker 池（默认不依赖；需 ops 启用） |
+| 住宅/EasyProxies | 可用 | 出图在 Image Edge ready 时 **仅应急**；API 在未启用 CF API 时仍可用 |
 
-Admin → **CF Worker** 一页部署默认：register + secret + 启用业务语义（runtime overlay，无需手改 env 重启）。
+Admin → **CF Worker** 一页部署默认按类型拆分：出图 `enable_business=true`（register + Image Edge）；API `enable_business=false`（register only，OAuth/hydrate 不默认走 CF API）。
 
 旧生产接管（F3）：`scripts/legacy/legacy-migrate-checklist.md` + `scripts/legacy/migrate_legacy_catalog.py`（SQLite 拷贝 / CSV / PG 流 / token 加密导入）。冷库 `x_restrict` 多为 NULL 时先关 `default_r18_strict` 或 hydrate。
 
