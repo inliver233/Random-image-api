@@ -26,7 +26,8 @@ from app.core.proxy_selector import iter_pixiv_api_egress
 from app.core.r2_prewarm import maybe_enqueue_r2_prewarm
 from app.core.random_engine_sync import maybe_publish_engine_upserts
 from app.core.redact import redact_text
-from app.core.runtime_settings import RuntimeConfig, load_runtime_config
+from app.core.runtime_config_cache import get_cached_runtime_config
+from app.core.runtime_settings import RuntimeConfig
 from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
 from app.db.catalog import CatalogStore, build_catalog_store
@@ -1046,7 +1047,8 @@ LIMIT 1;
     async def _hydrate_single_illust(*, illust_id: int, source_import_id: int | None) -> None:
         now_dt = datetime.now(timezone.utc)
         now_epoch = float(time.time())
-        runtime = await load_runtime_config(engine)
+        # TTL cache: collapses full runtime_settings reads under hydrate bursts.
+        runtime = await get_cached_runtime_config(engine)
 
         tried: set[int] = set()
         last_exc: BaseException | None = None

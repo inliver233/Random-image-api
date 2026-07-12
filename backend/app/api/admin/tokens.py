@@ -22,7 +22,7 @@ from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.errors import ApiError, ErrorCode
 from app.core.proxy_selector import iter_pixiv_api_egress
 from app.core.request_id import get_or_create_request_id
-from app.core.runtime_settings import load_runtime_config
+from app.core.runtime_config_cache import get_cached_runtime_config
 from app.core.time import iso_utc_ms
 from app.db.models.pixiv_tokens import PixivToken
 from app.db.models.token_proxy_bindings import TokenProxyBinding
@@ -283,7 +283,7 @@ async def test_refresh_token(
         token = None
 
         try:
-            runtime = await load_runtime_config(engine)
+            runtime = await get_cached_runtime_config(engine)
             oauth_url = config.base_url.rstrip("/") + OAUTH_TOKEN_PATH
             last_exc: BaseException | None = None
             # CF multi-base first, then residential (same plan as hydrate).
