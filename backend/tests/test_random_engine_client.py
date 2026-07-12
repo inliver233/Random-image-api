@@ -160,29 +160,17 @@ def test_build_engine_filters_safe_defaults() -> None:
 
 
 class _PickCtx:
-    def __init__(
-        self,
-        *,
-        anti_repeat: bool,
-        recent: list[int],
-        dedup_strict: bool = False,
-    ) -> None:
+    def __init__(self, *, anti_repeat: bool, recent: list[int]) -> None:
         self.anti_repeat_enabled = anti_repeat
         self.recent_exclude_image_ids = recent
-        self.dedup_strict = dedup_strict
 
 
 def test_merge_engine_exclude_ids_unions_recent_when_anti_repeat() -> None:
-    # Strict: hard-exclude recent ids (Python SQL exclude path).
-    ctx = _PickCtx(anti_repeat=True, recent=[10, 20, 10], dedup_strict=True)
+    # Align Python first-draw SQL exclude (independent of dedup_strict).
+    ctx = _PickCtx(anti_repeat=True, recent=[10, 20, 10])
     out = merge_engine_exclude_ids(pick_ctx=ctx, exclude_image_ids=[20, 30])
     assert out == {10, 20, 30}
 
-    # Non-strict: soft penalties only — do not hard-merge recent into engine filters.
-    ctx_soft = _PickCtx(anti_repeat=True, recent=[10, 20], dedup_strict=False)
-    out_soft = merge_engine_exclude_ids(pick_ctx=ctx_soft, exclude_image_ids=[20, 30])
-    assert out_soft == {20, 30}
-
-    ctx_off = _PickCtx(anti_repeat=False, recent=[10], dedup_strict=True)
+    ctx_off = _PickCtx(anti_repeat=False, recent=[10])
     out_off = merge_engine_exclude_ids(pick_ctx=ctx_off, exclude_image_ids=[5])
     assert out_off == {5}

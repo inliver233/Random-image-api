@@ -160,21 +160,17 @@ def merge_engine_exclude_ids(
     pick_ctx: Any,
     exclude_image_ids: list[int] | set[int] | None = None,
 ) -> set[int]:
-    """Union caller excludes with anti-repeat recent ids when hard-exclude is required.
+    """Union caller excludes with anti-repeat recent ids (SQL cap list on the plan).
 
-    Python non-strict anti-repeat only soft-penalizes recent images/authors and can
-    re-sample without the SQL exclude list when the first draw is empty. Hard-merge
-    recent ids into engine filters only when ``dedup_strict`` is true so dual-run
-    sampling matches; soft penalties travel via quality.recent_* instead.
+    Matches Python's first quality/random draw: recent images are hard-excluded via
+    SQL NOT IN. Soft logit penalties (quality.recent_*) still apply for authors and
+    for image ids beyond RECENT_EXCLUDE_SQL_CAP. Non-strict re-sample without excludes
+    is a rare empty-draw fallback on Python only — dual-run keeps the primary path.
     """
     out: set[int] = set(int(x) for x in (exclude_image_ids or []))
-    if not bool(getattr(pick_ctx, "anti_repeat_enabled", False)):
-        return out
-    # Default False matches Python non-strict (soft path) when attr is missing.
-    if not bool(getattr(pick_ctx, "dedup_strict", False)):
-        return out
-    recent = getattr(pick_ctx, "recent_exclude_image_ids", None) or []
-    out.update(int(x) for x in recent)
+    if bool(getattr(pick_ctx, "anti_repeat_enabled", False)):
+        recent = getattr(pick_ctx, "recent_exclude_image_ids", None) or []
+        out.update(int(x) for x in recent)
     return out
 
 
