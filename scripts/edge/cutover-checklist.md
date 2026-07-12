@@ -49,3 +49,4 @@ See [`engine-traffic-cutover.md`](./engine-traffic-cutover.md) for traffic% ramp
 - Admin deploy uses **this repo’s** workers only — not ds2api open reverse proxy.
 - Never store CF API tokens in runtime_settings / logs.
 - Real multi-base CF deploy still needs a CF account (code path ready; flags stay default-off).
+- BFF process-local CF base cooldown (~30s after 5xx/transport) demotes sticky dead members within a process; multi-process still needs ops/probe.

@@ -70,6 +70,14 @@ Env CSV bases merge with runtime-registered bases (`cf_pool.api.base_urls` in `r
 - Tokens stay on backend; Worker only forwards Authorization if present
 - Do not cache API responses on edge
 
+## Process-local base cooldown
+
+After a CF base transport / 5xx failure, BFF demotes that base for ~30s (process memory only):
+
+- `record_cf_base_outcome(request_url|base, ok=…)` from hydrate OAuth/detail + admin token test-refresh
+- `resolve_pixiv_api_cf_candidates` keeps sticky-first among **hot** bases, then appends cooling bases
+- Success clears cooldown; not a residential DB blacklist and not shared across processes
+
 ## Ops
 
 | Surface | Notes |

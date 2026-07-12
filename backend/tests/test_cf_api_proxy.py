@@ -7,9 +7,14 @@ from app.core.cf_api_proxy import (
     DEFAULT_CF_API_PROXY_HOSTS,
     CfApiProxyConfig,
     cf_api_proxy_headers,
+    cf_proxy_base_from_request_url,
     is_cf_api_proxy_host_allowed,
+    is_cf_base_cooling,
     load_cf_api_proxy_config,
+    order_cf_bases_for_failover,
     pick_cf_api_proxy_base_url,
+    record_cf_base_outcome,
+    reset_cf_base_cooldown_for_tests,
     resolve_pixiv_api_cf_candidates,
     resolve_pixiv_api_request,
     rewrite_url_via_cf_api_proxy,
@@ -155,6 +160,7 @@ def test_resolve_pixiv_api_request_requires_secret() -> None:
 
 
 def test_resolve_pixiv_api_cf_candidates_orders_sticky_first() -> None:
+    reset_cf_base_cooldown_for_tests()
     settings = load_settings(
         {
             "APP_ENV": "dev",
@@ -173,6 +179,51 @@ def test_resolve_pixiv_api_cf_candidates_orders_sticky_first() -> None:
     assert all(h.get("X-Proxy-Secret") == "sec" for _, h in candidates)
     bases = [u.split("/p/")[0] for u, _ in candidates]
     assert len(set(bases)) == 3
+
+
+def test_cf_base_cooldown_demotes_failed_base() -> None:
+    reset_cf_base_cooldown_for_tests()
+    settings = load_settings(
+        {
+            "APP_ENV": "dev",
+            "SECRET_KEY": "x",
+            "CF_API_PROXY_ENABLED": "1",
+            "CF_API_PROXY_BASE_URLS": "https://a.example.com,https://b.example.com",
+            "CF_API_PROXY_SECRET": "sec",
+        }
+    )
+    raw = "https://app-api.pixiv.net/v1/illust/detail"
+    first = resolve_pixiv_api_cf_candidates(settings=settings, url=raw)
+    sticky_url = first[0][0]
+    sticky_base = cf_proxy_base_from_request_url(sticky_url)
+    assert sticky_base is not None
+    record_cf_base_outcome(sticky_url, ok=False)
+    assert is_cf_base_cooling(sticky_base) is True
+    second = resolve_pixiv_api_cf_candidates(settings=settings, url=raw)
+    assert len(second) == 2
+    # Cooling sticky is still present but not first when another base is hot.
+    assert second[0][0] != sticky_url
+    assert second[-1][0] == sticky_url
+    record_cf_base_outcome(sticky_url, ok=True)
+    assert is_cf_base_cooling(sticky_base) is False
+    third = resolve_pixiv_api_cf_candidates(settings=settings, url=raw)
+    assert third[0][0] == sticky_url
+
+
+def test_order_cf_bases_for_failover_and_extract() -> None:
+    reset_cf_base_cooldown_for_tests()
+    assert (
+        cf_proxy_base_from_request_url("https://edge.example.com/p/app-api.pixiv.net/v1/x")
+        == "https://edge.example.com"
+    )
+    ordered = order_cf_bases_for_failover(
+        ["https://hot.example.com", "https://cold.example.com", "https://hot.example.com"]
+    )
+    assert ordered == ["https://hot.example.com", "https://cold.example.com"]
+    record_cf_base_outcome("https://hot.example.com", ok=False, cooldown_s=60.0)
+    demoted = order_cf_bases_for_failover(["https://hot.example.com", "https://cold.example.com"])
+    assert demoted[0] == "https://cold.example.com"
+    assert demoted[-1] == "https://hot.example.com"
 
 
 def test_settings_disables_flag_without_bases() -> None:

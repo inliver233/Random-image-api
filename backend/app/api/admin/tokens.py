@@ -20,6 +20,7 @@ from app.core.admin_request import (
 )
 from app.core.crypto import FieldEncryptor, mask_secret
 from app.core.errors import ApiError, ErrorCode
+from app.core.cf_api_proxy import record_cf_base_outcome
 from app.core.metrics import observe_pixiv_api_egress
 from app.core.proxy_selector import iter_pixiv_api_egress
 from app.core.request_id import get_or_create_request_id
@@ -358,6 +359,8 @@ async def test_refresh_token(
                         )
                 except PixivOauthError as exc:
                     observe_pixiv_api_egress(via=via_label, result="error")
+                    if attempt.via_cf and (exc.status_code is None or int(exc.status_code) >= 500):
+                        record_cf_base_outcome(attempt.request_url, ok=False)
                     if exc.status_code is None or int(exc.status_code) >= 500:
                         last_exc = exc
                         # Soft fail-open: no residential + not CF → stop; else try next.
@@ -367,12 +370,16 @@ async def test_refresh_token(
                     raise
                 except Exception as exc:
                     observe_pixiv_api_egress(via=via_label, result="error")
+                    if attempt.via_cf:
+                        record_cf_base_outcome(attempt.request_url, ok=False)
                     last_exc = exc
                     if attempt.residential is None and not attempt.via_cf:
                         break
                     continue
                 else:
                     observe_pixiv_api_egress(via=via_label, result="ok")
+                    if attempt.via_cf:
+                        record_cf_base_outcome(attempt.request_url, ok=True)
                     picked_proxy = attempt.residential
                     winning_via_cf = bool(attempt.via_cf)
                     break

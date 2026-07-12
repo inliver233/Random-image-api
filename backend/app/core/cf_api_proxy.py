@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import threading
+import time
 from dataclasses import dataclass
 from typing import Mapping
 from urllib.parse import urlparse
@@ -17,6 +19,12 @@ DEFAULT_CF_API_PROXY_HOSTS = frozenset(
         "public-api.secure.pixiv.net",
     }
 )
+
+# Process-local soft cooldown after CF base transport/5xx failures (not DB; not residential).
+# Sticky pick still prefers a healthy sticky base; cooling bases are demoted to the end.
+_CF_BASE_COOLDOWN_S = 30.0
+_cf_base_lock = threading.Lock()
+_cf_base_cool_until: dict[str, float] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +83,99 @@ def pick_cf_api_proxy_base_url(cfg: CfApiProxyConfig, *, host: str, path: str) -
     digest = hashlib.sha256(key).digest()
     idx = int.from_bytes(digest[:8], "big") % len(bases)
     return bases[idx]
+
+
+def reset_cf_base_cooldown_for_tests() -> None:
+    """Clear process CF base cooldown map (unit tests only)."""
+    with _cf_base_lock:
+        _cf_base_cool_until.clear()
+
+
+def normalize_cf_proxy_base_url(base: str) -> str:
+    return str(base or "").strip().rstrip("/")
+
+
+def cf_proxy_base_from_request_url(request_url: str) -> str | None:
+    """Extract worker base from a rewritten CF proxy URL ``{base}/p/{host}/…``."""
+    raw = (request_url or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return None
+    path = parsed.path or ""
+    marker = "/p/"
+    idx = path.find(marker)
+    if idx < 0:
+        return None
+    origin = f"{(parsed.scheme or 'https').lower()}://{(parsed.netloc or '').lower()}"
+    if not parsed.netloc:
+        return None
+    return normalize_cf_proxy_base_url(origin)
+
+
+def is_cf_base_cooling(base: str, *, now: float | None = None) -> bool:
+    b = normalize_cf_proxy_base_url(base)
+    if not b:
+        return False
+    t = time.monotonic() if now is None else float(now)
+    with _cf_base_lock:
+        until = float(_cf_base_cool_until.get(b) or 0.0)
+        if until <= t:
+            if b in _cf_base_cool_until:
+                _cf_base_cool_until.pop(b, None)
+            return False
+        return True
+
+
+def record_cf_base_outcome(
+    base_or_request_url: str,
+    *,
+    ok: bool,
+    cooldown_s: float = _CF_BASE_COOLDOWN_S,
+    now: float | None = None,
+) -> None:
+    """Record CF worker base success/failure for process-local demotion.
+
+    Success clears cooldown. Failure opens/extends cooldown so the next candidate
+    list demotes that base. Best-effort; never raises.
+    """
+    try:
+        b = normalize_cf_proxy_base_url(base_or_request_url)
+        if "/p/" in (base_or_request_url or ""):
+            extracted = cf_proxy_base_from_request_url(base_or_request_url)
+            if extracted:
+                b = extracted
+        if not b:
+            return
+        t = time.monotonic() if now is None else float(now)
+        with _cf_base_lock:
+            if ok:
+                _cf_base_cool_until.pop(b, None)
+                return
+            cool = max(1.0, float(cooldown_s))
+            prev = float(_cf_base_cool_until.get(b) or 0.0)
+            _cf_base_cool_until[b] = max(prev, t + cool)
+    except Exception:
+        return
+
+
+def order_cf_bases_for_failover(bases: list[str], *, now: float | None = None) -> list[str]:
+    """Keep sticky-first order among healthy bases; append cooling bases last."""
+    hot: list[str] = []
+    cold: list[str] = []
+    seen: set[str] = set()
+    for raw in bases:
+        b = normalize_cf_proxy_base_url(raw)
+        if not b or b in seen:
+            continue
+        seen.add(b)
+        if is_cf_base_cooling(b, now=now):
+            cold.append(b)
+        else:
+            hot.append(b)
+    return hot + cold
 
 
 def is_cf_api_proxy_host_allowed(host: str, *, allowed: frozenset[str] | None = None) -> bool:
@@ -172,11 +273,13 @@ def resolve_pixiv_api_cf_candidates(
     ordered: list[str] = []
     seen: set[str] = set()
     for base in [sticky, *list(cfg.base_urls or [])]:
-        b = str(base or "").strip().rstrip("/")
+        b = normalize_cf_proxy_base_url(base)
         if not b or b in seen:
             continue
         seen.add(b)
         ordered.append(b)
+    # Demote process-local cooling bases so sticky dead members do not lead forever.
+    ordered = order_cf_bases_for_failover(ordered)
     headers = cf_api_proxy_headers(cfg)
     out: list[tuple[str, dict[str, str]]] = []
     for base in ordered:
