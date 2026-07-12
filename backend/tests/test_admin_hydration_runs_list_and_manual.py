@@ -7,11 +7,15 @@ from pathlib import Path
 import sqlalchemy as sa
 from fastapi.testclient import TestClient
 
+from cryptography.fernet import Fernet
+
+from app.core.crypto import FieldEncryptor
 from app.core.security import create_jwt
 from app.db.models.base import Base
 from app.db.models.hydration_runs import HydrationRun
 from app.db.models.images import Image
 from app.db.models.jobs import JobRow
+from app.db.models.pixiv_tokens import PixivToken
 from app.db.session import create_sessionmaker
 from app.main import create_app
 
@@ -152,7 +156,18 @@ def test_admin_create_manual_hydration_job_by_image_or_illust(tmp_path: Path, mo
             await conn.run_sync(Base.metadata.create_all)
 
         Session = create_sessionmaker(app.state.engine)
+        field_key = Fernet.generate_key().decode("ascii")
+        encryptor = FieldEncryptor.from_key(field_key)
         async with Session() as session:
+            session.add(
+                PixivToken(
+                    label="t1",
+                    enabled=1,
+                    refresh_token_enc=encryptor.encrypt_text("rt"),
+                    refresh_token_masked="***",
+                    weight=1.0,
+                )
+            )
             image = Image(
                 illust_id=987654,
                 page_index=0,

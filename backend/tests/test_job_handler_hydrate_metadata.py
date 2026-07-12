@@ -228,6 +228,67 @@ def test_job_handler_hydrate_metadata_happy_path_updates_images_and_tags(tmp_pat
     asyncio.run(_run())
 
 
+def test_job_handler_hydrate_metadata_no_enabled_token_is_permanent(tmp_path: Path, monkeypatch) -> None:
+    """TOKEN-1: zero enabled tokens → permanent fail (no 60s defer churn)."""
+    db_path = tmp_path / "handler_hydrate_metadata_no_token.db"
+    engine = create_engine(_sqlite_url(db_path))
+
+    field_key = Fernet.generate_key().decode("ascii")
+    encryptor = FieldEncryptor.from_key(field_key)
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("FIELD_ENCRYPTION_KEY", field_key)
+    monkeypatch.setenv("PIXIV_OAUTH_CLIENT_ID", "cid_test")
+    monkeypatch.setenv("PIXIV_OAUTH_CLIENT_SECRET", "csec_test")
+
+    async def _run() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            session.add(
+                PixivToken(
+                    label="disabled",
+                    enabled=0,
+                    refresh_token_enc=encryptor.encrypt_text("rt"),
+                    refresh_token_masked="***",
+                    weight=1.0,
+                )
+            )
+            session.add(
+                JobRow(
+                    type="hydrate_metadata",
+                    status="pending",
+                    payload_json=json.dumps({"illust_id": 999}, ensure_ascii=False, separators=(",", ":")),
+                )
+            )
+            await session.commit()
+
+        dispatcher = JobDispatcher()
+        dispatcher.register(
+            "hydrate_metadata",
+            build_hydrate_metadata_handler(engine, transport=httpx.MockTransport(lambda r: httpx.Response(500))),
+        )
+
+        claimed = await claim_next_job(engine, worker_id="w1")
+        assert claimed is not None
+        transition = await execute_claimed_job(engine, dispatcher, job_row=claimed, worker_id="w1")
+        assert transition is not None
+        assert transition.status.value in {"failed", "dlq"}
+
+        async with Session() as session:
+            job_row = await session.get(JobRow, int(claimed["id"]))
+            assert job_row is not None
+            assert job_row.status in {"failed", "dlq"}
+            assert job_row.run_after is None or str(job_row.run_after) == ""
+            assert job_row.last_error is not None
+            assert "NO_TOKEN_AVAILABLE" in str(job_row.last_error)
+
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_job_handler_hydrate_metadata_missing_illust_id_moves_to_dlq(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "handler_hydrate_metadata_missing_illust_id.db"
     engine = create_engine(_sqlite_url(db_path))

@@ -649,6 +649,12 @@ LIMIT 1;
         nonlocal last_token_id
         tokens = await _load_tokens(now_epoch)
         tokens2 = [t for t in tokens if int(t.id) not in exclude_ids]
+        # TOKEN-1: no enabled tokens at all → permanent fail (do not 60s-retry churn).
+        # Enabled-but-all-in-backoff still defers until next_retry_at.
+        if not any(bool(t.enabled) for t in tokens2):
+            raise JobPermanentError(
+                f"{ErrorCode.NO_TOKEN_AVAILABLE.value}: no enabled Pixiv token; add/enable refresh_token"
+            )
         try:
             async with choose_lock:
                 chosen, new_last = choose_token(

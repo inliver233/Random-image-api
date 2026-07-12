@@ -23,6 +23,7 @@ from app.core.time import iso_utc_ms
 from app.db.models.hydration_runs import HydrationRun
 from app.core.random_delivery import resolve_catalog_store
 from app.db.models.jobs import JobRow
+from app.db.models.pixiv_tokens import PixivToken
 from app.db.session import resolve_sessionmaker, with_sqlite_busy_retry
 from app.jobs.queue import enqueue_pending_in_session
 
@@ -217,6 +218,17 @@ async def get_hydration_run(
     return admin_ok(request, payload={"item": item}, request_id=rid)
 
 
+async def _count_enabled_tokens(session) -> int:
+    return int(
+        (
+            await session.execute(
+                sa.select(sa.func.count()).select_from(PixivToken).where(PixivToken.enabled == 1)
+            )
+        ).scalar_one()
+        or 0
+    )
+
+
 @router.post(
     "/hydration-runs/manual",
     summary="Create manual hydration job",
@@ -241,6 +253,13 @@ async def create_manual_hydration_job(
 
     async def _op() -> dict[str, Any]:
         async with Session() as session:
+            if await _count_enabled_tokens(session) <= 0:
+                raise ApiError(
+                    code=ErrorCode.NO_TOKEN_AVAILABLE,
+                    message="No enabled Pixiv token; add/enable a refresh_token before hydrate",
+                    status_code=409,
+                )
+
             illust_id = body.get("illust_id")
             image_id = body.get("image_id")
             if illust_id is None and image_id is not None:
@@ -320,6 +339,13 @@ async def create_hydration_run(
 
     async def _op() -> tuple[int, int]:
         async with Session() as session:
+            if await _count_enabled_tokens(session) <= 0:
+                raise ApiError(
+                    code=ErrorCode.NO_TOKEN_AVAILABLE,
+                    message="No enabled Pixiv token; add/enable a refresh_token before hydrate",
+                    status_code=409,
+                )
+
             run = HydrationRun(
                 type=run_type,
                 status="pending",

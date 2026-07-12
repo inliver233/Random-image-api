@@ -6,10 +6,14 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from cryptography.fernet import Fernet
+
+from app.core.crypto import FieldEncryptor
 from app.core.security import create_jwt
 from app.db.models.base import Base
 from app.db.models.hydration_runs import HydrationRun
 from app.db.models.jobs import JobRow
+from app.db.models.pixiv_tokens import PixivToken
 from app.db.session import create_sessionmaker
 from app.main import create_app
 
@@ -24,10 +28,24 @@ def test_admin_create_hydration_run_creates_job(tmp_path: Path, monkeypatch) -> 
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
 
     app = create_app()
+    field_key = Fernet.generate_key().decode("ascii")
+    encryptor = FieldEncryptor.from_key(field_key)
 
     async def _migrate() -> None:
         async with app.state.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            session.add(
+                PixivToken(
+                    label="t1",
+                    enabled=1,
+                    refresh_token_enc=encryptor.encrypt_text("rt"),
+                    refresh_token_masked="***",
+                    weight=1.0,
+                )
+            )
+            await session.commit()
 
     asyncio.run(_migrate())
 
@@ -66,4 +84,34 @@ def test_admin_create_hydration_run_creates_job(tmp_path: Path, monkeypatch) -> 
             assert job.ref_id == str(run_id)
 
     asyncio.run(_verify())
+
+
+def test_admin_create_hydration_run_rejects_without_enabled_token(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "admin_create_hydration_run_no_token.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+
+    app = create_app()
+
+    async def _migrate() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_migrate())
+
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        resp = client.post(
+            "/admin/api/hydration-runs",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"type": "backfill", "criteria": {"missing": ["tags"]}},
+        )
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body.get("ok") is False
+        assert body.get("code") == "NO_TOKEN_AVAILABLE"
 
