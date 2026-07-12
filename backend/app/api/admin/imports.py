@@ -431,7 +431,6 @@ async def rollback_import(
     rid = get_or_create_request_id(request)
 
     target_status = 2 if body.mode == "disable" else 4
-    now_expr = sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
 
     engine = request.app.state.engine
     Session = resolve_sessionmaker(request, engine)
@@ -443,11 +442,12 @@ async def rollback_import(
             if imp is None:
                 raise ApiError(code=ErrorCode.NOT_FOUND, message="Import not found", status_code=404)
 
+            # now_expr=None → CatalogStore picks dual-dialect UTC text (sqlite/pg).
             updated = await catalog.set_status_for_import(
                 session,
                 import_id=import_id,
                 status=int(target_status),
-                now_expr=now_expr,
+                now_expr=None,
             )
             await session.commit()
             return int(updated)

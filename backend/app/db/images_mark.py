@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.coerce import truncate_text
 from app.core.redact import redact_text
+from app.db.images_upsert import dialect_name_from_session, now_expr_for_dialect
 from app.db.models.images import Image
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 
@@ -103,7 +104,7 @@ async def set_status_for_import(
     if now_expr is not None:
         values["updated_at"] = now_expr
     else:
-        values["updated_at"] = sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
+        values["updated_at"] = now_expr_for_dialect(dialect_name_from_session(session))
     result = await session.execute(
         update(Image).where(Image.created_import_id == int(import_id)).values(**values)
     )

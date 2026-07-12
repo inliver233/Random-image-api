@@ -58,6 +58,7 @@ Unit coverage for dialect helpers: `backend/tests/test_images_upsert.py`.
 | `enabled=1` / `status=1` in raw SQL | OK (int columns) | Prefer SQLAlchemy where practical |
 | Boolean-as-int columns | PG may prefer `BOOLEAN` | Keep integer flags for cross-dialect parity until explicit model change |
 | Timestamps as `Text` ISO strings | Works; no native `timestamptz` | Intentional; Engine + admin JSON stay stringly |
+| Import rollback `updated_at` | Was hard-coded SQLite `strftime` | Fixed: `set_status_for_import` uses `now_expr_for_dialect` |
 | Jobs queue backend name `sqlite` | Label only | `JOB_QUEUE_BACKEND=redis\|nats` still reserved/fails boot |
 
 ## Acceptance criteria for real PG cutover (not this PR)
