@@ -94,6 +94,62 @@ def test_admin_summary_includes_hydration_missing_counts(tmp_path: Path, monkeyp
         assert missing["title"] == 1
         assert missing["created_at"] == 1
         assert missing["popularity"] == 1
+        # D3: 1/2 enabled images have x_restrict NULL → ratio 0.5 → cold-start risk
+        assert hydration["r18_unknown_ratio"] == 0.5
+        assert hydration["cold_start_r18_risk"] is True
+        assert isinstance(hydration.get("cold_start_hint"), str) and "r18_strict" in hydration["cold_start_hint"]
+
+
+def test_admin_summary_cold_start_r18_risk_false_when_known(tmp_path: Path, monkeypatch) -> None:
+    """When most enabled images have x_restrict set, cold_start_r18_risk is false."""
+    db_path = tmp_path / "admin_summary_cold_start_ok.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            for i in range(3):
+                session.add(
+                    Image(
+                        illust_id=100 + i,
+                        page_index=0,
+                        ext="jpg",
+                        original_url=f"https://example.com/{i}.jpg",
+                        proxy_path=f"/i/{i}.jpg",
+                        random_key=0.1 * (i + 1),
+                        status=1,
+                        x_restrict=0 if i < 2 else None,
+                        width=100,
+                        height=100,
+                    )
+                )
+            await session.commit()
+
+    asyncio.run(_seed())
+
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        resp = client.get(
+            "/admin/api/summary",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        hydration = resp.json()["counts"]["hydration"]
+        assert hydration["enabled_images_total"] == 3
+        assert hydration["missing"]["r18"] == 1
+        assert hydration["r18_unknown_ratio"] == round(1 / 3, 4)
+        assert hydration["cold_start_r18_risk"] is False
+        assert hydration.get("cold_start_hint") is None
 
 
 def test_admin_summary_openapi_documents_jobs_table_counts() -> None:

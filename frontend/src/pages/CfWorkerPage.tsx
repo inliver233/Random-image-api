@@ -213,7 +213,7 @@ export function CfWorkerPage() {
           ))}
         </ol>
         <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 12 }}>
-          高级（R2、应急镜像、Engine、Ports）不在本页 — 见维护工具。
+          高级不在本页：R2 / Engine / Ports 见维护工具折叠；本地应急镜像见系统设置（非公开出图主路径）。
         </Typography.Paragraph>
       </Card>
 

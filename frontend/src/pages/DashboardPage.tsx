@@ -268,11 +268,12 @@ export function DashboardPage() {
   return (
     <>
       <Space wrap style={{ marginBottom: 16 }}>
-        <Button type="primary" onClick={() => navigate("/admin/import")}>
-          去导入链接
+        <Button type="primary" onClick={() => navigate("/admin/cf-worker")}>
+          CF Worker 出口
         </Button>
+        <Button onClick={() => navigate("/admin/import")}>去导入链接</Button>
         <Button onClick={() => navigate("/admin/tokens")}>去添加令牌</Button>
-        <Button onClick={() => navigate("/admin/proxies")}>去添加代理</Button>
+        <Button onClick={() => navigate("/admin/proxies")}>去添加代理（应急）</Button>
         <Button onClick={() => navigate("/admin/hydration")}>打开补全管理</Button>
         <Button onClick={() => navigate("/admin/random")}>打开随机测试</Button>
         <Button onClick={() => createHydration.mutate()} loading={createHydration.isPending}>

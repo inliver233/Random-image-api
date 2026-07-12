@@ -51,6 +51,29 @@ Ops-only. **Default path (Admin FE / deploy API):** one-page deploy → auto reg
 6. Accept: `new_pixiv_image_delivery_total{path="edge_redirect"}` dominates
 7. Rollback: disable flags / clear runtime enable
 
+## Pre-prod / prod metrics acceptance (mainline A gate)
+
+After deploy api+image and light traffic (token refresh + `/random` image open):
+
+```text
+# scrape BFF /metrics (or Prometheus)
+# API egress: CF should dominate when pool ready
+new_pixiv_pixiv_api_egress_total{via="cf",result="ok"}
+new_pixiv_pixiv_api_egress_total{via="residential",result="ok"}
+
+# Image delivery: edge_redirect ≫ local_stream_residential
+new_pixiv_image_delivery_total{path="edge_redirect"}
+new_pixiv_image_delivery_total{path="local_stream_residential"}
+```
+
+Pass criteria (ops judgment, not unit-testable without real CF):
+
+- Pool UI: both sides `business_enabled` / `ready` after deploy
+- `via=cf` ≫ `via=residential` for hydrate/token refresh
+- `edge_redirect` ≫ `local_stream_residential` for public images
+- Residential force switch off unless intentional emergency
+- Fail: still mostly residential/local while pool shows ready → secret/sign/register mismatch (re-probe)
+
 ## Random Engine (dual-run · D7)
 
 See [`engine-traffic-cutover.md`](./engine-traffic-cutover.md) for traffic% ramp, metrics, and rollback.
