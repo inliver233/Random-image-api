@@ -109,7 +109,14 @@ cp deploy/.env.example deploy/.env
 3. 启动
 
 ```bash
+# 开发默认（SQLite）
 docker compose -f deploy/docker-compose.yml up -d --build
+
+# 生产向（Postgres 一等公民；先改 DATABASE_URL 为 postgresql+asyncpg://…）
+docker compose -f deploy/docker-compose.yml --profile postgres up -d --build
+
+# 多实例共享限流/去重（可选）
+docker compose -f deploy/docker-compose.yml --profile postgres --profile redis up -d --build
 ```
 
 4. 访问

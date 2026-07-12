@@ -30,6 +30,14 @@ services:
     # Optional dual-run: set RANDOM_ENGINE_URL=http://random-engine:8091 in deploy/.env
     # (engine is a sibling service; BFF stays up if engine is down — pick falls back to catalog store).
     # Production data plane: point DATABASE_URL at Postgres (see deploy/.env.example); SQLite is dev-only.
+    # When using profile postgres: set DATABASE_URL=postgresql+asyncpg://ria:ria@postgres:5432/random_image
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
     restart: unless-stopped
 
   worker:
@@ -42,6 +50,12 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
     volumes:
       - ../data:/app/data
     restart: unless-stopped
@@ -72,3 +86,44 @@ services:
       retries: 8
       start_period: 5s
     restart: unless-stopped
+
+  # Production data plane (F1): enable with
+  #   docker compose -f deploy/docker-compose.yml --profile postgres up -d
+  # and set DATABASE_URL=postgresql+asyncpg://ria:ria@postgres:5432/random_image
+  # (override user/password via POSTGRES_* below). SQLite remains the zero-profile default.
+  postgres:
+    profiles: ["postgres"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ria}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ria}
+      POSTGRES_DB: ${POSTGRES_DB:-random_image}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  # Shared RL/dedup for multi-instance (F4): enable with --profile redis
+  # PUBLIC_API_KEY_RATE_LIMIT_BACKEND=redis + REDIS_URL=redis://redis:6379/0
+  redis:
+    profiles: ["redis"]
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    restart: unless-stopped
+
+volumes:
+  pgdata:

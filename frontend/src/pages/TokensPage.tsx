@@ -288,6 +288,13 @@ export function TokensPage() {
         Pixiv 令牌管理
       </Typography.Title>
 
+      <Alert
+        type="info"
+        showIcon
+        message="Token 刷新默认走 CF API 出口池（池 ready 时）"
+        description="测试刷新成功时会显示「经 CF API 代理」。住宅绑定仅应急；日常出口请在侧栏 CF Worker 部署/启用 api-worker。"
+      />
+
       <ActionAlerts
         message={alerts.message}
         requestId={alerts.requestId}

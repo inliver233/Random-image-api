@@ -59,6 +59,11 @@ def _is_sqlite_file_url(database_url: str) -> bool:
     return bool(db and db != ":memory:")
 
 
+def _is_postgres_url(database_url: str) -> bool:
+    low = (database_url or "").lower()
+    return low.startswith("postgres") or "+asyncpg" in low or "postgresql" in low
+
+
 def create_engine(database_url: str) -> AsyncEngine:
     kwargs: dict[str, Any] = {}
     if database_url.lower().startswith("sqlite"):
@@ -93,6 +98,19 @@ def create_engine(database_url: str) -> AsyncEngine:
                     "pool_timeout": float(pool_timeout_s),
                 }
             )
+    elif _is_postgres_url(database_url):
+        # Production data plane: modest pool defaults (override via PG_* env).
+        pool_size = parse_int_env("PG_POOL_SIZE", default=10, min_v=1, max_v=100)
+        max_overflow = parse_int_env("PG_MAX_OVERFLOW", default=20, min_v=0, max_v=100)
+        pool_timeout_s = parse_float_env("PG_POOL_TIMEOUT_S", default=30.0, min_v=0.5, max_v=120.0)
+        kwargs.update(
+            {
+                "pool_size": int(pool_size),
+                "max_overflow": int(max_overflow),
+                "pool_timeout": float(pool_timeout_s),
+                "pool_pre_ping": True,
+            }
+        )
 
     engine = create_async_engine(database_url, **kwargs)
 

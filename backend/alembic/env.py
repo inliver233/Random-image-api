@@ -26,7 +26,10 @@ def _get_database_url() -> str:
     url = (os.environ.get("DATABASE_URL") or config.get_main_option("sqlalchemy.url") or "").strip()
     if not url:
         raise RuntimeError("DATABASE_URL (or sqlalchemy.url) is required")
-    return url.replace("+aiosqlite", "")
+    # Alembic runs sync migrations: strip async driver suffixes (SQLite + Postgres).
+    for async_suffix in ("+aiosqlite", "+asyncpg", "+psycopg"):
+        url = url.replace(async_suffix, "")
+    return url
 
 
 def run_migrations_offline() -> None:

@@ -529,44 +529,27 @@ export function DashboardPage() {
                 ) : null}
 
                 <Space wrap size={[8, 8]}>
-                  {imageEdge.data ? (
-                    <>
-                      <Tag color={imageEdge.data.ready ? "green" : imageEdge.data.enabled_flag ? "orange" : undefined}>
-                        image_edge={imageEdge.data.ready ? "ready" : imageEdge.data.enabled_flag ? "flag-on-not-ready" : "off"}
+                  {(() => {
+                    const imgReady = Boolean(imageEdge.data?.ready);
+                    const apiReady = Boolean(cfApiProxy.data?.ready);
+                    const imgBases = Number(imageEdge.data?.base_url_count || 0);
+                    const apiBases = Number(cfApiProxy.data?.base_url_count || 0);
+                    const n = (imgReady ? 1 : 0) + (apiReady ? 1 : 0);
+                    const anyFlag =
+                      Boolean(imageEdge.data?.enabled_flag) || Boolean(cfApiProxy.data?.enabled_flag);
+                    const color = n > 0 ? "green" : anyFlag ? "orange" : undefined;
+                    const label =
+                      n > 0
+                        ? `CF：已启用 ${n} 池 · img=${imgBases} api=${apiBases}`
+                        : anyFlag
+                          ? "CF：flag 开未 ready"
+                          : "CF：未启用";
+                    return (
+                      <Tag color={color} style={{ cursor: "pointer" }} onClick={() => navigate("/admin/cf-worker")}>
+                        {label}
                       </Tag>
-                      <Tag>
-                        bases={imageEdge.data.base_url_count}
-                        {imageEdge.data.has_secret ? "" : " · no-secret"}
-                      </Tag>
-                      {imageEdge.data.has_secret_previous ? (
-                        <Tag color="blue">dual-secret</Tag>
-                      ) : null}
-                    </>
-                  ) : null}
-                  {cfApiProxy.data ? (
-                    <>
-                      <Tag
-                        color={
-                          cfApiProxy.data.ready
-                            ? "green"
-                            : cfApiProxy.data.enabled_flag
-                              ? "orange"
-                              : undefined
-                        }
-                      >
-                        cf_api_proxy=
-                        {cfApiProxy.data.ready
-                          ? "ready"
-                          : cfApiProxy.data.enabled_flag
-                            ? "flag-on-not-ready"
-                            : "off"}
-                      </Tag>
-                      <Tag>
-                        bases={cfApiProxy.data.base_url_count}
-                        {cfApiProxy.data.has_secret ? "" : " · no-secret"}
-                      </Tag>
-                    </>
-                  ) : null}
+                    );
+                  })()}
                   {r2Prewarm.data ? (
                     <Tag
                       color={

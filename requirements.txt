@@ -6,6 +6,8 @@
 #
 aiosqlite==0.22.1
     # via -r requirements.in
+asyncpg==0.30.0
+    # via -r requirements.in
 alembic==1.18.3
     # via -r requirements.in
 annotated-doc==0.0.4

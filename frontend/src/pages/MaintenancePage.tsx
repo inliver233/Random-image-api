@@ -588,77 +588,39 @@ export function MaintenancePage() {
         维护工具
       </Typography.Title>
 
-      <Card title="Image Edge（CF 出图）">
+      <Card title="CF 状态（高级 · 只读）">
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          只读配置状态（不展示密钥）。公开出图优先签 CF Worker URL；默认{" "}
-          <Typography.Text code>IMAGE_EDGE_ENABLED=false</Typography.Text>
-          ，未 ready 时回退本地 /i。多地区 403 POC 与 wrangler 部署在进程外完成。
+          日常部署与启用请打开侧栏{" "}
+          <Typography.Link href="/admin/cf-worker">CF Worker</Typography.Link>
+          。本卡仅排障：出图 / API 出口 ready 摘要（不展示密钥）。
         </Typography.Paragraph>
-
-        <QueryState query={imageEdgeStatus}>
+        <Space wrap style={{ marginBottom: 12 }}>
           {edge ? (
-            <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
-              <Descriptions.Item label="开关 flag">
-                {edge.enabled_flag ? <Tag color="blue">ENABLED</Tag> : <Tag>OFF</Tag>}
-              </Descriptions.Item>
-              <Descriptions.Item label="可签 URL">
-                {edge.ready ? <Tag color="green">ready</Tag> : <Tag color="orange">not ready</Tag>}
-              </Descriptions.Item>
-              <Descriptions.Item label="Base URLs">
-                {edge.base_urls?.length ? edge.base_urls.join(", ") : "（未配置）"}
-              </Descriptions.Item>
-              <Descriptions.Item label="TTL 秒">{edge.sign_ttl_seconds}</Descriptions.Item>
-              <Descriptions.Item label="密钥">
-                {edge.has_secret ? "已配置" : "缺失"}
-                {edge.has_secret_previous ? "（含 previous 轮换）" : ""}
-              </Descriptions.Item>
-              <Descriptions.Item label="缺失项">
-                {edge.missing?.length ? edge.missing.join(", ") : "—"}
-              </Descriptions.Item>
-            </Descriptions>
+            <Tag color={edge.ready ? "green" : edge.enabled_flag ? "orange" : undefined}>
+              出图={edge.ready ? "ready" : edge.enabled_flag ? "flag-on" : "off"} · bases=
+              {edge.base_url_count ?? edge.base_urls?.length ?? 0}
+            </Tag>
           ) : null}
-        </QueryState>
-
-        <Button onClick={() => void imageEdgeStatus.refetch()} loading={imageEdgeStatus.isFetching}>
-          刷新状态
-        </Button>
-      </Card>
-
-      <Card title="CF API Proxy（hydrate/OAuth 出口）">
-        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
-          只读配置状态（不展示密钥）。hydrate 的 OAuth refresh 与 illust detail 优先经 CF Worker
-          出口。默认 <Typography.Text code>RESIDENTIAL_EGRESS_EMERGENCY_ONLY=true</Typography.Text>
-          ：存在 CF 候选时住宅<strong>不会</strong>作为正常 failover；仅无 CF 候选、进程强制应急、或 env 显式关闭 emergency-only
-          时才走住宅。默认{" "}
-          <Typography.Text code>CF_API_PROXY_ENABLED=false</Typography.Text>
-          。部署见 <Typography.Text code>edge/api-worker</Typography.Text>。
-        </Typography.Paragraph>
-
-        <QueryState query={cfApiProxyStatus}>
           {cfApi ? (
-            <Descriptions size="small" column={1} bordered style={{ maxWidth: 640, marginBottom: 16 }}>
-              <Descriptions.Item label="开关 flag">
-                {cfApi.enabled_flag ? <Tag color="blue">ENABLED</Tag> : <Tag>OFF</Tag>}
-              </Descriptions.Item>
-              <Descriptions.Item label="可走 CF">
-                {cfApi.ready ? <Tag color="green">ready</Tag> : <Tag color="orange">not ready</Tag>}
-              </Descriptions.Item>
-              <Descriptions.Item label="Base URLs">
-                {cfApi.base_urls?.length ? cfApi.base_urls.join(", ") : "（未配置）"}
-              </Descriptions.Item>
-              <Descriptions.Item label="共享密钥">
-                {cfApi.has_secret ? "已配置" : "缺失（Worker fail-closed 必需）"}
-              </Descriptions.Item>
-              <Descriptions.Item label="缺失项">
-                {cfApi.missing?.length ? cfApi.missing.join(", ") : "—"}
-              </Descriptions.Item>
-            </Descriptions>
+            <Tag color={cfApi.ready ? "green" : cfApi.enabled_flag ? "orange" : undefined}>
+              API出口={cfApi.ready ? "ready" : cfApi.enabled_flag ? "flag-on" : "off"} · bases=
+              {cfApi.base_url_count ?? cfApi.base_urls?.length ?? 0}
+            </Tag>
           ) : null}
-        </QueryState>
-
-        <Button onClick={() => void cfApiProxyStatus.refetch()} loading={cfApiProxyStatus.isFetching}>
-          刷新状态
-        </Button>
+          <Button
+            size="small"
+            onClick={() => {
+              void imageEdgeStatus.refetch();
+              void cfApiProxyStatus.refetch();
+            }}
+            loading={imageEdgeStatus.isFetching || cfApiProxyStatus.isFetching}
+          >
+            刷新
+          </Button>
+          <Button size="small" type="link" href="/admin/cf-worker">
+            打开 CF Worker
+          </Button>
+        </Space>
       </Card>
 
       <Card title="CF Worker 池（成员 + 探针 · 高级）">
