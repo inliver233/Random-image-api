@@ -57,4 +57,4 @@ Wire-up reads settings (not raw `os.environ` at call sites):
 | `/healthz` → `modules.job_queue` | `backend` (active), `requested` (Settings), `implemented` — redis/nats rejected at settings load (no silent sqlite fallback) |
 | `/status.json` → `data.job_queue` | Same public shape; `/status` HTML chip mirrors it |
 | `GET /admin/api/maintenance/modular-ports` | Same honesty shape: `job_queue.backend` / `requested` / `implemented` (no `using_sqlite_fallback` field) |
-| `/metrics` (admin) → modular readiness | `new_pixiv_module_readiness{module="job_queue",flag="implemented"}` (sqlite/memory only) |
+| `/metrics` (admin) → modular readiness | `new_pixiv_module_readiness{module="job_queue",flag="implemented"}` (sqlite/memory only). OpenAPI summary documents scrape-time modular + circuit gauges |

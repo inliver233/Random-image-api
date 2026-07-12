@@ -218,3 +218,15 @@ def test_metrics_exposes_modular_readiness_when_edge_ready(tmp_path: Path, monke
             r'new_pixiv_module_readiness\{flag="using_memory_fallback",module="api_key_rate_limit"\}\s+1(\.0+)?\b',
             text,
         )
+
+
+def test_metrics_openapi_documents_modular_scrape() -> None:
+    """Admin /metrics must document dual-run circuit + modular readiness scrape behavior."""
+    app = create_app()
+    schema = app.openapi()
+    op = schema["paths"]["/metrics"]["get"]
+    assert op.get("summary") == "Prometheus metrics scrape"
+    desc = str(op.get("description") or "")
+    assert "new_pixiv_module_readiness" in desc
+    assert "circuit" in desc.lower()
+    assert "/healthz" in desc or "healthz" in desc

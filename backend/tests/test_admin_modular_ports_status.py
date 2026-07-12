@@ -7,6 +7,27 @@ from fastapi.testclient import TestClient
 from app.main import create_app
 
 
+def test_admin_maintenance_openapi_documents_dual_run_and_cleanup() -> None:
+    """Maintenance dual-run + cleanup ops must not rely on bare function-name summaries."""
+    app = create_app()
+    schema = app.openapi()
+    paths = schema["paths"]
+
+    engine_op = paths["/admin/api/maintenance/random-engine"]["get"]
+    assert engine_op.get("summary") == "Random engine dual-run status"
+    engine_desc = str(engine_op.get("description") or "")
+    assert "circuit" in engine_desc.lower()
+    assert "ready_for_traffic" in engine_desc
+
+    snap_op = paths["/admin/api/maintenance/random-engine/snapshot"]["post"]
+    assert snap_op.get("summary") == "Push random engine snapshot"
+    assert "catalog" in str(snap_op.get("description") or "").lower()
+
+    cleanup_op = paths["/admin/api/maintenance/request-logs/cleanup"]["post"]
+    assert cleanup_op.get("summary") == "Cleanup request logs"
+    assert "dry_run" in str(cleanup_op.get("description") or "")
+
+
 def test_admin_modular_ports_status_defaults(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "admin_modular_ports.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()

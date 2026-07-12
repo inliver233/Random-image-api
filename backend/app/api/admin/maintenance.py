@@ -68,7 +68,15 @@ async def _load_cleanup_request_logs_json(request: Request) -> dict[str, Any]:
     }
 
 
-@router.post("/maintenance/request-logs/cleanup")
+@router.post(
+    "/maintenance/request-logs/cleanup",
+    summary="Cleanup request logs",
+    description=(
+        "Delete or dry-run purge of old `request_logs` rows. Body: `keep_days`, "
+        "`max_delete_rows`, `chunk_size`, `dry_run`. Returns cutoff + deleted/would_delete "
+        "counts and `has_more` when more rows remain past the batch cap."
+    ),
+)
 async def cleanup_request_logs_endpoint(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
@@ -361,7 +369,18 @@ async def modular_ports_status(
     )
 
 
-@router.get("/maintenance/random-engine")
+@router.get(
+    "/maintenance/random-engine",
+    summary="Random engine dual-run status",
+    description=(
+        "Admin dual-run cutover surface: local config (`enabled`, `url`, `traffic_percent`, "
+        "`timeout_ms`) plus process circuit snapshot and optional outbound engine `/health` "
+        "probe. `circuit` mirrors public `/status` / `/healthz` dual-run honesty "
+        "(closed/half_open/open; fail-open to Python when open). "
+        "`ready_for_traffic` requires enabled + traffic>0 + healthy + non-empty index. "
+        "`cutover_warning` is operator-facing English (FE may localize)."
+    ),
+)
 async def random_engine_status(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
@@ -435,7 +454,16 @@ async def random_engine_status(
     return admin_ok(request, payload=payload, request_id=rid)
 
 
-@router.post("/maintenance/random-engine/snapshot")
+@router.post(
+    "/maintenance/random-engine/snapshot",
+    summary="Push random engine snapshot",
+    description=(
+        "Push catalog snapshot (enabled images + tags) to the Go random engine. "
+        "Requires `RANDOM_ENGINE_URL`. Optional body `limit` caps rows for dry probes. "
+        "Uses process `catalog_store` / `tag_store` ports when present. Returns revision "
+        "and engine ack payload, or 502 on upstream failure."
+    ),
+)
 async def random_engine_push_snapshot(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),

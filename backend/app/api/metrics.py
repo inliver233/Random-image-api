@@ -158,7 +158,18 @@ def _modular_readiness_from_request(request: Request) -> dict[str, Any]:
     }
 
 
-@router.get("/metrics")
+@router.get(
+    "/metrics",
+    summary="Prometheus metrics scrape",
+    description=(
+        "Admin-auth Prometheus text exposition. On each scrape refreshes local dual-run "
+        "circuit gauges (`new_pixiv_random_engine_circuit_*`) and modular readiness "
+        "(`new_pixiv_module_readiness`, `new_pixiv_module_base_url_count`) from process "
+        "config — same honesty shapes as `/healthz` `modules.*` / public `/status.json` "
+        "`data.*` (no secrets, no outbound engine/R2 probes). Also exports job status "
+        "counts, proxy endpoint state counts, and delivery/random counters."
+    ),
+)
 async def metrics(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
