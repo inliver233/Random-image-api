@@ -19,14 +19,15 @@ https://api-edge.example.com/p/oauth.secure.pixiv.net/auth/token
 ```
 
 - `host` 必须在 `ALLOWED_HOSTS` 白名单（默认 Pixiv OAuth + App API）
-- 可选门禁：请求头 `X-Proxy-Secret: <PROXY_SECRET>`（与 backend `CF_API_PROXY_SECRET` 一致）
+- **必填门禁（fail-closed）**：请求头 `X-Proxy-Secret: <PROXY_SECRET>`（与 backend `CF_API_PROXY_SECRET` 一致）。`PROXY_SECRET` 为空时 `/p/*` 一律 403。
+- 可选 isolate 限流：`RATE_LIMIT_RPM`（默认 600；`0` 关闭）、`RATE_LIMIT_BURST`
 
 ## 部署
 
 ```bash
 cd edge/api-worker
 npm install
-npx wrangler secret put PROXY_SECRET   # 推荐
+npx wrangler secret put PROXY_SECRET   # required (fail-closed)
 npx wrangler deploy
 ```
 
@@ -52,6 +53,8 @@ CF_API_PROXY_SECRET=<same as wrangler PROXY_SECRET>
 
 - **无** `?url=` 任意目标（防 open proxy）
 - Host 精确白名单
+- `PROXY_SECRET` 必填（空 secret = 拒绝所有 `/p/*`）
+- Isolate 级 token-bucket 限流（默认 600 rpm；多 POP 容量叠加）
 - 剥离 `CF-*` / `X-Forwarded-*` / Cookie
 - 响应 `Cache-Control: no-store`
 - 不在边缘存放 Pixiv refresh/access token（token 只在 backend）

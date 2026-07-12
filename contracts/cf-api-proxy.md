@@ -20,12 +20,14 @@ Implementation:
 | `host` | Exact allowlisted hostname (e.g. `app-api.pixiv.net`) |
 | `path` | Upstream path starting with `/` |
 
-Optional gate: request header `X-Proxy-Secret` = `CF_API_PROXY_SECRET` / Worker `PROXY_SECRET`.
+**Required gate (fail-closed):** request header `X-Proxy-Secret` must match non-empty Worker `PROXY_SECRET` / backend `CF_API_PROXY_SECRET`. Empty Worker secret rejects all `/p/*`.
+
+Optional isolate rate limit: Worker `RATE_LIMIT_RPM` (default 600; `0` disables) + `RATE_LIMIT_BURST`.
 
 Health:
 
 ```
-GET /healthz|/  →  {"ok":true,"service":"random-image-api-proxy","allowed_hosts":[...],"secret_required":bool}
+GET /healthz|/  →  {"ok":true,"service":"random-image-api-proxy","allowed_hosts":[...],"secret_required":true,"secret_configured":bool,"rate_limit":{...}}
 ```
 
 ## Allowed hosts (Worker default)

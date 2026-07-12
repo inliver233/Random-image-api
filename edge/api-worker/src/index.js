@@ -24,7 +24,12 @@ import {
   hostAllowed,
   parseAllowedHosts,
   parseProxyPath,
+  parseRateLimitConfig,
+  takeRateLimitToken,
 } from "./pure.js";
+
+/** Per-isolate token bucket (resets on cold start; multi-POP multiplies capacity). */
+let _rateBucket = null;
 
 function corsHeaders() {
   return {
@@ -69,13 +74,20 @@ export default {
     const url = new URL(request.url);
     const allowed = parseAllowedHosts(env);
 
+    const rateCfg = parseRateLimitConfig(env);
+
     if (url.pathname === "/healthz" || url.pathname === "/") {
       return new Response(
         JSON.stringify({
           ok: true,
           service: "random-image-api-proxy",
           allowed_hosts: allowed,
-          secret_required: Boolean(String(env.PROXY_SECRET || "").trim()),
+          // Always true when secret env empty too — Worker is fail-closed.
+          secret_required: true,
+          secret_configured: Boolean(String(env.PROXY_SECRET || "").trim()),
+          rate_limit: rateCfg.enabled
+            ? { enabled: true, rpm: rateCfg.rpm, burst: rateCfg.burst }
+            : { enabled: false },
         }),
         {
           status: 200,
@@ -86,6 +98,22 @@ export default {
 
     if (!authorize(request, env)) {
       return jsonError(403, "Forbidden");
+    }
+
+    if (rateCfg.enabled) {
+      const decision = takeRateLimitToken(_rateBucket, rateCfg, Date.now());
+      _rateBucket = decision.bucket;
+      if (!decision.allow) {
+        return new Response(JSON.stringify({ ok: false, message: "Rate limited" }), {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Retry-After": String(decision.retryAfterS || 1),
+            ...corsHeaders(),
+          },
+        });
+      }
     }
 
     const parsed = parseProxyPath(url);

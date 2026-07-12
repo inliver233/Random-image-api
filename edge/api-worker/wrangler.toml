@@ -7,6 +7,9 @@ compatibility_date = "2026-01-01"
 [vars]
 # Comma-separated exact hosts (no scheme/port). Empty → built-in Pixiv OAuth + App API hosts.
 ALLOWED_HOSTS = "oauth.secure.pixiv.net,app-api.pixiv.net,public-api.secure.pixiv.net"
+# Isolate token-bucket on /p/* (after secret). 0 = disable. Burst optional (defaults ~rpm/10).
+RATE_LIMIT_RPM = "600"
+# RATE_LIMIT_BURST = "60"
 
 # Optional custom domain:
 # routes = [{ pattern = "api-edge.example.com/*", zone_name = "example.com" }]

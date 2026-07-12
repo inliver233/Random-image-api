@@ -15,7 +15,9 @@ import {
   hostAllowed,
   parseAllowedHosts,
   parseProxyPath,
+  parseRateLimitConfig,
   STRIP_REQ_HEADERS,
+  takeRateLimitToken,
 } from "../src/pure.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -73,6 +75,44 @@ describe("authorizeSecret + hostAllowed", () => {
     const allowed = parseAllowedHosts({});
     assert.equal(hostAllowed("app-api.pixiv.net", allowed), true);
     assert.equal(hostAllowed("evil.com", allowed), false);
+  });
+});
+
+describe("rate limit token bucket", () => {
+  it("defaults enabled 600 rpm", () => {
+    const cfg = parseRateLimitConfig({});
+    assert.equal(cfg.enabled, true);
+    assert.equal(cfg.rpm, 600);
+    assert.ok(cfg.burst >= 20);
+  });
+  it("RATE_LIMIT_RPM=0 disables", () => {
+    assert.deepEqual(parseRateLimitConfig({ RATE_LIMIT_RPM: "0" }), {
+      enabled: false,
+      rpm: 0,
+      burst: 0,
+    });
+  });
+  it("allows up to burst then rejects", () => {
+    const cfg = { rpm: 60, burst: 2 };
+    let bucket = { tokens: 2, updatedAtMs: 0 };
+    const a = takeRateLimitToken(bucket, cfg, 0);
+    assert.equal(a.allow, true);
+    bucket = a.bucket;
+    const b = takeRateLimitToken(bucket, cfg, 0);
+    assert.equal(b.allow, true);
+    bucket = b.bucket;
+    const c = takeRateLimitToken(bucket, cfg, 0);
+    assert.equal(c.allow, false);
+    assert.ok(c.retryAfterS >= 1);
+  });
+  it("refills over time", () => {
+    const cfg = { rpm: 60, burst: 1 };
+    let bucket = { tokens: 0, updatedAtMs: 0 };
+    const denied = takeRateLimitToken(bucket, cfg, 0);
+    assert.equal(denied.allow, false);
+    // 2 seconds at 60 rpm → +2 tokens, capped at burst 1
+    const allowed = takeRateLimitToken(denied.bucket, cfg, 2000);
+    assert.equal(allowed.allow, true);
   });
 });
 
