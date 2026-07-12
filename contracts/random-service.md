@@ -54,5 +54,6 @@ When dual-run is not routed for the batch (`try_engine_batch` → `eng_meta is N
 | `/metrics` (admin) | Circuit gauges: `new_pixiv_random_engine_circuit_state{state=…}`, `…_open_remaining_seconds`, `…_consecutive_failures`. OpenAPI summary documents scrape-time circuit + modular readiness |
 | `GET /admin/api/maintenance/modular-ports` | `random_service.backend` (+ catalog/tags/job_queue/recent_dedup/random_pick) |
 | `GET /admin/api/maintenance/random-engine` | Full engine readiness + same `circuit` object; open may set `cutover_warning`. OpenAPI summary documents dual-run cutover fields |
+| `POST /admin/api/maintenance/random-engine/compare-filters` | Statistical SQLite vs Go filter cardinality (not pick ids). OpenAPI summary: **Compare random-engine filter cardinality** |
 
 No env switch yet; factory is DI-swappable for tests and future alternate planners.

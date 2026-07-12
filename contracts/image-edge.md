@@ -164,8 +164,8 @@ When disabled or non-pximg `original_url`, public API falls back to local `/i/{i
 | `/healthz` → `modules.image_edge` | `enabled_flag`, `ready`, `base_url_count` — config only, no outbound edge probe / secrets |
 | `/status.json` → `data.image_edge` | Same public shape (`enabled_flag` / `ready` / `base_url_count`); `/status` HTML chip mirrors it (no secrets / no edge probe) |
 | `/status.json` → `data.r2_prewarm` | Public subset: `enabled_flag` / `ready` / `url_configured` (ready = flag+url+secret; no secret fields); HTML chip mirrors it |
-| `GET /admin/api/maintenance/image-edge` | Same readiness shape for Dashboard / Maintenance tags (never returns secret) |
-| `GET /admin/api/maintenance/r2-prewarm` | BFF prewarm webhook readiness (`ready` requires secret; never returns secret) |
+| `GET /admin/api/maintenance/image-edge` | Same readiness shape for Dashboard / Maintenance tags (never returns secret). OpenAPI summary: **Image Edge readiness status** (parity note with healthz/status.json) |
+| `GET /admin/api/maintenance/r2-prewarm` | BFF prewarm webhook readiness (`ready` requires secret; never returns secret). OpenAPI summary: **R2 prewarm readiness status** |
 | Prometheus `new_pixiv_image_delivery_total{path=…}` | `edge_redirect` / `edge_unavailable` / local cascade paths |
 | `/metrics` (admin) → modular readiness | `new_pixiv_module_readiness{module="image_edge\|r2_prewarm",flag=…}` + `new_pixiv_module_base_url_count{module="image_edge"}` (local config only) |
 

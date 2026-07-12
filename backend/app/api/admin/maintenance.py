@@ -109,16 +109,21 @@ async def cleanup_request_logs_endpoint(
         "has_more": bool(result.has_more)}, request_id=rid)
 
 
-@router.get("/maintenance/image-edge")
+@router.get(
+    "/maintenance/image-edge",
+    summary="Image Edge readiness status",
+    description=(
+        "Read-only Image Edge config status (never returns secrets). "
+        "Ops surface for Phase 2 cutover: whether signed CF edge URLs can be minted "
+        "(`enabled_flag`, `ready`, `base_urls`/`base_url_count`, `has_secret`, `missing`). "
+        "Deploy / multi-region 403 POC remains outside this process. "
+        "Parity with `/healthz` `modules.image_edge` and public `/status.json` `data.image_edge`."
+    ),
+)
 async def image_edge_status(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
-    """Read-only Image Edge config status (never returns secrets).
-
-    Ops surface for Phase 2 cutover: whether signed CF edge URLs can be minted.
-    Deploy / multi-region 403 POC remains outside this process.
-    """
     _ = _claims
     rid = get_or_create_request_id(request)
     settings = getattr(request.app.state, "settings", None)
@@ -154,15 +159,21 @@ async def image_edge_status(
     )
 
 
-@router.get("/maintenance/cf-api-proxy")
+@router.get(
+    "/maintenance/cf-api-proxy",
+    summary="CF API proxy readiness status",
+    description=(
+        "Read-only CF API egress pool status (never returns secrets). "
+        "Ops surface for Phase 5: whether hydrate/OAuth prefer CF Worker egress "
+        "(`enabled_flag`, `ready`, `base_urls`/`base_url_count`, `has_secret`, `missing`). "
+        "Worker `PROXY_SECRET` is fail-closed; BFF secret required for ready. "
+        "Parity with `/healthz` `modules.cf_api_proxy` and public `/status.json` `data.cf_api_proxy`."
+    ),
+)
 async def cf_api_proxy_status(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
-    """Read-only CF API egress pool status (never returns secrets).
-
-    Ops surface for Phase 5: whether hydrate/OAuth prefer CF Worker egress.
-    """
     _ = _claims
     rid = get_or_create_request_id(request)
     settings = getattr(request.app.state, "settings", None)
@@ -193,17 +204,23 @@ async def cf_api_proxy_status(
     )
 
 
-@router.get("/maintenance/r2-prewarm")
+@router.get(
+    "/maintenance/r2-prewarm",
+    summary="R2 prewarm readiness status",
+    description=(
+        "Read-only R2 prewarm webhook status (never returns full secrets). "
+        "BFF maps catalog image_ids → pximg paths, then POSTs Worker "
+        "`POST /v1/prewarm` with `{paths}` + `X-Prewarm-Secret` after "
+        "hydrate/import/heal when enabled. Returns `enabled_flag`/`ready`/"
+        "`url_configured`/`secret_configured`/`url_preview`/`missing`. "
+        "Worker R2 binding / R2_MODE is separate (ops). "
+        "Parity with `/healthz` `modules.r2_prewarm` and public `/status.json` `data.r2_prewarm`."
+    ),
+)
 async def r2_prewarm_status(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
-    """Read-only R2 prewarm webhook status (never returns full secrets).
-
-    BFF maps catalog image_ids → pximg paths, then POSTs Worker
-    ``POST /v1/prewarm`` with ``{paths}`` + ``X-Prewarm-Secret`` after
-    hydrate/import/heal when enabled. Worker R2 binding / R2_MODE is separate.
-    """
     _ = _claims
     rid = get_or_create_request_id(request)
     settings = getattr(request.app.state, "settings", None)
@@ -244,16 +261,23 @@ async def r2_prewarm_status(
     )
 
 
-@router.get("/maintenance/api-key-rate-limit")
+@router.get(
+    "/maintenance/api-key-rate-limit",
+    summary="API key rate-limit readiness status",
+    description=(
+        "Read-only public API key rate-limit backend status (never returns Redis URL). "
+        "Default backend is process-local memory. Redis is optional via "
+        "`PUBLIC_API_KEY_RATE_LIMIT_BACKEND=redis` + `REDIS_URL` (fail-open to memory). "
+        "Returns `required`/`rpm`/`burst`/`configured_backend`/`active_backend`/"
+        "`redis_url_configured`/`using_memory_fallback`. "
+        "Parity with `/healthz` `modules.api_key_rate_limit` and public "
+        "`/status.json` `data.api_key_rate_limit`."
+    ),
+)
 async def api_key_rate_limit_status(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
-    """Read-only public API key rate-limit backend status (never returns Redis URL).
-
-    Default backend is process-local memory. Redis is optional via
-    PUBLIC_API_KEY_RATE_LIMIT_BACKEND=redis + REDIS_URL (fail-open to memory).
-    """
     _ = _claims
     rid = get_or_create_request_id(request)
     settings = getattr(request.app.state, "settings", None)
@@ -546,16 +570,20 @@ def _coerce_tag_list(raw: Any) -> list[str] | None:
     return None
 
 
-@router.post("/maintenance/random-engine/compare-filters")
+@router.post(
+    "/maintenance/random-engine/compare-filters",
+    summary="Compare random-engine filter cardinality",
+    description=(
+        "Statistical dual-run check: SQLite filter cardinality vs Go engine index. "
+        "Does not compare sampled pick ids (non-deterministic). Optional body fields "
+        "mirror public `/random` query params (r18, tags, mins, …). Defaults = safe r18=0. "
+        "Returns `match`/`python_filtered`/`engine_filtered`/`delta` plus engine index meta."
+    ),
+)
 async def random_engine_compare_filters(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> dict[str, Any]:
-    """Statistical dual-run check: SQLite filter cardinality vs Go engine index.
-
-    Does not compare sampled pick ids (non-deterministic). Optional body fields
-    mirror public /random query params (r18, tags, mins, …). Defaults = safe r18=0.
-    """
     _ = _claims
     rid = get_or_create_request_id(request)
     settings = getattr(request.app.state, "settings", None)

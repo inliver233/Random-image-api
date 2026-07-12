@@ -40,7 +40,7 @@ Socket connect/read timeouts on the Redis client are also short (~0.2s). Budget 
 | --- | --- |
 | `/healthz` → `modules.api_key_rate_limit` | `backend` (active), `requested` (Settings), `using_memory_fallback`, `redis_url_configured`, `required` — no Redis probe / secrets |
 | `/status.json` → `data.api_key_rate_limit` | Same public shape as healthz (`backend` / `requested` / `redis_url_configured` / `required` / `using_memory_fallback`); `/status` HTML chip mirrors it (no Redis URL / no probe) |
-| `GET /admin/api/maintenance/api-key-rate-limit` | Active vs configured backend (+ rpm/burst); never returns URL |
+| `GET /admin/api/maintenance/api-key-rate-limit` | Active vs configured backend (+ rpm/burst); never returns URL. OpenAPI summary: **API key rate-limit readiness status** (parity note with healthz/status.json) |
 | Prometheus `new_pixiv_api_key_rate_limit_total{result,backend}` | `allowed` / `limited` × `memory` / `redis` |
 | `/metrics` (admin) → modular readiness | `new_pixiv_module_readiness{module="api_key_rate_limit",flag="required\|using_memory_fallback\|redis_url_configured"}` |
 

@@ -34,6 +34,41 @@ def test_admin_maintenance_openapi_documents_dual_run_and_cleanup() -> None:
         assert needle in ports_desc
 
 
+def test_admin_maintenance_openapi_documents_edge_and_rate_limit_readiness() -> None:
+    """Phase-2/5 edge + RL ops surfaces must have explicit OpenAPI summaries (not Title-Case auto)."""
+    app = create_app()
+    schema = app.openapi()
+    paths = schema["paths"]
+
+    edge_op = paths["/admin/api/maintenance/image-edge"]["get"]
+    assert edge_op.get("summary") == "Image Edge readiness status"
+    edge_desc = str(edge_op.get("description") or "")
+    assert "ready" in edge_desc.lower()
+    assert "modules.image_edge" in edge_desc or "image_edge" in edge_desc
+
+    cf_op = paths["/admin/api/maintenance/cf-api-proxy"]["get"]
+    assert cf_op.get("summary") == "CF API proxy readiness status"
+    cf_desc = str(cf_op.get("description") or "")
+    assert "cf_api_proxy" in cf_desc or "Worker" in cf_desc
+
+    r2_op = paths["/admin/api/maintenance/r2-prewarm"]["get"]
+    assert r2_op.get("summary") == "R2 prewarm readiness status"
+    r2_desc = str(r2_op.get("description") or "")
+    assert "prewarm" in r2_desc.lower()
+    assert "r2_prewarm" in r2_desc or "X-Prewarm-Secret" in r2_desc
+
+    rl_op = paths["/admin/api/maintenance/api-key-rate-limit"]["get"]
+    assert rl_op.get("summary") == "API key rate-limit readiness status"
+    rl_desc = str(rl_op.get("description") or "")
+    assert "memory" in rl_desc.lower()
+    assert "redis" in rl_desc.lower() or "REDIS" in rl_desc
+
+    cmp_op = paths["/admin/api/maintenance/random-engine/compare-filters"]["post"]
+    assert cmp_op.get("summary") == "Compare random-engine filter cardinality"
+    cmp_desc = str(cmp_op.get("description") or "")
+    assert "cardinality" in cmp_desc.lower() or "filtered" in cmp_desc.lower()
+
+
 def test_admin_modular_ports_status_defaults(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "admin_modular_ports.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
