@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Mapping
 
-import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.config import Settings, load_settings
@@ -134,7 +133,6 @@ async def maybe_enqueue_r2_prewarm(
     When only image_ids are provided, resolve original_url via CatalogStore
     (requires engine). No-op when disabled / no paths / no secret. Never raises.
     """
-    owned: httpx.AsyncClient | None = None
     try:
         s = settings if settings is not None else load_settings()
         if not r2_prewarm_enabled(s):
@@ -170,8 +168,10 @@ async def maybe_enqueue_r2_prewarm(
 
         use_client = client
         if use_client is None:
-            owned = httpx.AsyncClient()
-            use_client = owned
+            # Worker/job path: reuse process control-plane client (no cold client per call).
+            from app.core.http_client import get_control_plane_http_client
+
+            use_client = get_control_plane_http_client()
 
         applied = 0
         failed_chunks = 0
@@ -213,9 +213,3 @@ async def maybe_enqueue_r2_prewarm(
     except Exception as exc:
         logger.warning("r2-prewarm error: %s", exc)
         return None
-    finally:
-        if owned is not None:
-            try:
-                await owned.aclose()
-            except Exception:
-                pass

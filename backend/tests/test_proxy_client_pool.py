@@ -7,19 +7,38 @@ import httpx
 from app.core.http_client import (
     ProxyClientPool,
     acquire_proxy_client,
+    aclose_control_plane_http_client,
     aclose_proxy_client_pool,
+    get_control_plane_http_client,
     get_proxy_client_pool,
+    reset_control_plane_http_client_for_tests,
     reset_proxy_client_pool_for_tests,
 )
 
 
 def setup_function() -> None:
     reset_proxy_client_pool_for_tests()
+    reset_control_plane_http_client_for_tests()
 
 
 def teardown_function() -> None:
     asyncio.run(aclose_proxy_client_pool())
+    asyncio.run(aclose_control_plane_http_client())
     reset_proxy_client_pool_for_tests()
+    reset_control_plane_http_client_for_tests()
+
+
+def test_control_plane_http_client_reuses_singleton() -> None:
+    async def _run() -> None:
+        a = get_control_plane_http_client()
+        b = get_control_plane_http_client()
+        assert a is b
+        assert isinstance(a, httpx.AsyncClient)
+        await aclose_control_plane_http_client()
+        c = get_control_plane_http_client()
+        assert c is not a
+
+    asyncio.run(_run())
 
 
 def test_proxy_pool_reuses_same_client() -> None:

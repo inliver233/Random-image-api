@@ -213,15 +213,21 @@ async def _resolve_publish_client(
     settings: Settings | None,
     client: Any | None,
 ) -> tuple[str | None, Any | None, httpx.AsyncClient | None]:
-    """Return (base_url, client_to_use, owned_client_to_close)."""
+    """Return (base_url, client_to_use, owned_client_to_close).
+
+    When ``client`` is omitted, reuse the process control-plane singleton
+    (worker hydrate/import/heal). Shared client must not be closed by callers
+    (owned is always None in that path).
+    """
     s = settings if settings is not None else load_settings()
     base = random_engine_base_url(s)
     if not base:
         return None, None, None
     if client is not None:
         return base, client, None
-    owned = httpx.AsyncClient()
-    return base, owned, owned
+    from app.core.http_client import get_control_plane_http_client
+
+    return base, get_control_plane_http_client(), None
 
 
 async def publish_engine_events(

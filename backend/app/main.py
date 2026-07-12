@@ -30,6 +30,7 @@ from app.core.api_keys import (
 )
 from app.core.errors import ApiError, ErrorCode, json_error_response
 from app.core.http_client import (
+    aclose_control_plane_http_client,
     aclose_proxy_client_pool,
     build_default_async_transport,
     build_shared_async_client,
@@ -178,6 +179,11 @@ def create_app() -> FastAPI:
 
             try:
                 await aclose_proxy_client_pool()
+            except Exception:
+                pass
+
+            try:
+                await aclose_control_plane_http_client()
             except Exception:
                 pass
 

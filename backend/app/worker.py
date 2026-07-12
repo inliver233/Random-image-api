@@ -17,6 +17,7 @@ from app.core.env_parse import (
     parse_str_env,
 )
 from app.core.coerce import format_exc
+from app.core.http_client import aclose_control_plane_http_client, aclose_proxy_client_pool
 from app.core.logging import configure_logging, get_logger
 from app.core.redact import redact_text
 from app.core.time import iso_utc_ms
@@ -486,6 +487,14 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
                 await scheduler.shutdown()
             except Exception:
                 log.warning("worker_scheduler_shutdown_failed")
+        try:
+            await aclose_proxy_client_pool()
+        except Exception:
+            log.warning("worker_proxy_client_pool_shutdown_failed")
+        try:
+            await aclose_control_plane_http_client()
+        except Exception:
+            log.warning("worker_control_plane_http_shutdown_failed")
         await engine.dispose()
 
 

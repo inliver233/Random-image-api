@@ -33,6 +33,42 @@ def build_shared_async_client(*, transport: httpx.AsyncBaseTransport | None = No
     )
 
 
+# Process-local non-proxy client for control-plane outbound (engine events, R2 prewarm)
+# when no request-scoped app.state.httpx_client is injected (worker/job handlers).
+_control_plane_client: httpx.AsyncClient | None = None
+
+
+def get_control_plane_http_client() -> httpx.AsyncClient:
+    """Lazy process singleton for non-proxy control-plane HTTP.
+
+    Prefer injecting ``app.state.httpx_client`` from the API process. Worker and
+    job handlers use this so each publish/prewarm does not open a cold client.
+    Callers must **not** aclose the returned client.
+    """
+    global _control_plane_client
+    if _control_plane_client is None:
+        _control_plane_client = build_shared_async_client()
+    return _control_plane_client
+
+
+async def aclose_control_plane_http_client() -> None:
+    """Shutdown hook — close process control-plane client if created."""
+    global _control_plane_client
+    client = _control_plane_client
+    _control_plane_client = None
+    if client is not None:
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+
+
+def reset_control_plane_http_client_for_tests() -> None:
+    """Drop control-plane client reference without awaiting close (tests only)."""
+    global _control_plane_client
+    _control_plane_client = None
+
+
 class ProxyClientPool:
     """Process-local pool of httpx clients keyed by proxy URI (keepalive reuse).
 
