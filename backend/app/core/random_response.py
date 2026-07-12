@@ -193,15 +193,23 @@ def build_feed_json_body(
     request_id: str,
     items: list[dict[str, Any]],
     requested: int,
+    debug: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Batch envelope for GET /feed (simple_json item shape per entry)."""
+    """Batch envelope for GET /feed (simple_json item shape per entry).
+
+    Per-item debug stays off by default; optional envelope ``debug`` is for
+    dual-run honesty (``?debug=1``) without bloating each card under /wtf.
+    """
+    data: dict[str, Any] = {
+        "items": items,
+        "count": len(items),
+        "requested": int(requested),
+    }
+    if debug is not None:
+        data["debug"] = {**debug}
     return {
         "ok": True,
         "code": "OK",
         "request_id": request_id,
-        "data": {
-            "items": items,
-            "count": len(items),
-            "requested": int(requested),
-        },
+        "data": data,
     }

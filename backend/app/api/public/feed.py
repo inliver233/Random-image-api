@@ -14,7 +14,7 @@ from app.core.random_delivery import (
     schedule_pick_side_effects,
 )
 from app.core.random_query import no_match_error_from_filters
-from app.core.random_request import PublicRandomQuery
+from app.core.random_request import PublicRandomQuery, parse_public_debug_flag
 from app.core.random_response import (
     build_feed_json_body,
     build_simple_item_payload,
@@ -138,10 +138,14 @@ async def feed_images(
 
     items: list[dict[str, Any]] = []
     exclude_ids: list[int] = []
+    include_debug = parse_public_debug_flag(request.query_params)
+    eng_meta: dict[str, Any] | None = None
+    batch_count = 0
+    topup_count = 0
 
     async with Session() as session:
         # Prefer one engine batch pick when dual-run is enabled (limit>1).
-        images, _eng_meta = await pick_ctx.try_engine_batch(
+        images, eng_meta = await pick_ctx.try_engine_batch(
             session=session,
             settings=settings,
             httpx_client=httpx_client,
@@ -149,6 +153,7 @@ async def feed_images(
             limit=limit_i,
             catalog=catalog,
         )
+        batch_count = len(images)
         for image in images:
             exclude_ids.append(int(image.id))
             _append_item(image, items)
@@ -173,9 +178,36 @@ async def feed_images(
                     break
                 exclude_ids.append(int(image.id))
                 _append_item(image, items)
+                topup_count += 1
 
     if not items:
         raise _no_match_error()
 
     request_id = getattr(getattr(request, "state", None), "request_id", None) or "req_unknown"
-    return build_feed_json_body(request_id=request_id, items=items, requested=limit_i)
+    # Envelope-only debug (items stay lean for /wtf). Surfaces dual-run batch engine_status.
+    debug_out: dict[str, Any] | None = None
+    if include_debug:
+        status: str | None = None
+        if isinstance(eng_meta, dict):
+            raw_status = eng_meta.get("engine_status")
+            if isinstance(raw_status, str) and raw_status.strip():
+                status = raw_status.strip()
+        debug_out = {
+            "batch": True,
+            # None eng_meta ⇒ dual-run not routed (disabled / no URL / traffic miss).
+            "engine_status": status or "skipped_not_routed",
+            "batch_count": int(batch_count),
+            "topup_count": int(topup_count),
+            # Feed always sticky-skips engine on Python top-up after one batch attempt.
+            "topup_skip_engine": True,
+        }
+        if isinstance(eng_meta, dict):
+            picked_by = eng_meta.get("picked_by")
+            if isinstance(picked_by, str) and picked_by.strip():
+                debug_out["picked_by"] = picked_by.strip()
+    return build_feed_json_body(
+        request_id=request_id,
+        items=items,
+        requested=limit_i,
+        debug=debug_out,
+    )

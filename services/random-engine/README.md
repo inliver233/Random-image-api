@@ -83,6 +83,11 @@ Prometheus:
 
 BFF debug meta on engine hit also includes `engine_dto_count` / `engine_rehydrate_count` / `engine_rehydrate` so dual-run can confirm SQLite skip rate.
 
+Public JSON (`?debug=1`):
+
+- `GET /random` → `data.debug.engine_status` (per pick; includes `skipped_circuit` / `skipped_sticky` / …)
+- `GET /feed` → envelope-only `data.debug` (`engine_status`, `batch_count`, `topup_count`, `topup_skip_engine`); per-item debug stays omitted for `/wtf` bandwidth
+
 ### Catalog → engine events (best-effort)
 
 When `RANDOM_ENGINE_URL` is set (does **not** require `RANDOM_ENGINE_ENABLED`), control-plane writers publish deltas:

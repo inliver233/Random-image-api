@@ -70,6 +70,87 @@ def test_feed_returns_batch_simple_items(tmp_path: Path, monkeypatch) -> None:
             assert "debug" not in it
             ids.add(it["image"]["id"])
         assert len(ids) == 3
+        # Envelope debug is opt-in only (?debug=1).
+        assert "debug" not in body["data"]
+
+
+def test_feed_debug_envelope_engine_status(tmp_path: Path, monkeypatch) -> None:
+    """?debug=1 attaches dual-run batch honesty on the feed envelope (not per item)."""
+    clear_recent()
+    db_path = tmp_path / "feed_debug.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("RANDOM_ENGINE_ENABLED", "true")
+    monkeypatch.setenv("RANDOM_ENGINE_BASE_URL", "http://engine.test")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            for i in range(3):
+                session.add(
+                    Image(
+                        illust_id=300 + i,
+                        page_index=0,
+                        ext="jpg",
+                        original_url=f"https://example.test/dbg/{i}.jpg",
+                        proxy_path=f"/i/{i + 1}.jpg",
+                        random_key=0.15 * (i + 1),
+                        x_restrict=0,
+                        status=1,
+                    )
+                )
+            await session.commit()
+        await app.state.engine.dispose()
+
+    asyncio.run(_seed())
+
+    async def _fake_try_many(**_kwargs):  # type: ignore[no-untyped-def]
+        return [], {"engine_status": "skipped_circuit", "engine": True, "picked_by": "python", "batch": True}
+
+    monkeypatch.setattr(
+        "app.core.random_engine_pick.try_pick_many_via_engine",
+        _fake_try_many,
+    )
+    monkeypatch.setattr(
+        "app.core.random_engine_client.should_route_pick_to_engine",
+        lambda _s: True,
+    )
+    monkeypatch.setattr(
+        "app.core.random_engine_client.random_engine_base_url",
+        lambda _s: "http://engine.test",
+    )
+    # Force circuit-open path through try_engine_batch (local snapshot, no outbound).
+    monkeypatch.setattr(
+        "app.core.random_engine_client.engine_circuit_allow",
+        lambda: False,
+    )
+
+    with TestClient(app) as client:
+        resp = client.get(
+            "/feed",
+            params={"limit": 2, "strategy": "random", "debug": "1"},
+            headers={"X-Request-Id": "req_feed_debug"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["request_id"] == "req_feed_debug"
+        dbg = body["data"]["debug"]
+        assert dbg["batch"] is True
+        assert dbg["engine_status"] == "skipped_circuit"
+        assert dbg["batch_count"] == 0
+        assert dbg["topup_count"] == 2
+        assert dbg["topup_skip_engine"] is True
+        # Items remain lean even when envelope debug is on.
+        for it in body["data"]["items"]:
+            assert "debug" not in it
 
 
 def test_feed_topup_skips_engine_after_batch(tmp_path: Path, monkeypatch) -> None:

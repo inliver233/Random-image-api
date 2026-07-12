@@ -33,6 +33,15 @@ Prometheus / debug honesty:
 
 Process circuit (BFF, not Go): 5 consecutive hard statuses (`unavailable` / `empty_index`) → open ~30s; success resets; soft miss does not trip. Snapshot shape: `{ state, consecutive_failures, open_remaining_s, failure_threshold, open_s }`.
 
+### Public JSON honesty (`?debug=1`)
+
+| Endpoint | Where `engine_status` appears |
+| --- | --- |
+| `GET /random` (`format=json` / `simple_json`) | `data.debug.engine_status` (per pick) |
+| `GET /feed` | Envelope only: `data.debug.engine_status` (+ `batch_count` / `topup_count` / `topup_skip_engine`); per-item debug stays omitted for `/wtf` bandwidth |
+
+When dual-run is not routed for the batch (`try_engine_batch` → `eng_meta is None`), feed debug reports `engine_status=skipped_not_routed`.
+
 ## Ops
 
 - `/healthz` → `modules.random_service.backend` (default: `default`)
