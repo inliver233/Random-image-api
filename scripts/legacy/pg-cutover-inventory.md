@@ -63,7 +63,7 @@ Unit coverage for dialect helpers: `backend/tests/test_images_upsert.py`.
 ## Acceptance criteria for real PG cutover (not this PR)
 
 - [ ] Fresh `alembic upgrade head` against empty Postgres succeeds without manual SQL  
-  - *Partial (code):* ORM `CreateTable` for all models compiles with `to_char` on PG / `strftime` on SQLite (`UtcNow`); alembic history uses `utc_iso_now_server_default`. **Still needs** live Docker/`asyncpg` dry-run on empty DB (no daemon in this workspace).  
+  - *Partial (code):* ORM `CreateTable` dual-compile OK; `alembic upgrade head --sql` offline render has **to_char**, **no strftime/fts5** (`tests/test_alembic_postgres_offline_sql.py`). **Still needs** live empty-DB apply via Docker/`asyncpg`.  
 - [ ] Import path (CSV or `import-pg`) + `verify` matches source counts  
 - [ ] Hydrate job claim + complete under concurrent workers (no silent lock death)  
 - [ ] Public `/random` + admin tags/authors search (LIKE acceptable)  
