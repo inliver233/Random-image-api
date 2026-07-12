@@ -42,7 +42,14 @@ from app.easy_proxies.normalize import normalize_exported_proxy_host, resolve_ex
 router = APIRouter()
 
 
-@router.get("/proxies/endpoints")
+@router.get(
+    "/proxies/endpoints",
+    summary="List proxy endpoints",
+    description=(
+        "Cursor-paginated ProxyEndpoint rows (scheme/host/port/source/failure flags). "
+        "Passwords never leave encrypted storage. Used by residential pools and probe enqueue."
+    ),
+)
 async def list_proxy_endpoints(
     request: Request,
     limit: int = 50,
@@ -347,7 +354,15 @@ async def _load_cleanup_invalid_hosts_json(request: Request) -> dict[str, Any]:
     return out
 
 
-@router.post("/proxies/endpoints/import")
+@router.post(
+    "/proxies/endpoints/import",
+    summary="Import proxy endpoints from URI text",
+    description=(
+        "Parse proxy URI lines into ProxyEndpoint rows (optional FieldEncryptor passwords). "
+        "Conflict policy overwrite|skip. Invalidates proxy pool caches. Inline control-plane "
+        "import (not JobQueuePort) — distinct from easy-proxies import and probe enqueue."
+    ),
+)
 async def import_proxy_endpoints(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
@@ -457,7 +472,14 @@ async def import_proxy_endpoints(
         "errors": errors[:200]}, request_id=rid)
 
 
-@router.put("/proxies/endpoints/{endpoint_id}")
+@router.put(
+    "/proxies/endpoints/{endpoint_id}",
+    summary="Update proxy endpoint enabled flag",
+    description=(
+        "Enable/disable a ProxyEndpoint. Invalidates proxy pool caches so residential "
+        "routing drops disabled endpoints promptly."
+    ),
+)
 async def update_proxy_endpoint(
     endpoint_id: int,
     request: Request,
@@ -487,7 +509,14 @@ async def update_proxy_endpoint(
     return admin_ok(request, payload={"endpoint_id": str(endpoint_id), "enabled": enabled}, request_id=rid)
 
 
-@router.post("/proxies/endpoints/{endpoint_id}/reset-failures")
+@router.post(
+    "/proxies/endpoints/{endpoint_id}/reset-failures",
+    summary="Reset proxy endpoint failure state",
+    description=(
+        "Clear failure_count / blacklisted_until / last_error so the endpoint re-enters "
+        "residential selection. Invalidates proxy pool caches. Does not enqueue a probe job."
+    ),
+)
 async def reset_proxy_failures(
     endpoint_id: int,
     request: Request,
@@ -519,7 +548,14 @@ async def reset_proxy_failures(
     return admin_ok(request, payload={"endpoint_id": str(endpoint_id)}, request_id=rid)
 
 
-@router.post("/proxies/endpoints/cleanup-invalid-hosts")
+@router.post(
+    "/proxies/endpoints/cleanup-invalid-hosts",
+    summary="Cleanup proxy endpoints with invalid hosts",
+    description=(
+        "Delete or disable ProxyEndpoint rows whose host fails validation (optional dry-run). "
+        "Control-plane maintenance; invalidates proxy pool caches. Not a JobQueuePort job."
+    ),
+)
 async def cleanup_invalid_hosts(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),

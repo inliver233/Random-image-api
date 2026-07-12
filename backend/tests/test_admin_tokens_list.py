@@ -124,3 +124,29 @@ def test_admin_list_tokens_cursor_pagination(tmp_path: Path, monkeypatch) -> Non
         assert len(body2["items"]) == 1
         ids = {row["id"] for row in body1["items"]} | {row["id"] for row in body2["items"]}
         assert len(ids) == 3
+
+
+def test_admin_tokens_openapi_documents_control_plane() -> None:
+    """Tokens CRUD OpenAPI must document secrets masking + test-refresh coupling."""
+    app = create_app()
+    paths = app.openapi()["paths"]
+
+    list_op = paths["/admin/api/tokens"]["get"]
+    assert list_op.get("summary") == "List Pixiv tokens"
+    assert "masked" in str(list_op.get("description") or "").lower() or "refresh" in str(
+        list_op.get("description") or ""
+    ).lower()
+
+    create_op = paths["/admin/api/tokens"]["post"]
+    assert create_op.get("summary") == "Create Pixiv token"
+    assert "encrypt" in str(create_op.get("description") or "").lower()
+
+    update_op = paths["/admin/api/tokens/{token_id}"]["put"]
+    assert update_op.get("summary") == "Update Pixiv token"
+
+    delete_op = paths["/admin/api/tokens/{token_id}"]["delete"]
+    assert delete_op.get("summary") == "Delete Pixiv token"
+    assert "binding" in str(delete_op.get("description") or "").lower()
+
+    reset_op = paths["/admin/api/tokens/{token_id}/reset-failures"]["post"]
+    assert reset_op.get("summary") == "Reset token failure backoff"

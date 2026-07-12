@@ -89,7 +89,15 @@ async def _load_update_token_json(request: Request) -> dict[str, Any]:
     return out
 
 
-@router.get("/tokens")
+@router.get(
+    "/tokens",
+    summary="List Pixiv tokens",
+    description=(
+        "Cursor-paginated PixivToken control-plane rows (label/weight/error backoff). "
+        "Never returns encrypted refresh tokens — only masked. Used with residential bindings "
+        "and CF-first OAuth test-refresh (`POST .../test-refresh`)."
+    ),
+)
 async def list_tokens(
     request: Request,
     limit: int = 200,
@@ -134,7 +142,15 @@ async def list_tokens(
     return admin_cursor_list(request, items=items, next_cursor=next_cursor, request_id=rid)
 
 
-@router.post("/tokens")
+@router.post(
+    "/tokens",
+    summary="Create Pixiv token",
+    description=(
+        "Store a new Pixiv refresh token encrypted via FieldEncryptor (`FIELD_ENCRYPTION_KEY`). "
+        "Response is `token_id` only — never echoes secrets. Pair with bindings recompute for "
+        "residential egress; OAuth probe is `POST .../test-refresh`."
+    ),
+)
 async def create_token(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
@@ -170,7 +186,14 @@ async def create_token(
     return admin_ok(request, payload={"token_id": str(row.id)}, request_id=rid)
 
 
-@router.put("/tokens/{token_id}")
+@router.put(
+    "/tokens/{token_id}",
+    summary="Update Pixiv token",
+    description=(
+        "Partial update of PixivToken label/enabled/weight (not the refresh secret). "
+        "Enabled=false removes the token from hydrate/OAuth selection until re-enabled."
+    ),
+)
 async def update_token(
     token_id: int,
     request: Request,
@@ -206,7 +229,14 @@ async def update_token(
     return admin_ok(request, payload={"token_id": str(token_id)}, request_id=rid)
 
 
-@router.delete("/tokens/{token_id}")
+@router.delete(
+    "/tokens/{token_id}",
+    summary="Delete Pixiv token",
+    description=(
+        "Delete PixivToken and cascade-clear TokenProxyBinding rows for that token. "
+        "Does not enqueue jobs; pure catalog/control-plane write."
+    ),
+)
 async def delete_token(
     token_id: int,
     request: Request,
@@ -413,7 +443,14 @@ async def test_refresh_token(
         "proxy": proxy_details}, request_id=rid)
 
 
-@router.post("/tokens/{token_id}/reset-failures")
+@router.post(
+    "/tokens/{token_id}/reset-failures",
+    summary="Reset token failure backoff",
+    description=(
+        "Clear error_count / backoff_until / last_error fields so the token is eligible again "
+        "for hydrate and OAuth refresh selection. Does not rotate secrets or touch bindings."
+    ),
+)
 async def reset_failures(
     token_id: int,
     request: Request,

@@ -50,3 +50,28 @@ def test_admin_list_proxy_pools(tmp_path: Path, monkeypatch) -> None:
         assert len(body["items"]) == 1
         assert body["items"][0]["name"] == "pool1"
 
+
+def test_admin_proxy_pools_openapi_documents_residential_control_plane() -> None:
+    """Proxy-pools OpenAPI must document residential pool control-plane coupling."""
+    app = create_app()
+    paths = app.openapi()["paths"]
+
+    list_op = paths["/admin/api/proxy-pools"]["get"]
+    assert list_op.get("summary") == "List proxy pools"
+    assert "residential" in str(list_op.get("description") or "").lower() or "binding" in str(
+        list_op.get("description") or ""
+    ).lower()
+
+    create_op = paths["/admin/api/proxy-pools"]["post"]
+    assert create_op.get("summary") == "Create proxy pool"
+    assert "cache" in str(create_op.get("description") or "").lower()
+
+    update_op = paths["/admin/api/proxy-pools/{pool_id}"]["put"]
+    assert update_op.get("summary") == "Update proxy pool"
+
+    set_ep = paths["/admin/api/proxy-pools/{pool_id}/endpoints"]["post"]
+    assert set_ep.get("summary") == "Set proxy pool endpoints"
+    assert "recompute" in str(set_ep.get("description") or "").lower() or "binding" in str(
+        set_ep.get("description") or ""
+    ).lower()
+

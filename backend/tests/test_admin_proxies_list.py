@@ -84,3 +84,30 @@ def test_admin_list_proxy_endpoints_does_not_echo_password(tmp_path: Path, monke
 
         easy = next(i for i in items if i["source"] == "easy_proxies")
         assert easy["source_ref"] == "http://easy.test:15666"
+
+
+def test_admin_proxies_endpoints_openapi_documents_control_plane() -> None:
+    """Proxy endpoints OpenAPI must document residential control-plane surfaces."""
+    app = create_app()
+    paths = app.openapi()["paths"]
+
+    list_op = paths["/admin/api/proxies/endpoints"]["get"]
+    assert list_op.get("summary") == "List proxy endpoints"
+    assert "password" in str(list_op.get("description") or "").lower() or "encrypted" in str(
+        list_op.get("description") or ""
+    ).lower()
+
+    import_op = paths["/admin/api/proxies/endpoints/import"]["post"]
+    assert import_op.get("summary") == "Import proxy endpoints from URI text"
+    assert "JobQueue" in str(import_op.get("description") or "") or "inline" in str(
+        import_op.get("description") or ""
+    ).lower()
+
+    update_op = paths["/admin/api/proxies/endpoints/{endpoint_id}"]["put"]
+    assert update_op.get("summary") == "Update proxy endpoint enabled flag"
+
+    reset_op = paths["/admin/api/proxies/endpoints/{endpoint_id}/reset-failures"]["post"]
+    assert reset_op.get("summary") == "Reset proxy endpoint failure state"
+
+    cleanup_op = paths["/admin/api/proxies/endpoints/cleanup-invalid-hosts"]["post"]
+    assert cleanup_op.get("summary") == "Cleanup proxy endpoints with invalid hosts"

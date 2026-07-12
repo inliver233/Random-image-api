@@ -101,7 +101,14 @@ async def _load_set_endpoints_json(request: Request) -> list[dict[str, Any]]:
     return out
 
 
-@router.get("/proxy-pools")
+@router.get(
+    "/proxy-pools",
+    summary="List proxy pools",
+    description=(
+        "List ProxyPool control-plane rows (name/enabled). Pools back residential egress "
+        "selection and TokenProxyBinding recompute; CF API proxy path is independent."
+    ),
+)
 async def list_proxy_pools(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
@@ -131,7 +138,14 @@ async def list_proxy_pools(
     return admin_ok(request, payload={"items": items}, request_id=rid)
 
 
-@router.post("/proxy-pools")
+@router.post(
+    "/proxy-pools",
+    summary="Create proxy pool",
+    description=(
+        "Create a ProxyPool. Invalidates in-process proxy pool caches after write so "
+        "residential routing sees the new pool without process restart."
+    ),
+)
 async def create_proxy_pool(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
@@ -161,7 +175,14 @@ async def create_proxy_pool(
     return admin_ok(request, payload={"pool_id": str(row.id)}, request_id=rid)
 
 
-@router.put("/proxy-pools/{pool_id}")
+@router.put(
+    "/proxy-pools/{pool_id}",
+    summary="Update proxy pool",
+    description=(
+        "Partial update of ProxyPool name/description/enabled. Invalidates proxy pool caches. "
+        "Disabling a pool affects residential routing; CF API proxy remains env-flagged."
+    ),
+)
 async def update_proxy_pool(
     pool_id: int,
     request: Request,
@@ -197,7 +218,15 @@ async def update_proxy_pool(
     return admin_ok(request, payload={"pool_id": str(pool_id)}, request_id=rid)
 
 
-@router.post("/proxy-pools/{pool_id}/endpoints")
+@router.post(
+    "/proxy-pools/{pool_id}/endpoints",
+    summary="Set proxy pool endpoints",
+    description=(
+        "Replace membership of ProxyPoolEndpoint for a pool (enabled/weight per endpoint). "
+        "Invalidates proxy pool caches. Bindings recompute is separate "
+        "(`POST /admin/api/bindings/recompute`) — this only attaches endpoints."
+    ),
+)
 async def set_proxy_pool_endpoints(
     pool_id: int,
     request: Request,
