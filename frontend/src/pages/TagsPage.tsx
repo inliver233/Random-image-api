@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 
 import { CursorTableCard } from "../admin/CursorTableCard";
 import { apiJson } from "../api/client";
+import { publicApiKeyHeaders } from "../auth/publicApiKeyStorage";
 import { useCursorList } from "../hooks/useCursorList";
 
 type TagItem = {
@@ -35,7 +36,10 @@ export function TagsPage() {
     fetchPage: (cursor) => {
       const sp = new URLSearchParams({ limit: "50" });
       if (cursor) sp.set("cursor", cursor);
-      return apiJson<TagsListResponse>(`/tags?${sp.toString()}`);
+      // Public route: needs X-API-Key when PUBLIC_API_KEY_REQUIRED (same storage as Playground).
+      return apiJson<TagsListResponse>(`/tags?${sp.toString()}`, {
+        headers: publicApiKeyHeaders(),
+      });
     },
   });
 

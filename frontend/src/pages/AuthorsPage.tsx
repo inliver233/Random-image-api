@@ -4,6 +4,7 @@ import React from "react";
 
 import { CursorTableCard } from "../admin/CursorTableCard";
 import { apiJson } from "../api/client";
+import { publicApiKeyHeaders } from "../auth/publicApiKeyStorage";
 import { useCursorList } from "../hooks/useCursorList";
 
 type AuthorItem = {
@@ -32,7 +33,10 @@ export function AuthorsPage() {
     fetchPage: (cursor) => {
       const sp = new URLSearchParams({ limit: "50" });
       if (cursor) sp.set("cursor", cursor);
-      return apiJson<AuthorsListResponse>(`/authors?${sp.toString()}`);
+      // Public route: needs X-API-Key when PUBLIC_API_KEY_REQUIRED (same storage as Playground).
+      return apiJson<AuthorsListResponse>(`/authors?${sp.toString()}`, {
+        headers: publicApiKeyHeaders(),
+      });
     },
   });
 
