@@ -19,6 +19,7 @@ Ops-only. **Default path (Admin FE / deploy API):** one-page deploy → auto reg
 4. Keep **部署后启用业务** on (default) → register + runtime enable without process restart
 5. Probe healthz; accept ready tags on pool status
 6. Residential stays emergency-only; Proxies page is legacy/emergency only
+7. Teardown: runtime **注销** = leave CF script; **删除脚本** = CF API DELETE (needs Token again; never stored) + optional pool unregister
 
 ## API egress pool (`edge/api-worker`) — advanced / env
 
@@ -39,7 +40,9 @@ Ops-only. **Default path (Admin FE / deploy API):** one-page deploy → auto reg
 4. Inspect: `GET /admin/api/cf-workers/pool`, `GET /admin/api/maintenance/cf-api-proxy`
 5. Enable (if not already via deploy): env `CF_API_PROXY_ENABLED=true` **or** runtime `cf_pool.api.enabled`
 6. Accept: `new_pixiv_pixiv_api_egress_total{via="cf"}` dominates
-7. Rollback: env false + clear runtime enable / Admin CF Worker 页对 runtime 成员「注销」或 `POST …/unregister`
+7. Rollback:
+   - Soft: env false + clear runtime enable / Admin CF Worker 页「注销」或 `POST …/unregister`（不删 CF 脚本）
+   - Hard (optional): form Token+Account →「删除脚本」或 `POST …/delete-script`（CF API DELETE；Token 不落库；可 `unregister_pool`）
 
 ## Image edge pool (`edge/img-worker`) — advanced / env
 
@@ -49,7 +52,7 @@ Ops-only. **Default path (Admin FE / deploy API):** one-page deploy → auto reg
 4. Inspect: pool + `GET /admin/api/maintenance/image-edge`
 5. Enable: `IMAGE_EDGE_ENABLED=true` **or** runtime `cf_pool.image.enabled`
 6. Accept: `new_pixiv_image_delivery_total{path="edge_redirect"}` dominates
-7. Rollback: disable flags / clear runtime enable
+7. Rollback: soft unregister/disable as API pool; hard optional `delete-script` same as api
 
 ## Pre-prod / prod metrics acceptance (mainline A gate)
 

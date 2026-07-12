@@ -85,4 +85,5 @@ Unit coverage for dialect helpers: `backend/tests/test_images_upsert.py`.
 
 - Ops topology: `deploy/.env.example`, `scripts/edge/cutover-checklist.md`  
 - Legacy catalog: `scripts/legacy/legacy-migrate-checklist.md`  
-- Dialect helpers: `backend/app/db/images_upsert.py`, `backend/app/db/dialect.py`
+- Dialect helpers: `backend/app/db/images_upsert.py`, `backend/app/db/dialect.py`, `backend/app/db/sqlite_utils.py` (FTS probe)  
+- Jobs lifecycle (QUEUE-1): Admin `jobs_cleanup` + optional `WORKER_JOBS_PURGE_*` on worker (default off)
