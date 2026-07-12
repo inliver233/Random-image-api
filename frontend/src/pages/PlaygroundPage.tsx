@@ -551,18 +551,44 @@ export function PlaygroundPage() {
               <Space direction="vertical" size="middle" style={{ width: "100%" }}>
                 <Typography.Text type="secondary">请求ID: {m.data.request_id || "-"}</Typography.Text>
                 <Typography.Text type="secondary">
-                  {/* Split FE/API + key-required: show absolute, browser-openable URL. */}
+                  {/* Split FE/API + key-required: absolute, browser-openable request URL. */}
                   请求链接:{" "}
-                  {withPublicApiKeyQuery(
-                    resolvePublicApiUrl(m.data.url),
-                    form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
-                  )}
+                  {(() => {
+                    const openable = withPublicApiKeyQuery(
+                      resolvePublicApiUrl(m.data.url),
+                      form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+                    );
+                    return (
+                      <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
+                        {openable}
+                      </Typography.Link>
+                    );
+                  })()}
                 </Typography.Text>
 
                 {m.data.kind === "json" ? (
-                  <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                    {JSON.stringify(m.data.payload, null, 2)}
-                  </pre>
+                  <>
+                    {(() => {
+                      const proxy = m.data.payload?.data?.urls?.proxy;
+                      if (!proxy) return null;
+                      // JSON proxy path is often /i/... — openable when key required.
+                      const openable = withPublicApiKeyQuery(
+                        resolvePublicApiUrl(proxy),
+                        form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+                      );
+                      return (
+                        <Typography.Text type="secondary">
+                          代理链接:{" "}
+                          <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
+                            {openable}
+                          </Typography.Link>
+                        </Typography.Text>
+                      );
+                    })()}
+                    <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                      {JSON.stringify(m.data.payload, null, 2)}
+                    </pre>
+                  </>
                 ) : m.data.kind === "image" ? (
                   <>
                     <img src={m.data.src} alt="随机图片" style={{ maxWidth: "100%", borderRadius: 6 }} />

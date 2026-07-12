@@ -110,8 +110,12 @@ describe("PlaygroundPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "开始请求" }));
     expect(await screen.findByText(/请求ID:\s*req_play_key/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalled();
-    // Displayed link must be browser-openable when key required (parity with Recommendation).
-    expect(await screen.findByText(/请求链接:.*api_key=debug-public-key-1234567890/)).toBeInTheDocument();
+    // Displayed request + proxy links must be browser-openable when key required.
+    const reqLink = await screen.findByRole("link", { name: /format=json.*api_key=debug-public-key-1234567890|api_key=debug-public-key-1234567890.*format=json/ });
+    expect(reqLink.getAttribute("href") || "").toContain("api_key=debug-public-key-1234567890");
+    const proxyLink = await screen.findByRole("link", { name: /\/i\/1\.jpg.*api_key=debug-public-key-1234567890/ });
+    expect(proxyLink.getAttribute("href") || "").toContain("/i/1.jpg");
+    expect(proxyLink.getAttribute("href") || "").toContain("api_key=debug-public-key-1234567890");
 
     const writeText = vi.fn(async () => undefined);
     vi.stubGlobal("navigator", {
@@ -185,8 +189,8 @@ describe("PlaygroundPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "开始请求" }));
 
     expect(await screen.findByText(/请求ID:\s*req_redirect/)).toBeInTheDocument();
-    const link = await screen.findByRole("link", { name: /api_key=debug-public-key-1234567890/ });
-    expect(link.getAttribute("href") || "").toContain("/i/9.jpg");
-    expect(link.getAttribute("href") || "").toContain("api_key=debug-public-key-1234567890");
+    const locLink = await screen.findByRole("link", { name: /\/i\/9\.jpg.*api_key=debug-public-key-1234567890/ });
+    expect(locLink.getAttribute("href") || "").toContain("/i/9.jpg");
+    expect(locLink.getAttribute("href") || "").toContain("api_key=debug-public-key-1234567890");
   });
 });
