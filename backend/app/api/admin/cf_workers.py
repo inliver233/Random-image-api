@@ -155,6 +155,10 @@ async def cf_workers_register(
     if not base:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid base_url", status_code=400)
 
+    # Multi-process: load current runtime membership before RMW so peer registers
+    # are not clobbered by a stale process-local overlay snapshot.
+    await ensure_overlay_fresh(_engine(request), force=True)
+
     if kind == "api":
         next_bases = register_base_url(get_api_overlay_bases(), base)
         set_api_overlay_bases(next_bases)
@@ -202,6 +206,8 @@ async def cf_workers_unregister(
     base = normalize_cf_base_url(base_raw)
     if not base:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid base_url", status_code=400)
+
+    await ensure_overlay_fresh(_engine(request), force=True)
 
     if kind == "api":
         next_bases = unregister_base_url(get_api_overlay_bases(), base)
@@ -291,6 +297,8 @@ async def cf_workers_deploy(
 
     runtime_bases: list[str] = []
     if register:
+        # Refresh before RMW so multi-process deploy+register does not drop peer bases.
+        await ensure_overlay_fresh(_engine(request), force=True)
         if kind == "api":
             runtime_bases = register_base_url(get_api_overlay_bases(), result.base_url)
             set_api_overlay_bases(runtime_bases)
@@ -306,6 +314,7 @@ async def cf_workers_deploy(
         updated_by = str(claims.get("sub") or claims.get("username") or "admin")
         await _persist_overlay(_engine(request), kind=kind, bases=runtime_bases, updated_by=updated_by)
     else:
+        await ensure_overlay_fresh(_engine(request), force=True)
         runtime_bases = get_api_overlay_bases() if kind == "api" else get_image_overlay_bases()
 
     # Never echo api_token or secrets.

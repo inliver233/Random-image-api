@@ -173,3 +173,34 @@ def test_probe_cf_worker_base_api_secret_not_configured() -> None:
     # Config gap must not open egress cooldown (would demote a good base wrongly).
     assert is_cf_base_cooling("https://api-nosecret.example.workers.dev") is False
     reset_cf_base_cooldown_for_tests()
+
+
+def test_probe_cf_worker_base_image_secret_not_configured() -> None:
+    """img-worker healthz secret_configured=false → not cutover-ready, no cooldown."""
+    reset_image_edge_base_cooldown_for_tests()
+    client = AsyncMock(spec=httpx.AsyncClient)
+    client.get = AsyncMock(
+        return_value=_json_response(
+            200,
+            {
+                "ok": True,
+                "service": "random-image-edge",
+                "secret_configured": False,
+            },
+        )
+    )
+
+    async def _run() -> dict:
+        return await probe_cf_worker_base(
+            client,
+            kind="image",
+            base_url="https://img-nosecret.example.workers.dev/",
+            timeout_s=1.0,
+        )
+
+    out = asyncio.run(_run())
+    assert out["ok"] is False
+    assert out["error"] == "secret_not_configured"
+    assert out["secret_configured"] is False
+    assert is_image_edge_base_cooling("https://img-nosecret.example.workers.dev") is False
+    reset_image_edge_base_cooldown_for_tests()

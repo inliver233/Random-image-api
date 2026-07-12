@@ -207,6 +207,9 @@ type CfProbeResult = {
   status_code?: number | null;
   error?: string | null;
   latency_ms?: number | null;
+  /** Worker healthz: false means secret empty — not cutover-ready. */
+  secret_configured?: boolean | null;
+  service?: string | null;
 };
 
 type CfWorkersProbeResponse = {
@@ -716,7 +719,17 @@ export function MaintenancePage() {
               ok={probeResult.api?.summary?.ok ?? 0}/{probeResult.api?.summary?.total ?? 0}
               {probeResult.api?.results?.length
                 ? ` · ${probeResult.api.results
-                    .map((r) => `${r.base_url ?? "?"} ${r.ok ? "ok" : "fail"}`)
+                    .map((r) => {
+                      const host = r.base_url ?? "?";
+                      if (r.ok) {
+                        return `${host} ok${typeof r.latency_ms === "number" ? ` ${Math.round(r.latency_ms)}ms` : ""}`;
+                      }
+                      const detail =
+                        r.error ||
+                        (r.secret_configured === false ? "secret_not_configured" : null) ||
+                        (r.status_code != null ? `status=${r.status_code}` : "fail");
+                      return `${host} fail(${detail})`;
+                    })
                     .join("; ")}`
                 : ""}
             </Descriptions.Item>
@@ -724,7 +737,17 @@ export function MaintenancePage() {
               ok={probeResult.image?.summary?.ok ?? 0}/{probeResult.image?.summary?.total ?? 0}
               {probeResult.image?.results?.length
                 ? ` · ${probeResult.image.results
-                    .map((r) => `${r.base_url ?? "?"} ${r.ok ? "ok" : "fail"}`)
+                    .map((r) => {
+                      const host = r.base_url ?? "?";
+                      if (r.ok) {
+                        return `${host} ok${typeof r.latency_ms === "number" ? ` ${Math.round(r.latency_ms)}ms` : ""}`;
+                      }
+                      const detail =
+                        r.error ||
+                        (r.secret_configured === false ? "secret_not_configured" : null) ||
+                        (r.status_code != null ? `status=${r.status_code}` : "fail");
+                      return `${host} fail(${detail})`;
+                    })
                     .join("; ")}`
                 : ""}
             </Descriptions.Item>

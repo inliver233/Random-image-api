@@ -236,10 +236,13 @@ export function buildHealthzBody({ secrets, circuitOpen, r2Mode, rateLimit }) {
     rateLimit && rateLimit.enabled
       ? { enabled: true, rpm: Number(rateLimit.rpm) || 0, burst: Number(rateLimit.burst) || 0 }
       : { enabled: false };
+  const secretList = Array.isArray(secrets) ? secrets.filter((s) => String(s || "").trim()) : [];
   return {
     ok: true,
     service: "random-image-edge",
-    dual_secret: Array.isArray(secrets) && secrets.length > 1,
+    // Parity with api-worker: empty IMAGE_EDGE_SECRET → not cutover-ready (signed /u will 500).
+    secret_configured: secretList.length > 0,
+    dual_secret: secretList.length > 1,
     origin_circuit_open: Boolean(circuitOpen),
     r2: mode !== "off",
     r2_mode: mode,

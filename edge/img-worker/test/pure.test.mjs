@@ -181,6 +181,7 @@ describe("buildHealthzBody", () => {
       {
         ok: true,
         service: "random-image-edge",
+        secret_configured: true,
         dual_secret: true,
         origin_circuit_open: true,
         r2: true,
@@ -193,12 +194,17 @@ describe("buildHealthzBody", () => {
       {
         ok: true,
         service: "random-image-edge",
+        secret_configured: true,
         dual_secret: false,
         origin_circuit_open: false,
         r2: false,
         r2_mode: "off",
         rate_limit: { enabled: false },
       },
+    );
+    assert.equal(
+      buildHealthzBody({ secrets: [], circuitOpen: false, r2Mode: "off" }).secret_configured,
+      false,
     );
   });
 });

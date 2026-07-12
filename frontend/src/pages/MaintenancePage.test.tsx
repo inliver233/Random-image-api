@@ -52,8 +52,27 @@ function fixtureFor(url: string, mode: FixtureMode): Response {
       kind: "all",
       timeout_s: 3,
       api: {
-        results: mode === "ready" ? [{ base_url: "https://api-proxy.example.com", ok: true, status_code: 200 }] : [],
-        summary: mode === "ready" ? { total: 1, ok: 1, fail: 0 } : { total: 0, ok: 0, fail: 0 },
+        results:
+          mode === "ready"
+            ? [
+                {
+                  base_url: "https://api-proxy.example.com",
+                  ok: true,
+                  status_code: 200,
+                  secret_configured: true,
+                  latency_ms: 12,
+                },
+              ]
+            : [
+                {
+                  base_url: "https://api-nosecret.example.com",
+                  ok: false,
+                  status_code: 200,
+                  secret_configured: false,
+                  error: "secret_not_configured",
+                },
+              ],
+        summary: mode === "ready" ? { total: 1, ok: 1, fail: 0 } : { total: 1, ok: 0, fail: 1 },
       },
       image: {
         results: mode === "ready" ? [{ base_url: "https://img.example.com", ok: true, status_code: 200 }] : [],
@@ -355,6 +374,25 @@ describe("MaintenancePage", () => {
       expect(screen.getByText(/探针完成：api ok=1\/1；image ok=1\/1/)).toBeInTheDocument();
     });
     expect(screen.getByText(/最近探针 API/)).toBeInTheDocument();
+    expect(screen.getByText(/api-proxy\.example\.com ok/)).toBeInTheDocument();
+  });
+
+  it("surfaces secret_not_configured on probe fail rows", async () => {
+    // fallback fixture returns api probe row with secret_configured:false
+    stubFetch("fallback");
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <MaintenancePage />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("CF Worker 池（成员 + 探针）")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "探针全部 healthz" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/fail\(secret_not_configured\)/)).toBeInTheDocument();
+    });
   });
 
   it("registers a runtime CF pool base from the form", async () => {
