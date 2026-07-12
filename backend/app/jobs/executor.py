@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.core.coerce import as_int, as_str, format_exc
 from app.core.time import iso_utc_ms
 from app.core.metrics import JOBS_FAILED_TOTAL
+from app.db.images_upsert import adapt_driver_sql_named_binds, dialect_name_from_engine
 from app.db.session import is_sqlite_busy_error, with_sqlite_busy_retry
 from app.jobs.claim import DEFAULT_LOCK_TTL_S
 from app.jobs.dispatch import JobDispatcher
@@ -53,23 +54,25 @@ SET status=:status,
     updated_at=:updated_at
 WHERE id=:id AND status='running' AND locked_by=:worker_id;
 """.strip()
+    sql_exec, params_exec = adapt_driver_sql_named_binds(
+        sql,
+        {
+            "status": transition.status.value,
+            "attempt": int(transition.attempt),
+            "run_after": transition.run_after,
+            "last_error": transition.last_error,
+            "locked_by": transition.locked_by,
+            "locked_at": transition.locked_at,
+            "updated_at": transition.updated_at,
+            "id": int(job_id),
+            "worker_id": worker_id,
+        },
+        dialect_name=dialect_name_from_engine(engine),
+    )
 
     async def _op() -> bool:
         async with engine.begin() as conn:
-            result = await conn.exec_driver_sql(
-                sql,
-                {
-                    "status": transition.status.value,
-                    "attempt": int(transition.attempt),
-                    "run_after": transition.run_after,
-                    "last_error": transition.last_error,
-                    "locked_by": transition.locked_by,
-                    "locked_at": transition.locked_at,
-                    "updated_at": transition.updated_at,
-                    "id": int(job_id),
-                    "worker_id": worker_id,
-                },
-            )
+            result = await conn.exec_driver_sql(sql_exec, params_exec)
             return (result.rowcount or 0) == 1
 
     return await with_sqlite_busy_retry(_op)

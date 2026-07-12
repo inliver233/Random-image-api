@@ -31,6 +31,7 @@ from app.core.runtime_settings import RuntimeConfig
 from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
 from app.db.catalog import CatalogStore, build_catalog_store
+from app.db.images_upsert import adapt_driver_sql_named_binds, dialect_name_from_engine
 from app.db.models.hydration_runs import HydrationRun
 from app.db.models.pixiv_tokens import PixivToken
 from app.db.models.proxy_endpoints import ProxyEndpoint
@@ -574,19 +575,22 @@ SET status=:status,
     updated_at=:now
 WHERE id=:id AND status='running' AND locked_by=:worker_id;
 """.strip()
+        dialect = dialect_name_from_engine(engine)
+        sql_exec, params_exec = adapt_driver_sql_named_binds(
+            sql,
+            {
+                "status": str(status),
+                "run_after": run_after,
+                "now": iso_utc_ms(),
+                "id": int(job_id),
+                "worker_id": worker_id,
+            },
+            dialect_name=dialect,
+        )
 
         async def _op() -> bool:
             async with engine.begin() as conn:
-                result = await conn.exec_driver_sql(
-                    sql,
-                    {
-                        "status": str(status),
-                        "run_after": run_after,
-                        "now": iso_utc_ms(),
-                        "id": int(job_id),
-                        "worker_id": worker_id,
-                    },
-                )
+                result = await conn.exec_driver_sql(sql_exec, params_exec)
                 return (result.rowcount or 0) == 1
 
         return await with_sqlite_busy_retry(_op)
@@ -605,10 +609,14 @@ WHERE status=1
 ORDER BY id ASC
 LIMIT 1;
 """.strip()
+        dialect = dialect_name_from_engine(engine)
+        sql_exec, params_exec = adapt_driver_sql_named_binds(
+            sql, {"cursor": int(cursor_image_id)}, dialect_name=dialect
+        )
 
         async def _op() -> tuple[int, int] | None:
             async with engine.connect() as conn:
-                result = await conn.exec_driver_sql(sql, {"cursor": int(cursor_image_id)})
+                result = await conn.exec_driver_sql(sql_exec, params_exec)
                 row = result.first()
                 if row is None:
                     return None

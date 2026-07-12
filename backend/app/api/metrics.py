@@ -22,6 +22,7 @@ from app.core.metrics import (
 from app.core.r2_prewarm import r2_prewarm_enabled, r2_prewarm_secret
 from app.core.random_engine_client import engine_circuit_snapshot
 from app.core.time import iso_utc_ms
+from app.db.images_upsert import adapt_driver_sql_named_binds, dialect_name_from_engine
 
 router = APIRouter()
 
@@ -55,8 +56,11 @@ SELECT
       THEN 1 ELSE 0 END) AS unhealthy
 FROM proxy_endpoints;
 """.strip()
+    sql_exec, params_exec = adapt_driver_sql_named_binds(
+        sql, {"now": now}, dialect_name=dialect_name_from_engine(engine)
+    )
     async with engine.connect() as conn:
-        result = await conn.exec_driver_sql(sql, {"now": now})
+        result = await conn.exec_driver_sql(sql_exec, params_exec)
         row = result.fetchone()
         if row is None:
             return {"total": 0, "enabled": 0, "healthy": 0, "unhealthy": 0, "blacklisted": 0}

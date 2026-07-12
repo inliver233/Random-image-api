@@ -14,6 +14,7 @@ from app.core.errors import ApiError, ErrorCode
 from app.core.proxy_uri import build_proxy_uri
 from app.core.runtime_settings import RuntimeConfig
 from app.core.time import iso_utc_ms
+from app.db.images_upsert import adapt_driver_sql_named_binds, dialect_name_from_engine
 from app.db.session import with_sqlite_busy_retry
 
 # Short TTL for pool membership / eligible endpoint lists under concurrent hydrate.
@@ -197,10 +198,15 @@ JOIN proxy_endpoints pe
   ON pe.id = ppe.endpoint_id AND pe.enabled = 1
 WHERE pp.id = :pool_id AND pp.enabled = 1;
 """.strip()
+    sql_exec, params_exec = adapt_driver_sql_named_binds(
+        sql,
+        {"pool_id": int(pool_id), "now": str(now_iso)},
+        dialect_name=dialect_name_from_engine(engine),
+    )
 
     async def _op() -> dict[str, Any]:
         async with engine.connect() as conn:
-            row = (await conn.exec_driver_sql(sql, {"pool_id": int(pool_id), "now": str(now_iso)})).first()
+            row = (await conn.exec_driver_sql(sql_exec, params_exec)).first()
         if row is None:
             return {"endpoints_total": 0, "endpoints_eligible": 0, "next_available_at": None}
         total = int(row[0] or 0)
@@ -239,10 +245,15 @@ WHERE pp.id = :pool_id AND pp.enabled = 1
   AND (pe.blacklisted_until IS NULL OR pe.blacklisted_until <= :now)
 ORDER BY pe.id ASC;
 """.strip()
+    sql_exec, params_exec = adapt_driver_sql_named_binds(
+        sql,
+        {"pool_id": int(pool_id), "now": now_iso},
+        dialect_name=dialect_name_from_engine(engine),
+    )
 
     async def _op() -> list[Any]:
         async with engine.connect() as conn:
-            result = await conn.exec_driver_sql(sql, {"pool_id": int(pool_id), "now": now_iso})
+            result = await conn.exec_driver_sql(sql_exec, params_exec)
             return list(result.fetchall())
 
     rows = await with_sqlite_busy_retry(_op)
@@ -309,10 +320,15 @@ FROM token_proxy_bindings
 WHERE token_id=:token_id AND pool_id=:pool_id
 LIMIT 1;
 """.strip()
+    sql_exec, params_exec = adapt_driver_sql_named_binds(
+        sql,
+        {"token_id": int(token_id), "pool_id": int(pool_id)},
+        dialect_name=dialect_name_from_engine(engine),
+    )
 
     async def _op() -> tuple[int, int | None, str | None] | None:
         async with engine.connect() as conn:
-            result = await conn.exec_driver_sql(sql, {"token_id": int(token_id), "pool_id": int(pool_id)})
+            result = await conn.exec_driver_sql(sql_exec, params_exec)
             row = result.first()
             if row is None:
                 return None
@@ -343,13 +359,15 @@ WHERE pp.id = :pool_id AND pp.enabled = 1
   AND (pe.blacklisted_until IS NULL OR pe.blacklisted_until <= :now)
 LIMIT 1;
 """.strip()
+    sql_exec, params_exec = adapt_driver_sql_named_binds(
+        sql,
+        {"pool_id": int(pool_id), "endpoint_id": int(endpoint_id), "now": now_iso},
+        dialect_name=dialect_name_from_engine(engine),
+    )
 
     async def _op() -> tuple[int, str, str, int, str, str] | None:
         async with engine.connect() as conn:
-            result = await conn.exec_driver_sql(
-                sql,
-                {"pool_id": int(pool_id), "endpoint_id": int(endpoint_id), "now": now_iso},
-            )
+            result = await conn.exec_driver_sql(sql_exec, params_exec)
             row = result.first()
             if row is None:
                 return None
