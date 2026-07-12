@@ -52,7 +52,7 @@ Unit coverage for dialect helpers: `backend/tests/test_images_upsert.py`.
 
 | Symbol / path | Risk on PG | Mitigation already / needed |
 | --- | --- | --- |
-| `sqlite_table_exists` → `sqlite_master` | FTS probe throws / false | Used only for FTS; callers catch `DBAPIError` and use LIKE |
+| `sqlite_table_exists` → `sqlite_master` | FTS probe throws / false | **Dialect-gated:** non-SQLite returns False (no `sqlite_master`); SQLite still probes; callers also catch `DBAPIError` → LIKE |
 | `tags_list` / `authors_list` `MATCH` | N/A without FTS | LIKE fallback |
 | `apply_sqlite_pragmas` | N/A | Gated on sqlite URL in `create_engine` |
 | `enabled=1` / `status=1` in raw SQL | OK (int columns) | Prefer SQLAlchemy where practical |
