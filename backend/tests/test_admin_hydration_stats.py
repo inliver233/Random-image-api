@@ -94,3 +94,13 @@ def test_admin_summary_includes_hydration_missing_counts(tmp_path: Path, monkeyp
         assert missing["title"] == 1
         assert missing["created_at"] == 1
         assert missing["popularity"] == 1
+
+
+def test_admin_summary_openapi_documents_jobs_table_counts() -> None:
+    """Summary OpenAPI must document jobs table histogram vs external queues."""
+    app = create_app()
+    op = app.openapi()["paths"]["/admin/api/summary"]["get"]
+    assert op.get("summary") == "Get admin dashboard counts"
+    desc = str(op.get("description") or "")
+    assert "jobs" in desc.lower()
+    assert "redis" in desc.lower() or "nats" in desc.lower() or "table" in desc.lower()

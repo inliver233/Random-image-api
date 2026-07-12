@@ -61,3 +61,12 @@ VALUES (123,0,'jpg','https://example.com/123.jpg','/i/123.jpg',0.5,1,0,100,100);
         assert int(stats["total_error"]) >= 1
         assert int(stats["in_flight"]) == 0
         assert int(stats["last_window_requests"]) >= 2
+
+
+def test_admin_random_stats_openapi_documents_in_process_counters() -> None:
+    """Random stats OpenAPI must document in-process counters (not Prometheus)."""
+    app = create_app()
+    op = app.openapi()["paths"]["/admin/api/stats/random"]["get"]
+    assert op.get("summary") == "Get random request stats"
+    desc = str(op.get("description") or "")
+    assert "random_request_stats" in desc or "in-process" in desc.lower() or "Prometheus" in desc

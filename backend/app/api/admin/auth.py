@@ -32,7 +32,14 @@ async def _load_login_json(request: Request) -> tuple[str, str]:
     return username, password
 
 
-@router.post("/login")
+@router.post(
+    "/login",
+    summary="Admin login",
+    description=(
+        "Issue admin JWT after constant-time password check against env credentials. "
+        "Token is for admin APIs only — distinct from public X-API-Key / Pixiv OAuth tokens."
+    ),
+)
 async def login(request: Request) -> dict[str, Any]:
     username, password = await _load_login_json(request)
     settings = request.app.state.settings
@@ -45,7 +52,14 @@ async def login(request: Request) -> dict[str, Any]:
     return admin_ok(request, payload={"token": token}, request_id=rid)
 
 
-@router.post("/logout")
+@router.post(
+    "/logout",
+    summary="Admin logout",
+    description=(
+        "Stateless logout acknowledgment (JWT is client-held). Requires a valid admin JWT; "
+        "does not revoke server-side sessions."
+    ),
+)
 async def logout(request: Request, _claims: dict[str, Any] = Depends(get_admin_claims)) -> dict[str, Any]:
     _ = _claims
     rid = get_or_create_request_id(request)

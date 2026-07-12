@@ -134,3 +134,21 @@ def test_admin_logout_missing_token_returns_401(tmp_path: Path, monkeypatch) -> 
         assert body["ok"] is False
         assert body["code"] == "UNAUTHORIZED"
         assert body["request_id"] == "req_test"
+
+
+def test_admin_auth_openapi_documents_jwt_vs_public_key() -> None:
+    """Login/logout OpenAPI must document admin JWT vs public API keys."""
+    app = create_app()
+    paths = app.openapi()["paths"]
+
+    login_op = paths["/admin/api/login"]["post"]
+    assert login_op.get("summary") == "Admin login"
+    desc = str(login_op.get("description") or "")
+    assert "JWT" in desc or "jwt" in desc.lower()
+    assert "API-Key" in desc or "public" in desc.lower()
+
+    logout_op = paths["/admin/api/logout"]["post"]
+    assert logout_op.get("summary") == "Admin logout"
+    assert "stateless" in str(logout_op.get("description") or "").lower() or "JWT" in str(
+        logout_op.get("description") or ""
+    )

@@ -12,7 +12,14 @@ from app.core.request_id import get_or_create_request_id
 router = APIRouter()
 
 
-@router.get("/stats/random")
+@router.get(
+    "/stats/random",
+    summary="Get random request stats",
+    description=(
+        "In-process random request counters from `app.state.random_request_stats` "
+        "(window success/error/in-flight). Not Prometheus `/metrics` and not CatalogStore."
+    ),
+)
 async def get_random_stats(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),

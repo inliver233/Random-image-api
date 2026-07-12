@@ -15,7 +15,14 @@ from app.db.session import resolve_sessionmaker
 router = APIRouter()
 
 
-@router.get("/audit")
+@router.get(
+    "/audit",
+    summary="List admin audit log",
+    description=(
+        "Cursor-paginated AdminAudit rows (actor/action/resource/detail). Control-plane "
+        "audit trail only — not JobQueue or public API access logs."
+    ),
+)
 async def list_admin_audit(
     request: Request,
     limit: int = 50,

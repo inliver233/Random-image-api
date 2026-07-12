@@ -155,3 +155,26 @@ def test_admin_images_list_missing_filters_and_cursor(tmp_path: Path, monkeypatc
         )
         assert bad.status_code == 400
         assert bad.json()["ok"] is False
+
+
+def test_admin_images_openapi_documents_catalog_store() -> None:
+    """Admin images OpenAPI must document CatalogStore/TagStore + dual-run coupling."""
+    app = create_app()
+    paths = app.openapi()["paths"]
+
+    list_op = paths["/admin/api/images"]["get"]
+    assert list_op.get("summary") == "List catalog images (admin)"
+    assert "CatalogStore" in str(list_op.get("description") or "")
+
+    delete_op = paths["/admin/api/images/{image_id}"]["delete"]
+    assert delete_op.get("summary") == "Delete catalog image"
+    assert "TagStore" in str(delete_op.get("description") or "") or "engine" in str(
+        delete_op.get("description") or ""
+    ).lower()
+
+    bulk_op = paths["/admin/api/images/bulk-delete"]["post"]
+    assert bulk_op.get("summary") == "Bulk delete catalog images"
+
+    clear_op = paths["/admin/api/images/clear"]["post"]
+    assert clear_op.get("summary") == "Clear all catalog images"
+    assert "confirm" in str(clear_op.get("description") or "").lower()

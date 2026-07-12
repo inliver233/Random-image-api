@@ -36,7 +36,15 @@ def _parse_missing(values: list[str] | None) -> list[str]:
     return out
 
 
-@router.get("/images")
+@router.get(
+    "/images",
+    summary="List catalog images (admin)",
+    description=(
+        "Cursor-paginated catalog images via CatalogStorePort (`list_admin_images`) with "
+        "optional `missing` filters (tags/geometry/r18/ai/…). Tag counts from catalog join; "
+        "does not hydrate Pixiv live."
+    ),
+)
 async def list_admin_images(
     request: Request,
     limit: int = 50,
@@ -133,7 +141,14 @@ async def _load_bulk_delete_json(request: Request) -> dict[str, Any]:
     return {"image_ids": ids}
 
 
-@router.delete("/images/{image_id}")
+@router.delete(
+    "/images/{image_id}",
+    summary="Delete catalog image",
+    description=(
+        "Delete one image via CatalogStorePort + TagStorePort link cleanup, then optionally "
+        "publish dual-run engine deletes (`maybe_publish_engine_deletes`). Not a JobQueuePort job."
+    ),
+)
 async def delete_admin_image(
     image_id: int,
     request: Request,
@@ -168,7 +183,14 @@ async def delete_admin_image(
     return result
 
 
-@router.post("/images/bulk-delete")
+@router.post(
+    "/images/bulk-delete",
+    summary="Bulk delete catalog images",
+    description=(
+        "Delete many images via CatalogStorePort + TagStorePort, then optional dual-run "
+        "engine delete publish. Max batch size enforced by admin request parsers."
+    ),
+)
 async def bulk_delete_admin_images(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
@@ -224,7 +246,14 @@ async def _load_clear_images_json(request: Request) -> dict[str, Any]:
     return {"delete_tags": parse_bool(data.get("delete_tags"), default=True)}
 
 
-@router.post("/images/clear")
+@router.post(
+    "/images/clear",
+    summary="Clear all catalog images",
+    description=(
+        "Destructive clear of all images (requires `confirm=true`) via CatalogStorePort; "
+        "optional TagStore clear. May publish dual-run empty snapshot. Not reversible via API."
+    ),
+)
 async def clear_admin_images(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),

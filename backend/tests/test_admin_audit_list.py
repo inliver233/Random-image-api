@@ -144,3 +144,12 @@ def test_admin_audit_middleware_records_write_ops(tmp_path: Path, monkeypatch) -
         assert action == "POST"
         assert resource == "/admin/api/proxy-pools"
         assert request_id == "req_test"
+
+
+def test_admin_audit_openapi_documents_control_plane_trail() -> None:
+    """Audit OpenAPI must document AdminAudit control-plane trail."""
+    app = create_app()
+    op = app.openapi()["paths"]["/admin/api/audit"]["get"]
+    assert op.get("summary") == "List admin audit log"
+    desc = str(op.get("description") or "")
+    assert "AdminAudit" in desc or "audit" in desc.lower()

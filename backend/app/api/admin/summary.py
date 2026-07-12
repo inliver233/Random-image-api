@@ -13,7 +13,15 @@ from app.db.session import with_sqlite_busy_retry
 router = APIRouter()
 
 
-@router.get("/summary")
+@router.get(
+    "/summary",
+    summary="Get admin dashboard counts",
+    description=(
+        "Aggregate control-plane counts: catalog hydration gaps, tokens/proxies/pools/"
+        "bindings, SQLite `jobs` status histogram, and worker last-seen from RuntimeSetting. "
+        "Job counts reflect the jobs table (payload store) — not external redis/nats queues."
+    ),
+)
 async def get_summary(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
