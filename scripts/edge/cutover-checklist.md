@@ -38,7 +38,7 @@ Ops-only. Deploy/register **never** flips `CF_API_PROXY_ENABLED` / `IMAGE_EDGE_E
 
 1. Deploy ≥1 (better ≥2) bases with shared `IMAGE_EDGE_SECRET`
    - Admin deploy multipart includes `index` + `pure.js` (ES module import)
-2. Probe matrix with a known pximg path (`--twice --healthz`); admin `POST /admin/api/cf-workers/probe` `{"kind":"image"}` for pool healthz
+2. Probe matrix with a known pximg path (`--twice --healthz`); CLI summary `ready_for_image_edge_flag` requires all signed 200 (+ healthz when probed); admin `POST /admin/api/cf-workers/probe` `{"kind":"image"}` for pool healthz
 3. Membership: `IMAGE_EDGE_BASE_URLS` and/or register `kind=image` (FE form same card)
 4. Inspect: pool + `GET /admin/api/maintenance/image-edge` (`base_urls` lists env∪overlay even when flag off)
 5. Enable: `IMAGE_EDGE_ENABLED=true`

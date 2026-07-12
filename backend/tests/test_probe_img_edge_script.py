@@ -132,3 +132,37 @@ def test_probe_split_bases() -> None:
         "https://a.example.com",
         "https://b.example.com",
     ]
+
+
+def test_probe_summarize_matrix_ready_gate_requires_signed_pass() -> None:
+    probe = _load_probe()
+    rows = [
+        {"pass": True, "probe_1": {"status": 200, "elapsed_ms": 10.0}, "probe_2": {}},
+        {"pass": False, "probe_1": {"status": 403, "elapsed_ms": 8.0}, "probe_2": {}},
+    ]
+    summary = probe.summarize_matrix(rows)
+    assert summary["all_signed_ok"] is False
+    assert summary["ready_for_image_edge_flag"] is False
+
+
+def test_probe_summarize_matrix_ready_gate_healthz_fail() -> None:
+    """When --healthz is used, dead healthz must block IMAGE_EDGE_ENABLED cutover."""
+    probe = _load_probe()
+    rows = [
+        {
+            "pass": True,
+            "healthz": {"ok": True, "status": 200},
+            "probe_1": {"status": 200, "elapsed_ms": 10.0},
+            "probe_2": {},
+        },
+        {
+            "pass": True,
+            "healthz": {"ok": False, "status": 503},
+            "probe_1": {"status": 200, "elapsed_ms": 12.0},
+            "probe_2": {},
+        },
+    ]
+    summary = probe.summarize_matrix(rows)
+    assert summary["all_signed_ok"] is True
+    assert summary["healthz_ok"] == 1
+    assert summary["ready_for_image_edge_flag"] is False

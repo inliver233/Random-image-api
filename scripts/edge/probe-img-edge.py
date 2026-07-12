@@ -117,6 +117,20 @@ def probe_one(
     return report
 
 
+def _healthz_service_ok(row: dict[str, Any]) -> bool | None:
+    """True/False when healthz was probed; None when --healthz was not used."""
+    hz = row.get("healthz")
+    if hz is None:
+        return None
+    if not isinstance(hz, dict):
+        return False
+    # Prefer explicit body.ok when present; else HTTP 200.
+    if "ok" in hz and isinstance(hz.get("ok"), bool):
+        return bool(hz["ok"]) and int(hz.get("status") or 0) == 200
+    # fetch() shape: ok + status
+    return bool(hz.get("ok")) and int(hz.get("status") or 0) == 200
+
+
 def summarize_matrix(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Ops-facing summary for multi-region B / B+R2 / B2 decision."""
     bases_ok = 0
@@ -125,10 +139,17 @@ def summarize_matrix(rows: list[dict[str, Any]]) -> dict[str, Any]:
     storage_counts: dict[str, int] = {}
     circuit_open = 0
     latencies: list[float] = []
+    healthz_probed = 0
+    healthz_ok = 0
 
     for row in rows:
         if row.get("pass"):
             bases_ok += 1
+        hz_ok = _healthz_service_ok(row)
+        if hz_ok is not None:
+            healthz_probed += 1
+            if hz_ok:
+                healthz_ok += 1
         p1 = row.get("probe_1") or {}
         p2 = row.get("probe_2") or {}
         if p2.get("x_edge_cache") == "HIT":
@@ -155,9 +176,18 @@ def summarize_matrix(rows: list[dict[str, Any]]) -> dict[str, Any]:
     elif bases_ok == len(rows) and cache_hit_on_second > 0:
         suggestion = "B (Cache API only) ready for sticky multi-base"
 
+    # Cutover-ready: all signed path probes pass; when healthz was requested, all must be ok.
+    all_pass = bases_ok == len(rows) and len(rows) > 0
+    healthz_ready = healthz_probed == 0 or (healthz_ok == healthz_probed and healthz_probed == len(rows))
+    ready = all_pass and healthz_ready
+
     return {
         "bases_total": len(rows),
         "bases_ok": bases_ok,
+        "healthz_probed": healthz_probed,
+        "healthz_ok": healthz_ok,
+        "all_signed_ok": all_pass,
+        "ready_for_image_edge_flag": ready,
         "cache_hit_on_second": cache_hit_on_second,
         "via_counts": via_counts,
         "storage_counts": storage_counts,
@@ -166,8 +196,13 @@ def summarize_matrix(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "latency_ms_max": round(max(latencies), 1) if latencies else None,
         "latency_ms_avg": round(sum(latencies) / len(latencies), 1) if latencies else None,
         "mode_suggestion": suggestion,
+        "note": (
+            "Set IMAGE_EDGE_ENABLED only after all bases pass signed path "
+            "(and healthz when --healthz). This script never flips flags."
+        ),
         "decision_checklist": [
             "All bases return 200 on known good path?",
+            "healthz ok on every base when --healthz used?",
             "Second request shows X-Edge-Cache: HIT on most bases?",
             "X-Edge-Via mostly origin (not emergency mirrors)?",
             "If origin 403 / circuit-open high → enable R2 read_through or r2_only + prewarm",
@@ -238,9 +273,15 @@ def main() -> int:
             f.write(text)
             f.write("\n")
 
-    if len(rows) == 1:
-        return 0 if rows[0].get("pass") else 1
-    return 0 if all(r.get("pass") for r in rows) else 1
+    # Exit 0 only when cutover-ready: signed path pass on all bases; healthz ok if probed.
+    ok = True
+    for row in rows:
+        if not row.get("pass"):
+            ok = False
+        hz_ok = _healthz_service_ok(row)
+        if hz_ok is False:
+            ok = False
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
