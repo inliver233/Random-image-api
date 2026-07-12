@@ -96,6 +96,8 @@ Admin → **CF Worker** 一页部署默认：register + secret + 启用业务语
 
 旧生产接管（F3）：`scripts/legacy/legacy-migrate-checklist.md` + `scripts/legacy/migrate_legacy_catalog.py`（SQLite 拷贝 / CSV / PG 流 / token 加密导入）。冷库 `x_restrict` 多为 NULL 时先关 `default_r18_strict` 或 hydrate。
 
+Postgres 切库脚手架（§6.8，**≠ 已生产切完**）：`scripts/legacy/pg-cutover-inventory.md`（alembic 双方言时间戳 / FTS5 跳过 / offline `--sql` 无 strftime）。真机 `alembic upgrade head` on empty PG 仍须 ops 干跑。
+
 1. 准备环境变量
 
 ```bash
@@ -132,7 +134,7 @@ docker compose -f deploy/docker-compose.yml --profile postgres --profile redis u
 - 状态页：`http://localhost:23222/status`
 - Swagger：`http://localhost:23222/api/docs`
 - 管理后台：`http://localhost:23222/admin`（CF Worker / 维护工具）
-- Random Engine（compose）：主机 `127.0.0.1:8091`；BFF 需另设 `RANDOM_ENGINE_URL=http://random-engine:8091` 才接线（见 `scripts/edge/engine-traffic-cutover.md`）
+- Random Engine（compose）：主机 `127.0.0.1:8091`；api/worker 默认 `RANDOM_ENGINE_URL=http://random-engine:8091`，但 **`RANDOM_ENGINE_ENABLED` / traffic% 仍默认关**（见 `scripts/edge/engine-traffic-cutover.md`）
 
 ## 首次使用建议流程
 
