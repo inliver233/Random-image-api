@@ -138,11 +138,12 @@ class RandomPickContext:
         """Build Go engine /v1/pick body from this plan + public filters."""
         from app.core.random_engine_pick import compose_engine_pick_payload
 
-        # When BFF anti-repeat is on, also pin an engine-side short window (OpenAPI client_dedup_key).
-        # Complements filters.exclude_image_ids; fail-open if engine ignores the field.
+        # Do not auto-inject a shared client_dedup_key when anti_repeat is on.
+        # A global key (e.g. "bff-anti-repeat") couples all dual-run traffic into one
+        # engine process window and hard-excludes beyond BFF recent_dedup + quality soft
+        # penalties — sampling then diverges from Python. Pass an explicit per-client key
+        # only when the caller has one; otherwise rely on exclude_image_ids + soft penalties.
         dedup_key = (client_dedup_key or "").strip() or None
-        if dedup_key is None and bool(self.anti_repeat_enabled):
-            dedup_key = "bff-anti-repeat"
 
         # Soft penalties only when anti-repeat is on (matches Python pick_by_quality).
         soft_imgs = self.recent_image_ids if bool(self.anti_repeat_enabled) else None

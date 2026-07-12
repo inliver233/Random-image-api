@@ -228,10 +228,10 @@ def test_dual_run_vector_client_dedup_key_and_feed_limit() -> None:
         velocity_smooth_days=7.0,
         seed=filters.seed_norm,
         limit=20,
-        client_dedup_key="bff-anti-repeat",
+        client_dedup_key="explicit-client",
     )
     assert payload["limit"] == 20
-    assert payload["client_dedup_key"] == "bff-anti-repeat"
+    assert payload["client_dedup_key"] == "explicit-client"
     assert payload["filters"]["fail_cooldown_before"] == "2026-01-01T00:00:00.000Z"
     assert payload["filters"]["exclude_image_ids"] == [1, 2, 3]
     assert payload["seed"] == "feed-seed"
@@ -285,12 +285,21 @@ def _minimal_plan(*, anti_repeat_enabled: bool, recent_exclude: list[int] | None
     )
 
 
-def test_dual_run_vector_plan_injects_bff_anti_repeat_dedup_key() -> None:
+def test_dual_run_vector_plan_does_not_inject_shared_client_dedup_key() -> None:
     filters = _parse()
     plan = _minimal_plan(anti_repeat_enabled=True, recent_exclude=[5])
     body = plan.build_engine_payload(filters=filters, exclude_image_ids=[5, 9], limit=1)
-    assert body["client_dedup_key"] == "bff-anti-repeat"
+    # Shared "bff-anti-repeat" would couple all dual-run traffic; hard exclude + soft only.
+    assert "client_dedup_key" not in body
     assert set(body["filters"]["exclude_image_ids"]) == {5, 9}
+
+    body_explicit = plan.build_engine_payload(
+        filters=filters,
+        exclude_image_ids=[5],
+        limit=1,
+        client_dedup_key="api-key-7",
+    )
+    assert body_explicit["client_dedup_key"] == "api-key-7"
 
     plan_off = _minimal_plan(anti_repeat_enabled=False)
     body_off = plan_off.build_engine_payload(filters=filters, limit=1)
