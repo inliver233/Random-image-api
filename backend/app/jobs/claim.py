@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.metrics import JOBS_CLAIM_TOTAL
 from app.core.time import iso_utc_ms
+from app.db.images_upsert import adapt_driver_sql_named_binds, dialect_name_from_engine
 from app.db.session import with_sqlite_busy_retry
 
 DEFAULT_LOCK_TTL_S = 300
@@ -42,17 +43,20 @@ SET status='running',
 WHERE id IN (SELECT id FROM candidate)
 RETURNING *;
 """.strip()
+    dialect = dialect_name_from_engine(engine)
+    sql_exec, params_exec = adapt_driver_sql_named_binds(
+        sql,
+        {
+            "now": now_s,
+            "lock_expired_before": expired_before_s,
+            "worker_id": worker_id,
+        },
+        dialect_name=dialect,
+    )
 
     async def _op() -> dict[str, Any] | None:
         async with engine.begin() as conn:
-            result = await conn.exec_driver_sql(
-                sql,
-                {
-                    "now": now_s,
-                    "lock_expired_before": expired_before_s,
-                    "worker_id": worker_id,
-                },
-            )
+            result = await conn.exec_driver_sql(sql_exec, params_exec)
             row = result.mappings().first()
             return dict(row) if row else None
 
@@ -79,13 +83,16 @@ SET status='running',
 WHERE id=:id AND status='pending'
 RETURNING *;
 """.strip()
+    dialect = dialect_name_from_engine(engine)
+    sql_exec, params_exec = adapt_driver_sql_named_binds(
+        sql,
+        {"id": int(job_id), "worker_id": worker_id, "now": now},
+        dialect_name=dialect,
+    )
 
     async def _op() -> dict[str, Any] | None:
         async with engine.begin() as conn:
-            result = await conn.exec_driver_sql(
-                sql,
-                {"id": int(job_id), "worker_id": worker_id, "now": now},
-            )
+            result = await conn.exec_driver_sql(sql_exec, params_exec)
             row = result.mappings().first()
             return dict(row) if row else None
 
@@ -111,13 +118,16 @@ SET locked_at=:now,
     updated_at=:now
 WHERE id=:id AND locked_by=:worker_id AND status='running';
 """.strip()
+    dialect = dialect_name_from_engine(engine)
+    sql_exec, params_exec = adapt_driver_sql_named_binds(
+        sql,
+        {"now": now_s, "id": job_id, "worker_id": worker_id},
+        dialect_name=dialect,
+    )
 
     async def _op() -> bool:
         async with engine.begin() as conn:
-            result = await conn.exec_driver_sql(
-                sql,
-                {"now": now_s, "id": job_id, "worker_id": worker_id},
-            )
+            result = await conn.exec_driver_sql(sql_exec, params_exec)
             return (result.rowcount or 0) == 1
 
     return await with_sqlite_busy_retry(_op)

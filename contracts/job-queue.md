@@ -6,6 +6,7 @@ Implementation:
 
 - Protocol: `JobQueuePort` in `backend/app/jobs/queue.py`
 - Default: `SqliteJobQueue` → existing `claim_next_job` / `claim_pending_job_by_id` / `renew_job_lock` + enqueue helpers
+- Claim raw SQL: `:name` binds go through `adapt_driver_sql_named_binds` (sqlite named style; postgres → `$1..$n` for asyncpg) — still SQLite jobs table until external queue cutover
 - Shared insert shape: `new_pending_job` / `enqueue_pending_in_session` (same-txn admin/worker paths)
 - Worker: `_JobScheduler` + `poll_and_execute_jobs` take optional `queue=`; `execute_claimed_job` renews via `queue.renew_lock`
 - Public opportunistic hydrate: `schedule_hydrate_if_needed` / `schedule_pick_side_effects` / `deliver_random_image_stream` / `deliver_known_image` (`/i` + legacy) accept `job_queue=` from `app.state.job_queue`

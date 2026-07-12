@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import sqlalchemy as sa
@@ -58,6 +59,44 @@ def driver_param_marker(dialect_name: str) -> str:
     if name.startswith("postgres"):
         return "%s"
     return "?"
+
+
+_NAMED_BIND_RE = re.compile(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def adapt_driver_sql_named_binds(
+    sql: str,
+    params: dict[str, Any] | None,
+    *,
+    dialect_name: str,
+) -> tuple[str, Any]:
+    """Adapt `:name` named binds for raw `exec_driver_sql`.
+
+    - sqlite/aiosqlite: keep `:name` + dict (DBAPI named style)
+    - postgres/asyncpg: rewrite to `$1..$n` + ordered tuple (numeric_dollar)
+
+    Skips PostgreSQL ``::type`` casts via negative lookbehind. Callers still pass
+    a dict of bind values; missing keys raise KeyError when rewriting.
+    """
+    if not params:
+        return sql, params
+    name = (dialect_name or "sqlite").strip().lower() or "sqlite"
+    if not name.startswith("postgres"):
+        return sql, params
+
+    index_by_key: dict[str, int] = {}
+    order: list[str] = []
+
+    def _repl(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key not in index_by_key:
+            index_by_key[key] = len(order) + 1
+            order.append(key)
+        return f"${index_by_key[key]}"
+
+    adapted = _NAMED_BIND_RE.sub(_repl, sql)
+    values = tuple(params[key] for key in order)
+    return adapted, values
 
 
 async def upsert_image_by_illust_page(

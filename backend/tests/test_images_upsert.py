@@ -9,6 +9,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from app.db.engine import create_engine
 from app.db.images_upsert import (
+    adapt_driver_sql_named_binds,
     dialect_name_from_engine,
     driver_param_marker,
     insert_for_dialect,
@@ -101,3 +102,37 @@ def test_dialect_name_from_engine_sqlite(tmp_path: Path) -> None:
         assert dialect_name_from_engine(engine) == "sqlite"
     finally:
         asyncio.run(engine.dispose())
+
+
+def test_adapt_driver_sql_named_binds_sqlite_passthrough() -> None:
+    sql = "SELECT 1 WHERE key = :key AND t <= :now AND cast_col::text IS NOT NULL"
+    params = {"key": "k", "now": "t0"}
+    out_sql, out_params = adapt_driver_sql_named_binds(sql, params, dialect_name="sqlite")
+    assert out_sql == sql
+    assert out_params is params
+
+
+def test_adapt_driver_sql_named_binds_postgres_numeric_dollar() -> None:
+    sql = """
+UPDATE jobs
+SET locked_by=:worker_id, locked_at=:now, updated_at=:now
+WHERE id=:id AND status='pending' AND note::text IS NOT NULL
+RETURNING *;
+""".strip()
+    params = {"worker_id": "w1", "now": "t0", "id": 7}
+    out_sql, out_params = adapt_driver_sql_named_binds(sql, params, dialect_name="postgresql")
+    assert ":worker_id" not in out_sql
+    assert ":now" not in out_sql
+    assert ":id" not in out_sql
+    assert "note::text" in out_sql  # postgres cast preserved
+    assert "$1" in out_sql and "$2" in out_sql and "$3" in out_sql
+    # repeated :now reuses the same dollar index
+    assert out_sql.count("$2") >= 2
+    assert out_params == ("w1", "t0", 7)
+
+
+def test_adapt_driver_sql_named_binds_empty_params() -> None:
+    sql = "SELECT 1"
+    out_sql, out_params = adapt_driver_sql_named_binds(sql, None, dialect_name="postgresql")
+    assert out_sql == sql
+    assert out_params is None
