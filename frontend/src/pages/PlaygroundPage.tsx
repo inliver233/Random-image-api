@@ -571,7 +571,20 @@ export function PlaygroundPage() {
                 ) : (
                   <>
                     <Typography.Text>
-                      跳转地址: {m.data.location ? m.data.location : "（未提供）"}
+                      跳转地址:{" "}
+                      {(() => {
+                        if (!m.data.location) return "（未提供）";
+                        // Location may be /i/... or edge URL; browser open needs ?api_key= when required.
+                        const openable = withPublicApiKeyQuery(
+                          resolvePublicApiUrl(m.data.location),
+                          form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+                        );
+                        return (
+                          <Typography.Link href={openable} target="_blank" rel="noopener noreferrer">
+                            {openable}
+                          </Typography.Link>
+                        );
+                      })()}
                     </Typography.Text>
                     {m.data.note ? <Alert type="info" showIcon message={m.data.note} /> : null}
                   </>

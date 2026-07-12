@@ -147,4 +147,46 @@ describe("PlaygroundPage", () => {
     expect(await screen.findByText("本次筛选条件：")).toBeInTheDocument();
     expect(await screen.findByText(/r18_strict/)).toBeInTheDocument();
   });
+
+  it("makes redirect Location openable with public api_key", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/random") && (url.includes("redirect=1") || init?.redirect === "manual")) {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location: "/i/9.jpg",
+            "x-request-id": "req_redirect",
+          },
+        });
+      }
+      return new Response(JSON.stringify({ ok: false, code: "NOT_FOUND", message: "not found", request_id: "req_x", details: {} }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/admin/random?format=redirect"]}>
+          <Routes>
+            <Route path="/admin/random" element={<PlaygroundPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("随机接口调试")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("留空=不发送 X-API-Key"), {
+      target: { value: "debug-public-key-1234567890" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "开始请求" }));
+
+    expect(await screen.findByText(/请求ID:\s*req_redirect/)).toBeInTheDocument();
+    const link = await screen.findByRole("link", { name: /api_key=debug-public-key-1234567890/ });
+    expect(link.getAttribute("href") || "").toContain("/i/9.jpg");
+    expect(link.getAttribute("href") || "").toContain("api_key=debug-public-key-1234567890");
+  });
 });
