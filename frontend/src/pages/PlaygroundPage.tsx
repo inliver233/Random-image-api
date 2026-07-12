@@ -248,6 +248,7 @@ export function PlaygroundPage() {
     const format = sp.get("format");
     const includedTags = sp.get("included_tags");
     const userIdRaw = sp.get("user_id");
+    const illustIdRaw = sp.get("illust_id");
 
     const updates: Partial<PlaygroundFormValues> = {};
     if (format === "image" || format === "json" || format === "redirect") updates.format = format;
@@ -255,6 +256,10 @@ export function PlaygroundPage() {
     if (userIdRaw != null && String(userIdRaw).trim()) {
       const n = Number(userIdRaw);
       if (Number.isFinite(n) && n > 0) updates.user_id = Math.trunc(n);
+    }
+    if (illustIdRaw != null && String(illustIdRaw).trim()) {
+      const n = Number(illustIdRaw);
+      if (Number.isFinite(n) && n > 0) updates.illust_id = Math.trunc(n);
     }
 
     if (Object.keys(updates).length > 0) form.setFieldsValue(updates);

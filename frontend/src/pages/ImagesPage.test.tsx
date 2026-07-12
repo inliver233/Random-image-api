@@ -1,13 +1,25 @@
 ﻿import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as client from "../api/client";
 import { ImagesPage } from "./ImagesPage";
+import { PlaygroundPage } from "./PlaygroundPage";
 
 function makeClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+function renderImagesPage(qc: QueryClient) {
+  return render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>
+        <ImagesPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
 }
 
 describe("ImagesPage", () => {
@@ -15,14 +27,24 @@ describe("ImagesPage", () => {
     cleanup();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    try {
+      sessionStorage.clear();
+    } catch {
+      // ignore
+    }
   });
 
   beforeEach(() => {
+    try {
+      sessionStorage.clear();
+    } catch {
+      // ignore
+    }
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith("/admin/api/images?limit=50")) {
+        if (url.endsWith("/admin/api/images?limit=50") || url.includes("/admin/api/images?limit=50")) {
           return new Response(
             JSON.stringify({
               ok: true,
@@ -67,11 +89,7 @@ describe("ImagesPage", () => {
 
   it("renders list", async () => {
     const qc = makeClient();
-    render(
-      <QueryClientProvider client={qc}>
-        <ImagesPage />
-      </QueryClientProvider>,
-    );
+    renderImagesPage(qc);
 
     expect(await screen.findByText("图片管理")).toBeInTheDocument();
     expect(await screen.findByText("111")).toBeInTheDocument();
@@ -89,11 +107,7 @@ describe("ImagesPage", () => {
     );
 
     const qc = makeClient();
-    render(
-      <QueryClientProvider client={qc}>
-        <ImagesPage />
-      </QueryClientProvider>,
-    );
+    renderImagesPage(qc);
 
     fireEvent.click(await screen.findByRole("button", { name: "#1" }));
     expect(openSpy).toHaveBeenCalledWith(
@@ -113,11 +127,7 @@ describe("ImagesPage", () => {
     setPublicDebugApiKey("pk_img_open");
 
     const qc = makeClient();
-    render(
-      <QueryClientProvider client={qc}>
-        <ImagesPage />
-      </QueryClientProvider>,
-    );
+    renderImagesPage(qc);
 
     fireEvent.click(await screen.findByRole("button", { name: "#1" }));
     expect(openSpy).toHaveBeenCalledWith(
@@ -125,5 +135,28 @@ describe("ImagesPage", () => {
       "_blank",
       "noopener,noreferrer",
     );
+  });
+
+  it("navigates to playground with illust_id prefill", async () => {
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={["/admin/images"]}>
+          <Routes>
+            <Route path="/admin/images" element={<ImagesPage />} />
+            <Route path="/admin/random" element={<PlaygroundPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("111")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /按此作品随机/ }));
+    expect(await screen.findByText("随机接口调试")).toBeInTheDocument();
+
+    await waitFor(() => {
+      const input = screen.getByLabelText(/作品ID/) as HTMLInputElement;
+      expect(String(input.value)).toBe("111");
+    });
   });
 });

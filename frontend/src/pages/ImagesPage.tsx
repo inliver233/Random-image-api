@@ -3,6 +3,7 @@ import { Button, Card, Popconfirm, Select, Space, Table, Tag, Typography } from 
 import type { ColumnsType } from "antd/es/table";
 import React from "react";
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
 import { dash } from "../admin/format";
@@ -75,6 +76,7 @@ type ClearImagesResponse = {
 };
 
 export function ImagesPage() {
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const [missing, setMissing] = useState<string[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -250,9 +252,19 @@ export function ImagesPage() {
       {
         title: "操作",
         key: "actions",
-        width: 160,
+        width: 260,
         render: (_, row) => (
           <Space wrap>
+            <Button
+              size="small"
+              onClick={() =>
+                navigate(
+                  `/admin/random?format=image&illust_id=${encodeURIComponent(String(row.illust_id))}`,
+                )
+              }
+            >
+              按此作品随机
+            </Button>
             <Button
               size="small"
               onClick={() => manualHydrate.mutate(row.id)}
@@ -275,7 +287,7 @@ export function ImagesPage() {
         ),
       },
     ],
-    [deleteImage, manualHydrate],
+    [deleteImage, manualHydrate, navigate],
   );
 
   const selectedImageIds = useMemo(() => selectedRowKeys.map((k) => String(k)), [selectedRowKeys]);
