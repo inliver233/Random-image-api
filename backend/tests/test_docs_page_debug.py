@@ -65,3 +65,33 @@ def test_docs_html_public_key_required_banner() -> None:
     assert "/images" in html
     assert "/version" in html
     assert "/healthz" in html
+
+
+def test_public_html_pages_openapi_route_metadata_documents_modular_surfaces() -> None:
+    """/docs /status /wtf stay schema-hidden but carry modular-coupled route metadata."""
+    from app.main import create_app
+
+    app = create_app()
+    # include_in_schema=False → not in openapi paths; assert on route.openapi_extra / endpoint
+    by_path: dict[str, object] = {}
+    for route in app.routes:
+        path = getattr(route, "path", None)
+        if path in {"/docs", "/status", "/wtf"}:
+            by_path[str(path)] = route
+
+    docs = by_path["/docs"]
+    assert getattr(docs, "summary", None) == "Public API docs HTML"
+    assert "PUBLIC_API_KEY" in str(getattr(docs, "description", "") or "") or "API-key" in str(
+        getattr(docs, "description", "") or ""
+    )
+    assert getattr(docs, "include_in_schema", True) is False
+
+    status = by_path["/status"]
+    assert getattr(status, "summary", None) == "Public modular status HTML"
+    assert "status.json" in str(getattr(status, "description", "") or "")
+    assert getattr(status, "include_in_schema", True) is False
+
+    wtf = by_path["/wtf"]
+    assert getattr(wtf, "summary", None) == "Public WTF waterfall HTML"
+    assert "feed" in str(getattr(wtf, "description", "") or "").lower()
+    assert getattr(wtf, "include_in_schema", True) is False

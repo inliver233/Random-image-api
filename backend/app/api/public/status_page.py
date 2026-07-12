@@ -806,7 +806,17 @@ async def status_json(request: Request) -> JSONResponse:
     return resp
 
 
-@router.get("/status", include_in_schema=False)
+@router.get(
+    "/status",
+    include_in_schema=False,
+    summary="Public modular status HTML",
+    description=(
+        "Human-facing status dashboard mirroring `/status.json` modular `data.*` chips "
+        "(random_engine/image_edge/cf_api_proxy/r2_prewarm/api_key_rate_limit/job_queue/"
+        "recent_dedup + dialect labels). API-key exempt; no secrets / no outbound probes. "
+        "JSON twin: GET /status.json (in OpenAPI)."
+    ),
+)
 async def status_page(request: Request) -> HTMLResponse:
     rid = get_or_create_request_id(request)
     set_request_id_on_state(request, rid)

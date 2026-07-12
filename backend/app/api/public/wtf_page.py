@@ -1981,7 +1981,16 @@ def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> 
 """
 
 
-@router.get("/wtf", include_in_schema=False)
+@router.get(
+    "/wtf",
+    include_in_schema=False,
+    summary="Public WTF waterfall HTML",
+    description=(
+        "Browser masonry feed over public `/feed` + `/i` (client may attach `api_key` query "
+        "when PUBLIC_API_KEY_REQUIRED). Page itself is API-key exempt. Admin nav deep-links "
+        "append stored public debug key for session bootstrap."
+    ),
+)
 async def wtf_page(request: Request) -> HTMLResponse:
     rid = get_or_create_request_id(request)
     set_request_id_on_state(request, rid)

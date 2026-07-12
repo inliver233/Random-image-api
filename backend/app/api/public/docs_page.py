@@ -538,7 +538,16 @@ def _build_docs_html(*, base_url: str, public_api_key_required: bool = False) ->
 """
 
 
-@router.get("/docs", include_in_schema=False)
+@router.get(
+    "/docs",
+    include_in_schema=False,
+    summary="Public API docs HTML",
+    description=(
+        "Human-facing public docs page (API-key exempt when PUBLIC_API_KEY_REQUIRED). "
+        "Documents /random,/feed,/i,/tags,/authors modular public surfaces; links "
+        "/status.json modular honesty and /api/docs OpenAPI. Not the Swagger UI."
+    ),
+)
 async def docs_page(request: Request) -> HTMLResponse:
     settings = getattr(request.app.state, "settings", None)
     public_api_key_required = bool(getattr(settings, "public_api_key_required", False))
