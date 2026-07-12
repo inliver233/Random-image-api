@@ -19,11 +19,13 @@ import {
   isSignedUrlExpired,
   noteOriginSample,
   originCircuitConfig,
+  parseRateLimitConfig,
   parseSignedPath,
   resolveFallbackHosts,
   resolveR2Mode,
   resolveVerifySecrets,
   r2ObjectKey,
+  takeRateLimitToken,
   validPath,
 } from "../src/pure.js";
 
@@ -168,9 +170,14 @@ describe("signed URL expiry", () => {
 });
 
 describe("buildHealthzBody", () => {
-  it("reports dual_secret and r2_mode fields", () => {
+  it("reports dual_secret, r2_mode, and rate_limit fields", () => {
     assert.deepEqual(
-      buildHealthzBody({ secrets: ["a", "b"], circuitOpen: true, r2Mode: "read_through" }),
+      buildHealthzBody({
+        secrets: ["a", "b"],
+        circuitOpen: true,
+        r2Mode: "read_through",
+        rateLimit: { enabled: true, rpm: 3000, burst: 300 },
+      }),
       {
         ok: true,
         service: "random-image-edge",
@@ -178,6 +185,7 @@ describe("buildHealthzBody", () => {
         origin_circuit_open: true,
         r2: true,
         r2_mode: "read_through",
+        rate_limit: { enabled: true, rpm: 3000, burst: 300 },
       },
     );
     assert.deepEqual(
@@ -189,8 +197,46 @@ describe("buildHealthzBody", () => {
         origin_circuit_open: false,
         r2: false,
         r2_mode: "off",
+        rate_limit: { enabled: false },
       },
     );
+  });
+});
+
+describe("rate limit token bucket", () => {
+  it("defaults enabled 3000 rpm", () => {
+    const cfg = parseRateLimitConfig({});
+    assert.equal(cfg.enabled, true);
+    assert.equal(cfg.rpm, 3000);
+    assert.ok(cfg.burst >= 50);
+  });
+  it("RATE_LIMIT_RPM=0 disables", () => {
+    assert.deepEqual(parseRateLimitConfig({ RATE_LIMIT_RPM: "0" }), {
+      enabled: false,
+      rpm: 0,
+      burst: 0,
+    });
+  });
+  it("allows up to burst then rejects", () => {
+    const cfg = { rpm: 60, burst: 2 };
+    let bucket = { tokens: 2, updatedAtMs: 0 };
+    const a = takeRateLimitToken(bucket, cfg, 0);
+    assert.equal(a.allow, true);
+    bucket = a.bucket;
+    const b = takeRateLimitToken(bucket, cfg, 0);
+    assert.equal(b.allow, true);
+    bucket = b.bucket;
+    const c = takeRateLimitToken(bucket, cfg, 0);
+    assert.equal(c.allow, false);
+    assert.ok(c.retryAfterS >= 1);
+  });
+  it("refills over time", () => {
+    const cfg = { rpm: 60, burst: 1 };
+    let bucket = { tokens: 0, updatedAtMs: 0 };
+    const denied = takeRateLimitToken(bucket, cfg, 0);
+    assert.equal(denied.allow, false);
+    const allowed = takeRateLimitToken(denied.bucket, cfg, 2000);
+    assert.equal(allowed.allow, true);
   });
 });
 

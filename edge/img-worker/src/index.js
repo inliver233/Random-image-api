@@ -30,14 +30,19 @@ import {
   isSignedUrlExpired,
   noteOriginSample as pureNoteOriginSample,
   originCircuitConfig,
+  parseRateLimitConfig,
   parseSignedPath,
   resolveFallbackHosts,
   resolveR2Mode,
   resolveVerifySecrets,
   r2ObjectKey,
+  takeRateLimitToken,
   timingSafeEqual,
   validPath,
 } from "./pure.js";
+
+/** Per-isolate token bucket for origin/R2 miss path (resets on cold start). */
+let _rateBucket = null;
 
 const DEFAULT_ORIGIN = "i.pximg.net";
 const REFERER = "https://www.pixiv.net/";
@@ -415,10 +420,23 @@ export default {
     if (url.pathname === "/healthz" || url.pathname === "/") {
       const circuitOpen = isOriginCircuitOpen(Date.now());
       const r2Mode = resolveR2Mode(env);
-      return new Response(JSON.stringify(buildHealthzBody({ secrets, circuitOpen, r2Mode })), {
-        status: 200,
-        headers: { "Content-Type": "application/json; charset=utf-8", ...corsHeaders() },
-      });
+      const rateCfg = parseRateLimitConfig(env);
+      return new Response(
+        JSON.stringify(
+          buildHealthzBody({
+            secrets,
+            circuitOpen,
+            r2Mode,
+            rateLimit: rateCfg.enabled
+              ? { enabled: true, rpm: rateCfg.rpm, burst: rateCfg.burst }
+              : { enabled: false },
+          }),
+        ),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json; charset=utf-8", ...corsHeaders() },
+        },
+      );
     }
 
     const parsed = parseSignedPath(url.pathname);
@@ -463,6 +481,24 @@ export default {
         return new Response(null, { status: cached.status, headers });
       }
       return new Response(cached.body, { status: cached.status, headers });
+    }
+
+    // Isolate rate limit only on Cache MISS (origin/R2 work). Cache HIT stays free.
+    const rateCfg = parseRateLimitConfig(env);
+    if (rateCfg.enabled) {
+      const decision = takeRateLimitToken(_rateBucket, rateCfg, Date.now());
+      _rateBucket = decision.bucket;
+      if (!decision.allow) {
+        return new Response(JSON.stringify({ ok: false, message: "Rate limited" }), {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+            "Retry-After": String(decision.retryAfterS || 1),
+            ...corsHeaders(),
+          },
+        });
+      }
     }
 
     // Optional R2 read (Mode B2 / read_through).

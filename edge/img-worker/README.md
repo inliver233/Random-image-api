@@ -49,6 +49,7 @@ IMAGE_EDGE_SIGN_TTL_SECONDS=604800
 - 剥离客户端 Cookie / Authorization / CF-* 转发
 - 出站固定 `Referer: https://www.pixiv.net/`
 - 双密钥轮换：`IMAGE_EDGE_SECRET` + `IMAGE_EDGE_SECRET_PREVIOUS`（仅校验旧签）
+- 隔离级 token-bucket：`RATE_LIMIT_RPM`（默认 3000；`0` 关闭）仅约束 **Cache MISS** 的 R2/origin 路径；Cache HIT 不计数
 
 ## 密钥轮换
 

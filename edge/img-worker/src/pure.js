@@ -166,11 +166,76 @@ export function isSignedUrlExpired(exp, nowSec) {
 }
 
 /**
- * /healthz JSON body (no Request).
- * @param {{secrets:string[], circuitOpen:boolean, r2Mode:string}} input
+ * Parse isolate-local rate limit from env (parity with api-worker).
+ * RATE_LIMIT_RPM=0 → disabled. Empty → default 3000 rpm (image traffic).
+ * Burst defaults to max(rpm/10, 50) when unset.
  */
-export function buildHealthzBody({ secrets, circuitOpen, r2Mode }) {
+export function parseRateLimitConfig(env) {
+  const rawRpm = String(env?.RATE_LIMIT_RPM ?? "").trim();
+  if (rawRpm === "0") {
+    return { enabled: false, rpm: 0, burst: 0 };
+  }
+  if (!rawRpm) {
+    return { enabled: true, rpm: 3000, burst: 300 };
+  }
+  const rpm = Number(rawRpm);
+  if (!Number.isFinite(rpm) || rpm <= 0) {
+    return { enabled: false, rpm: 0, burst: 0 };
+  }
+  const clampedRpm = Math.min(Math.floor(rpm), 1_000_000);
+  const rawBurst = String(env?.RATE_LIMIT_BURST ?? "").trim();
+  let burst = rawBurst ? Number(rawBurst) : Math.max(Math.floor(clampedRpm / 10), 50);
+  if (!Number.isFinite(burst) || burst <= 0) {
+    burst = Math.max(Math.floor(clampedRpm / 10), 50);
+  }
+  burst = Math.min(Math.floor(burst), clampedRpm);
+  return { enabled: true, rpm: clampedRpm, burst };
+}
+
+/**
+ * Token-bucket allow decision (pure; caller mutates bucket).
+ * @param {{ tokens: number, updatedAtMs: number }} bucket
+ * @param {{ rpm: number, burst: number }} cfg
+ * @param {number} nowMs
+ */
+export function takeRateLimitToken(bucket, cfg, nowMs) {
+  const rpm = Math.max(1, Number(cfg?.rpm) || 1);
+  const burst = Math.max(1, Number(cfg?.burst) || 1);
+  const now = Number.isFinite(Number(nowMs)) ? Number(nowMs) : 0;
+  const prev = bucket && typeof bucket === "object" ? bucket : { tokens: burst, updatedAtMs: now };
+  const prevAt = Number(prev.updatedAtMs);
+  const updatedAtMs = Number.isFinite(prevAt) ? prevAt : now;
+  const elapsedS = Math.max(0, (now - updatedAtMs) / 1000);
+  const refill = (rpm / 60) * elapsedS;
+  const prevTokens = Number(prev.tokens);
+  let tokens = Math.min(burst, (Number.isFinite(prevTokens) ? prevTokens : burst) + refill);
+  if (tokens >= 1) {
+    tokens -= 1;
+    return {
+      allow: true,
+      retryAfterS: 0,
+      bucket: { tokens, updatedAtMs: now },
+    };
+  }
+  const need = 1 - tokens;
+  const retryAfterS = Math.max(1, Math.ceil((need * 60) / rpm));
+  return {
+    allow: false,
+    retryAfterS,
+    bucket: { tokens, updatedAtMs: now },
+  };
+}
+
+/**
+ * /healthz JSON body (no Request).
+ * @param {{secrets:string[], circuitOpen:boolean, r2Mode:string, rateLimit?:{enabled:boolean,rpm?:number,burst?:number}}} input
+ */
+export function buildHealthzBody({ secrets, circuitOpen, r2Mode, rateLimit }) {
   const mode = String(r2Mode || "off");
+  const rl =
+    rateLimit && rateLimit.enabled
+      ? { enabled: true, rpm: Number(rateLimit.rpm) || 0, burst: Number(rateLimit.burst) || 0 }
+      : { enabled: false };
   return {
     ok: true,
     service: "random-image-edge",
@@ -178,6 +243,7 @@ export function buildHealthzBody({ secrets, circuitOpen, r2Mode }) {
     origin_circuit_open: Boolean(circuitOpen),
     r2: mode !== "off",
     r2_mode: mode,
+    rate_limit: rl,
   };
 }
 

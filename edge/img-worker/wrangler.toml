@@ -18,6 +18,9 @@ ORIGIN_403_CIRCUIT_WINDOW_MS = "60000"
 ORIGIN_403_CIRCUIT_OPEN_MS = "30000"
 # R2 modes when [[r2_buckets]] is bound: off | read_through (default) | r2_only
 R2_MODE = "read_through"
+# Isolate token-bucket on Cache MISS /u/* (after HMAC). 0 = disable. Default 3000.
+RATE_LIMIT_RPM = "3000"
+# RATE_LIMIT_BURST = "300"
 # Rotation: put previous secret via `wrangler secret put IMAGE_EDGE_SECRET_PREVIOUS`
 # Prewarm auth: `wrangler secret put PREWARM_SECRET` (falls back to IMAGE_EDGE_SECRET)
 

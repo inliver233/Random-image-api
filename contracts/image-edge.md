@@ -26,8 +26,10 @@ GET|HEAD https://{edge-host}/u/{exp}/{sig}/{b64url(path)}
 Health:
 
 ```
-GET /healthz|/  →  {"ok":true,"service":"random-image-edge","dual_secret":bool,"origin_circuit_open":bool,"r2":bool,"r2_mode":"off|read_through|r2_only"}
+GET /healthz|/  →  {"ok":true,"service":"random-image-edge","dual_secret":bool,"origin_circuit_open":bool,"r2":bool,"r2_mode":"off|read_through|r2_only","rate_limit":{"enabled":bool,"rpm"?:number,"burst"?:number}}
 ```
+
+Isolate rate limit (optional): Worker `RATE_LIMIT_RPM` (default 3000; `0` disables) + `RATE_LIMIT_BURST`. Applied after HMAC on **Cache MISS** only (origin/R2 work); Cache HIT is free.
 
 Response headers of interest for ops (HIT rate / upstream diagnostics):
 
