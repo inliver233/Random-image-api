@@ -53,6 +53,17 @@ BFF counters: Prometheus `new_pixiv_image_delivery_total{path=...}`:
 | `local_stream_mirror` | local stream via pixiv.cat / host mirror |
 | `local_i_redirect` | `/i` non-stream redirect path |
 
+BFF R2 prewarm enqueue counters: Prometheus `new_pixiv_r2_prewarm_total{result=...}` (best-effort; never raises):
+
+| result | Meaning |
+| --- | --- |
+| `ok` | Worker chunk POST accepted (`status < 300`) |
+| `failed_chunk` | HTTP ≥300 or transport error on a chunk |
+| `skipped_disabled` | flag/URL not ready |
+| `skipped_no_secret` | ready URL but no prewarm/edge secret |
+| `skipped_no_paths` | no allowlisted paths after resolve |
+| `error` | unexpected outer failure |
+
 When Image Edge is **ready** (`IMAGE_EDGE_ENABLED` + secret + base URLs), public local cascade **skips residential pool selection** and fetches origin direct (or mirror if `pixiv_cat`/`proxy` override). Residential remains for control-plane hydrate and when edge is not configured.
 
 ## Signing (Python / any language)

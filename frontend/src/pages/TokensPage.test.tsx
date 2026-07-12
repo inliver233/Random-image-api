@@ -9,6 +9,15 @@ function makeClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
 }
 
+function pathOnly(input: RequestInfo | URL): string {
+  const raw = String(input);
+  try {
+    return new URL(raw, "http://local.test").pathname;
+  } catch {
+    return raw.split("?")[0] || raw;
+  }
+}
+
 describe("TokensPage", () => {
   afterEach(() => {
     cleanup();
@@ -23,8 +32,8 @@ describe("TokensPage", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/admin/api/tokens") && init?.method === "POST") {
+        const path = pathOnly(input);
+        if (path === "/admin/api/tokens" && init?.method === "POST") {
           const body = init?.body ? JSON.parse(String(init.body)) : {};
           expect(body.refresh_token).toBe("rt_test");
           return new Response(JSON.stringify({ ok: true, token_id: "2", request_id: "req_create" }), {
@@ -32,7 +41,7 @@ describe("TokensPage", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
-        if (url.endsWith("/admin/api/tokens")) {
+        if (path === "/admin/api/tokens") {
           listCalls += 1;
           return new Response(
             JSON.stringify({
@@ -57,7 +66,7 @@ describe("TokensPage", () => {
             { status: 200, headers: { "Content-Type": "application/json" } },
           );
         }
-        if (url.endsWith("/admin/api/tokens/1") && init?.method === "PUT") {
+        if (path === "/admin/api/tokens/1" && init?.method === "PUT") {
           const body = init?.body ? JSON.parse(String(init.body)) : {};
           if ("label" in body) tokenLabel = body.label ?? null;
           if ("enabled" in body) tokenEnabled = Boolean(body.enabled);
@@ -67,13 +76,14 @@ describe("TokensPage", () => {
             headers: { "Content-Type": "application/json" },
           });
         }
-        if (url.endsWith("/admin/api/tokens/1/test-refresh")) {
+        if (path === "/admin/api/tokens/1/test-refresh") {
           expect(init?.method).toBe("POST");
           return new Response(
             JSON.stringify({
               ok: true,
               expires_in: 123,
               user_id: "u1",
+              via_cf: false,
               proxy: { endpoint_id: "10", pool_id: "1" },
               request_id: "req_test_refresh",
             }),
@@ -83,7 +93,7 @@ describe("TokensPage", () => {
             },
           );
         }
-        if (url.endsWith("/admin/api/tokens/1/reset-failures")) {
+        if (path === "/admin/api/tokens/1/reset-failures") {
           expect(init?.method).toBe("POST");
           return new Response(JSON.stringify({ ok: true, token_id: "1", request_id: "req_reset" }), {
             status: 200,
@@ -146,11 +156,81 @@ describe("TokensPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: /测试刷新/ }));
     expect(await screen.findByText(/令牌刷新成功/)).toBeInTheDocument();
     expect(await screen.findByText(/代理 #10，代理池 #1/)).toBeInTheDocument();
+    expect(screen.queryByText(/直连/)).not.toBeInTheDocument();
     expect(await screen.findByText(/请求ID:\s*req_test_refresh/)).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: /重置失败计数/ }));
     expect(await screen.findByText(/已重置失败计数：1/)).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:\s*req_reset/)).toBeInTheDocument();
+  });
+
+  it("surfaces CF API proxy on test-refresh when via_cf", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = pathOnly(input);
+        if (path === "/admin/api/tokens" && init?.method === "POST") {
+          return new Response(JSON.stringify({ ok: true, token_id: "2", request_id: "req_create" }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        if (path === "/admin/api/tokens") {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              items: [
+                {
+                  id: "1",
+                  label: "acc1",
+                  enabled: true,
+                  refresh_token_masked: "***",
+                  weight: 1,
+                  error_count: 0,
+                  backoff_until: null,
+                  last_ok_at: null,
+                  last_fail_at: null,
+                  last_error_code: null,
+                  last_error_msg: null,
+                },
+              ],
+              request_id: "req_tokens_cf",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (path === "/admin/api/tokens/1/test-refresh") {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              expires_in: 60,
+              user_id: "u1",
+              via_cf: true,
+              proxy: null,
+              request_id: "req_cf_refresh",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(
+          JSON.stringify({ ok: false, code: "NOT_FOUND", message: "not found", request_id: "req_x", details: {} }),
+          { status: 404, headers: { "Content-Type": "application/json" } },
+        );
+      }),
+    );
+
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <TokensPage />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("acc1")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /测试刷新/ }));
+    expect(await screen.findByText(/令牌刷新成功/)).toBeInTheDocument();
+    expect(await screen.findByText(/经 CF API 代理/)).toBeInTheDocument();
+    expect(screen.queryByText(/直连/)).not.toBeInTheDocument();
   });
 
   it("updates token", async () => {

@@ -172,7 +172,11 @@ def _modular_readiness_from_request(request: Request) -> dict[str, Any]:
         "config — same honesty shapes as `/healthz` `modules.*` / public `/status.json` "
         "`data.*` (no secrets, no outbound engine/R2 probes). Also exports job status "
         "counts, proxy endpoint state counts (dialect-aware named binds on raw driver SQL), "
-        "and delivery/random counters."
+        "image delivery (`new_pixiv_image_delivery_total{path}` incl. edge_redirect / "
+        "local_stream_* / local_i_redirect), Pixiv API egress attempts "
+        "(`new_pixiv_pixiv_api_egress_total{via=cf|residential,result=ok|error}`), "
+        "R2 prewarm enqueue (`new_pixiv_r2_prewarm_total{result=ok|failed_chunk|"
+        "skipped_disabled|skipped_no_secret|skipped_no_paths|error}`), and random counters."
     ),
 )
 async def metrics(

@@ -461,6 +461,13 @@ export function DashboardPage() {
                         ? ` (req=${modularPorts.data.job_queue.requested})`
                         : ""}
                     </Tag>
+                    {typeof modularPorts.data.job_queue.implemented === "boolean" ? (
+                      <Tag color={modularPorts.data.job_queue.implemented ? "green" : "orange"}>
+                        {modularPorts.data.job_queue.implemented
+                          ? "job_queue implemented"
+                          : "job_queue not implemented"}
+                      </Tag>
+                    ) : null}
                     <Tag
                       color={
                         modularPorts.data.recent_dedup.active_backend === "redis"

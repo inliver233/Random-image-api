@@ -286,6 +286,7 @@ describe("DashboardPage", () => {
     expect(await screen.findByText("模块端口 / 边缘切流（Phase 4）")).toBeInTheDocument();
     expect(await screen.findByText(/catalog=sqlite/)).toBeInTheDocument();
     expect(await screen.findByText(/job_queue=sqlite/)).toBeInTheDocument();
+    expect(await screen.findByText("job_queue implemented")).toBeInTheDocument();
     expect((await screen.findAllByText("redis→memory fallback")).length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText(/api_key_rl=memory/)).toBeInTheDocument();
     expect(await screen.findByText("api_key required")).toBeInTheDocument();

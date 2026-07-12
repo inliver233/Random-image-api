@@ -58,6 +58,8 @@ type TestRefreshResponse = {
   ok: true;
   expires_in: number;
   user_id: string | null;
+  /** Winning egress was CF API proxy (not residential “direct”). */
+  via_cf?: boolean;
   proxy: { endpoint_id: string; pool_id: string } | null;
   request_id: string;
 };
@@ -215,7 +217,14 @@ export function TokensPage() {
       alerts.clear();
     },
     onSuccess: (data) => {
-      const routeInfo = data.proxy ? `（经代理 #${data.proxy.endpoint_id}，代理池 #${data.proxy.pool_id}）` : "（直连）";
+      let routeInfo: string;
+      if (data.via_cf) {
+        routeInfo = "（经 CF API 代理）";
+      } else if (data.proxy) {
+        routeInfo = `（经代理 #${data.proxy.endpoint_id}，代理池 #${data.proxy.pool_id}）`;
+      } else {
+        routeInfo = "（直连）";
+      }
       alerts.setSuccess(`令牌刷新成功，expires_in=${data.expires_in}${routeInfo}`, data.request_id);
       queryClient.invalidateQueries({ queryKey: ["admin", "tokens"] });
     },
