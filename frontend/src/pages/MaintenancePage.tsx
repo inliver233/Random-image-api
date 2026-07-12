@@ -176,10 +176,12 @@ type CfWorkersPoolResponse = {
   image?: CfPoolSide;
   egress_policy?: {
     residential_egress_emergency_only?: boolean;
+    force_residential_emergency?: boolean;
     cf_api_proxy_ready?: boolean;
     image_edge_ready?: boolean;
     pixiv_api_allows_residential_when_cf_ready?: boolean;
     image_origin_allows_residential_when_edge_ready?: boolean;
+    note?: string;
   };
   note?: string;
   request_id: string;
@@ -547,6 +549,13 @@ export function MaintenancePage() {
                   <Tag color="orange">OFF</Tag>
                 ) : (
                   <Tag color="green">ON</Tag>
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="进程强制住宅">
+                {egressPolicy?.force_residential_emergency ? (
+                  <Tag color="red">FORCE ON</Tag>
+                ) : (
+                  <Tag>off</Tag>
                 )}
               </Descriptions.Item>
               <Descriptions.Item label="CF API ready">

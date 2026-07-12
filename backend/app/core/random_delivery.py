@@ -269,6 +269,12 @@ async def deliver_random_image_stream(
             user_id_for_recent = int(image.user_id) if getattr(image, "user_id", None) is not None else None
 
         if prefer_edge_redirect:
+            try:
+                from app.core.image_edge import ensure_image_edge_overlay_fresh
+
+                await ensure_image_edge_overlay_fresh(engine)
+            except Exception:
+                pass
             edge_url = resolve_image_edge_redirect_url(settings=settings, original_url=origin_url)
             if edge_url:
                 schedule_edge_side_effects(

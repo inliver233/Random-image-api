@@ -132,3 +132,32 @@ def test_iter_pixiv_api_egress_residential_only_when_cf_empty() -> None:
     assert attempts[0].via_cf is False
     assert attempts[0].residential is None
     assert attempts[0].proxy_uri is None
+
+
+def test_iter_pixiv_api_egress_refreshes_overlay() -> None:
+    async def _run() -> None:
+        with (
+            patch(
+                "app.core.cf_pool_overlay.ensure_overlay_fresh",
+                new_callable=AsyncMock,
+            ) as refresh,
+            patch("app.core.proxy_selector.resolve_pixiv_api_cf_candidates", return_value=[]),
+            patch(
+                "app.core.proxy_selector.select_proxy_uri_for_url",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            _ = [
+                a
+                async for a in iter_pixiv_api_egress(
+                    object(),  # type: ignore[arg-type]
+                    SimpleNamespace(residential_egress_emergency_only=True),  # type: ignore[arg-type]
+                    SimpleNamespace(),  # type: ignore[arg-type]
+                    url="https://app-api.pixiv.net/v1/illust/detail",
+                    residential_failover_attempts=0,
+                )
+            ]
+            refresh.assert_awaited()
+
+    asyncio.run(_run())

@@ -320,6 +320,22 @@ def build_image_edge_url(
         return None
 
 
+async def ensure_image_edge_overlay_fresh(engine: Any | None = None) -> None:
+    """Best-effort multi-process refresh of runtime image pool members before signing.
+
+    Image delivery is sync-config after this await; mirrors API egress
+    ``ensure_overlay_fresh`` so register/deploy on another BFF is visible without restart.
+    """
+    if engine is None:
+        return
+    try:
+        from app.core.cf_pool_overlay import ensure_overlay_fresh
+
+        await ensure_overlay_fresh(engine)
+    except Exception:
+        pass
+
+
 def resolve_image_edge_signed_candidates(
     *,
     settings: Settings | None,
@@ -375,6 +391,7 @@ def resolve_image_edge_redirect_url(
 
     Sticky multi-base only (same as ``build_image_edge_url``). For ordered multi-base
     signed candidates see ``resolve_image_edge_signed_candidates``.
+    Callers on multi-process BFFs should ``await ensure_image_edge_overlay_fresh(engine)`` first.
     """
     cfg = load_image_edge_config_from_settings(settings)
     if cfg is None:

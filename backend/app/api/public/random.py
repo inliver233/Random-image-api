@@ -5,7 +5,11 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 
 from app.core.errors import ApiError
-from app.core.image_edge import image_edge_is_ready, resolve_image_edge_redirect_url
+from app.core.image_edge import (
+    ensure_image_edge_overlay_fresh,
+    image_edge_is_ready,
+    resolve_image_edge_redirect_url,
+)
 from app.core.metrics import observe_image_delivery
 from app.core.proxy_mirror import resolve_proxy_mirror
 from app.core.random_delivery import (
@@ -156,6 +160,7 @@ async def random_image(
         if format == "image" and redirect == 1:
             # Prefer CF image edge only when ready (flag+secret+bases). Default-off
             # must not emit edge_unavailable on every local /i redirect.
+            await ensure_image_edge_overlay_fresh(getattr(request.app.state, "engine", None))
             prefer_edge = prefer_image_edge(
                 proxy_override=proxy_override,
                 pixiv_cat=int(pixiv_cat),
@@ -220,6 +225,7 @@ async def random_image(
         )
 
     # When edge is ready and client did not force local mirror/proxy, hand bytes off to CF.
+    # Overlay freshness is also awaited inside deliver_random_image_stream before sign.
     prefer_edge_redirect = prefer_image_edge(
         proxy_override=proxy_override,
         pixiv_cat=int(pixiv_cat),

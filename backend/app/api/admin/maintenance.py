@@ -131,6 +131,14 @@ async def image_edge_status(
     _ = _claims
     rid = get_or_create_request_id(request)
     settings = getattr(request.app.state, "settings", None)
+    engine = getattr(request.app.state, "engine", None)
+    try:
+        from app.core.cf_pool_overlay import ensure_overlay_fresh, get_image_overlay_bases
+
+        await ensure_overlay_fresh(engine, force=True)
+        rt_bases = get_image_overlay_bases()
+    except Exception:
+        rt_bases = []
     flag_enabled = bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False
     raw_bases = list(getattr(settings, "image_edge_base_urls", None) or []) if settings is not None else []
     secret = str(getattr(settings, "image_edge_secret", "") or "").strip() if settings is not None else ""
@@ -140,12 +148,14 @@ async def image_edge_status(
     ttl = int(getattr(settings, "image_edge_sign_ttl_seconds", 604800) or 604800) if settings is not None else 604800
     cfg = load_image_edge_config_from_settings(settings) if settings is not None else None
     ready = cfg is not None
+    merged_count = len(cfg.base_urls) if cfg is not None else max(len(raw_bases), len(rt_bases))
     missing: list[str] = []
     if not flag_enabled:
         missing.append("IMAGE_EDGE_ENABLED")
     if not secret:
         missing.append("IMAGE_EDGE_SECRET")
-    if not raw_bases:
+    # Bases may come from env CSV and/or runtime overlay (register/deploy).
+    if not raw_bases and not rt_bases and not (cfg is not None and cfg.base_urls):
         missing.append("IMAGE_EDGE_BASE_URLS")
     return admin_ok(
         request,
@@ -154,6 +164,9 @@ async def image_edge_status(
             "ready": ready,
             "base_urls": list(cfg.base_urls) if cfg is not None else list(raw_bases),
             "base_url_count": len(cfg.base_urls) if cfg is not None else len(raw_bases),
+            "env_base_url_count": len(raw_bases),
+            "runtime_base_url_count": len(rt_bases),
+            "merged_base_url_count": merged_count,
             "sign_ttl_seconds": int(cfg.sign_ttl_seconds) if cfg is not None else int(ttl),
             "has_secret": bool(secret),
             "has_secret_previous": bool(secret_previous) and secret_previous != secret,
@@ -181,15 +194,25 @@ async def cf_api_proxy_status(
     _ = _claims
     rid = get_or_create_request_id(request)
     settings = getattr(request.app.state, "settings", None)
+    engine = getattr(request.app.state, "engine", None)
+    try:
+        from app.core.cf_pool_overlay import ensure_overlay_fresh, get_api_overlay_bases
+
+        await ensure_overlay_fresh(engine, force=True)
+        rt_bases = get_api_overlay_bases()
+    except Exception:
+        rt_bases = []
     flag_enabled = bool(getattr(settings, "cf_api_proxy_enabled", False)) if settings is not None else False
     raw_bases = list(getattr(settings, "cf_api_proxy_base_urls", None) or []) if settings is not None else []
     secret = str(getattr(settings, "cf_api_proxy_secret", "") or "").strip() if settings is not None else ""
     cfg = load_cf_api_proxy_config_from_settings(settings) if settings is not None else None
     ready = bool(cfg is not None and cfg.ready)
+    merged_count = len(cfg.base_urls) if cfg is not None else max(len(raw_bases), len(rt_bases))
     missing: list[str] = []
     if not flag_enabled:
         missing.append("CF_API_PROXY_ENABLED")
-    if not raw_bases:
+    # Bases may come from env CSV and/or runtime overlay (register/deploy).
+    if not raw_bases and not rt_bases and not (cfg is not None and cfg.base_urls):
         missing.append("CF_API_PROXY_BASE_URLS")
     # Worker PROXY_SECRET is fail-closed; BFF secret required for ready.
     if not secret:
@@ -201,6 +224,9 @@ async def cf_api_proxy_status(
             "ready": ready,
             "base_urls": list(cfg.base_urls) if cfg is not None else list(raw_bases),
             "base_url_count": len(cfg.base_urls) if cfg is not None else len(raw_bases),
+            "env_base_url_count": len(raw_bases),
+            "runtime_base_url_count": len(rt_bases),
+            "merged_base_url_count": merged_count,
             "has_secret": bool(secret),
             "missing": missing,
         },

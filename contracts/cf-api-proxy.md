@@ -62,6 +62,8 @@ Env CSV bases merge with runtime-registered bases (`cf_pool.api.base_urls` in `r
 | `POST /admin/api/cf-workers/unregister` | remove runtime base |
 | `POST /admin/api/cf-workers/deploy` | CF API upload of **hardened** `edge/api-worker` or `edge/img-worker`, enable workers.dev, optional auto-register — **does not** flip enable flags; never stores CF API token |
 | `POST /admin/api/cf-workers/probe` | outbound `GET {base}/healthz` for merged pool (or body `base_urls`); optional `kind=api\|image\|all` (default all), `timeout_s`; `base_urls` override requires `kind=api` or `kind=image` (not `all`); records process-local base cooldown on hard fail — **never** flips enable flags |
+| `GET /admin/api/cf-workers/egress-policy` | residential emergency-only + process-local `force_residential_emergency` |
+| `POST /admin/api/cf-workers/egress-policy` | body `force_residential_emergency=true\|false` — process-local only; does not change env |
 
 Prod enable gate: `CF_API_PROXY_ENABLED` requires `CF_API_PROXY_SECRET` in prod; bases may be env CSV and/or runtime overlay after boot (env CSV alone is not required).
 

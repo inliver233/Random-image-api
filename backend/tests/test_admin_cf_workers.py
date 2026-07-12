@@ -237,3 +237,45 @@ def test_cf_workers_probe_rejects_all_with_base_urls_override(tmp_path: Path, mo
         assert body.get("ok") is False
         assert str(body.get("code") or "").upper() == "BAD_REQUEST"
     reset_overlay_for_tests()
+
+
+def test_cf_workers_egress_policy_force_residential(tmp_path: Path, monkeypatch) -> None:
+    from app.core.egress_policy import (
+        is_force_residential_emergency,
+        reset_force_residential_emergency_for_tests,
+    )
+
+    reset_force_residential_emergency_for_tests()
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_egress_force")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        get_resp = client.get("/admin/api/cf-workers/egress-policy", headers=headers)
+        assert get_resp.status_code == 200
+        gbody = get_resp.json()
+        assert gbody["ok"] is True
+        assert gbody["residential_egress_emergency_only"] is True
+        assert gbody["force_residential_emergency"] is False
+
+        set_resp = client.post(
+            "/admin/api/cf-workers/egress-policy",
+            headers=headers,
+            json={"force_residential_emergency": True},
+        )
+        assert set_resp.status_code == 200
+        sbody = set_resp.json()
+        assert sbody["updated"] is True
+        assert sbody["force_residential_emergency"] is True
+        assert sbody["pixiv_api_allows_residential_when_cf_ready"] is True
+        assert is_force_residential_emergency() is True
+
+        off = client.post(
+            "/admin/api/cf-workers/egress-policy",
+            headers=headers,
+            json={"force_residential_emergency": False},
+        )
+        assert off.status_code == 200
+        assert off.json()["force_residential_emergency"] is False
+        assert is_force_residential_emergency() is False
+    reset_force_residential_emergency_for_tests()
+    reset_overlay_for_tests()

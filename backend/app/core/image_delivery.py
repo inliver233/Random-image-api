@@ -6,7 +6,11 @@ from fastapi import BackgroundTasks
 
 from app.core.errors import ApiError, ErrorCode
 from app.core.http_stream import stream_url
-from app.core.image_edge import image_edge_is_ready, resolve_image_edge_redirect_url
+from app.core.image_edge import (
+    ensure_image_edge_overlay_fresh,
+    image_edge_is_ready,
+    resolve_image_edge_redirect_url,
+)
 from app.core.metrics import observe_image_delivery
 from app.core.origin_stream import prepare_origin_stream
 from app.core.pixiv_urls import ALLOWED_IMAGE_EXTS
@@ -125,6 +129,8 @@ async def deliver_known_image(
 ) -> Any:
     """Shared edge-prefer + local stream path for /i and legacy routes."""
     store = resolve_catalog_store(catalog)
+    # Multi-process: refresh runtime image pool members before readiness/sign.
+    await ensure_image_edge_overlay_fresh(engine)
     # Gate on edge ready: default-off must not count edge_unavailable on every /i.
     prefer_edge = (
         prefer_image_edge(

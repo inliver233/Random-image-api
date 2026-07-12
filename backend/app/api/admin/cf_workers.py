@@ -32,7 +32,11 @@ from app.core.cf_pool_registry import (
     unregister_base_url,
 )
 from app.core.cf_worker_deploy import CfWorkerDeployError, deploy_cf_worker
-from app.core.egress_policy import egress_policy_snapshot
+from app.core.egress_policy import (
+    egress_policy_snapshot,
+    is_force_residential_emergency,
+    set_force_residential_emergency,
+)
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_settings import set_runtime_setting
@@ -328,7 +332,10 @@ async def cf_workers_deploy(
 @router.get(
     "/cf-workers/egress-policy",
     summary="Residential emergency-only egress policy",
-    description="Read-only: whether residential is demoted when CF pools are ready.",
+    description=(
+        "Read-only: whether residential is demoted when CF pools are ready. "
+        "Includes process-local force_residential_emergency override."
+    ),
 )
 async def cf_workers_egress_policy(
     request: Request,
@@ -341,6 +348,36 @@ async def cf_workers_egress_policy(
         payload=dict(egress_policy_snapshot(_settings(request))),
         request_id=rid,
     )
+
+
+@router.post(
+    "/cf-workers/egress-policy",
+    summary="Set process-local force residential emergency override",
+    description=(
+        "Body: force_residential_emergency=true|false. Process-local only (not durable; "
+        "does not change RESIDENTIAL_EGRESS_EMERGENCY_ONLY env). When true, residential "
+        "egress is allowed even if CF API / image edge is ready. Ops emergency path."
+    ),
+)
+async def cf_workers_egress_policy_set(
+    request: Request,
+    claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    _ = claims
+    rid = get_or_create_request_id(request)
+    data = await load_json_object(request)
+    if "force_residential_emergency" not in data:
+        raise ApiError(
+            code=ErrorCode.BAD_REQUEST,
+            message="force_residential_emergency is required",
+            status_code=400,
+        )
+    enabled = parse_bool(data.get("force_residential_emergency"), default=False)
+    set_force_residential_emergency(enabled)
+    snap = dict(egress_policy_snapshot(_settings(request)))
+    snap["updated"] = True
+    snap["force_residential_emergency"] = is_force_residential_emergency()
+    return admin_ok(request, payload=snap, request_id=rid)
 
 
 @router.post(
