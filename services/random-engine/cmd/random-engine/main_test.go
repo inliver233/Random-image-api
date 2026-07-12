@@ -446,3 +446,35 @@ func TestQualityFreshnessFallsBackToAddedAt(t *testing.T) {
 		t.Fatalf("velocity should be 0 without created_at_pixiv, got %v", logitVel)
 	}
 }
+
+func TestFilterByMultiplierAllow(t *testing.T) {
+	ai, nonAI := 1, 0
+	illust, manga := 0, 1
+	imAI := indexImage{ID: 1, AIType: &ai, IllustType: &illust}
+	imNon := indexImage{ID: 2, AIType: &nonAI, IllustType: &illust}
+	imManga := indexImage{ID: 3, AIType: &nonAI, IllustType: &manga}
+	mults := map[string]float64{"ai": 0, "non_ai": 1, "unknown_ai": 1, "illust": 1, "manga": 0, "ugoira": 1, "unknown_illust_type": 1}
+	out := filterByMultiplierAllow([]indexImage{imAI, imNon, imManga}, mults)
+	if len(out) != 1 || out[0].ID != 2 {
+		t.Fatalf("want only non-AI illust id=2, got %+v", out)
+	}
+	// All multipliers default 1 → keep all.
+	all := filterByMultiplierAllow([]indexImage{imAI, imNon, imManga}, map[string]float64{})
+	if len(all) != 3 {
+		t.Fatalf("default mults should keep all, got %d", len(all))
+	}
+}
+
+func TestImageMultiplierMatchesQualityLogitGate(t *testing.T) {
+	ai := 1
+	bm, vw := 1, 1
+	im := indexImage{AIType: &ai, BookmarkCount: &bm, ViewCount: &vw}
+	mults := map[string]float64{"ai": 0}
+	if imageMultiplier(im, mults) > 0 {
+		t.Fatal("expected zero")
+	}
+	_, _, ok := qualityLogit(im, map[string]float64{"bookmark": 0, "view": 0, "comment": 0, "pixels": 0, "bookmark_rate": 0, "freshness": 0, "bookmark_velocity": 0}, mults, 21, 2, 1, nil, nil, 0, 0)
+	if ok {
+		t.Fatal("qualityLogit should skip zero mult")
+	}
+}

@@ -572,10 +572,6 @@ func handlePick(w http.ResponseWriter, r *http.Request, st *engineState) {
 		if samples > 64 {
 			samples = 64
 		}
-		if samples > len(candidates) {
-			samples = len(candidates)
-		}
-		pool := ringSample(candidates, samples, rng)
 		pickMode := stringFromAny(req.Quality["pick_mode"], "weighted")
 		temp := floatFromAny(req.Quality["temperature"], 1.0)
 		weights := mapFromAny(req.Quality["weights"])
@@ -588,6 +584,14 @@ func handlePick(w http.ResponseWriter, r *http.Request, st *engineState) {
 		recentImgs := int64SetFromAny(req.Quality["recent_image_ids"])
 		recentAuths := int64SetFromAny(req.Quality["recent_author_ids"])
 
+		// Python pick_by_quality drops zero-multiplier types in SQL (ai_type_allowed /
+		// illust_type_allowed) before sampling. Pre-filter so zero-mult classes do not
+		// consume quality sample slots (post-score skip alone is not enough).
+		allowed := filterByMultiplierAllow(candidates, multipliers)
+		if samples > len(allowed) {
+			samples = len(allowed)
+		}
+		pool := ringSample(allowed, samples, rng)
 		scored := make([]scoredImg, 0, len(pool))
 		for _, im := range pool {
 			// Temperature scales score only; log(mult) is added after (Python parity).
@@ -764,6 +768,46 @@ func pickFromScored(scored []scoredImg, pickMode string, limit int, rng *rand.Ra
 	return out
 }
 
+
+// filterByMultiplierAllow keeps images whose AI/illust class multipliers are both > 0.
+// Mirrors Python pick_by_quality ai_type_allowed / illust_type_allowed SQL pre-filter.
+func filterByMultiplierAllow(cands []indexImage, multipliers map[string]float64) []indexImage {
+	out := make([]indexImage, 0, len(cands))
+	for _, im := range cands {
+		if imageMultiplier(im, multipliers) > 0 {
+			out = append(out, im)
+		}
+	}
+	return out
+}
+
+// imageMultiplier computes the product of AI + illust-type multipliers (defaults 1).
+func imageMultiplier(im indexImage, multipliers map[string]float64) float64 {
+	mult := 1.0
+	if im.AIType == nil {
+		mult *= weightOr(multipliers, "unknown_ai", 1.0)
+	} else if *im.AIType == 1 {
+		mult *= weightOr(multipliers, "ai", 1.0)
+	} else {
+		mult *= weightOr(multipliers, "non_ai", 1.0)
+	}
+	if im.IllustType == nil {
+		mult *= weightOr(multipliers, "unknown_illust_type", 1.0)
+	} else {
+		switch *im.IllustType {
+		case 0:
+			mult *= weightOr(multipliers, "illust", 1.0)
+		case 1:
+			mult *= weightOr(multipliers, "manga", 1.0)
+		case 2:
+			mult *= weightOr(multipliers, "ugoira", 1.0)
+		default:
+			mult *= weightOr(multipliers, "unknown_illust_type", 1.0)
+		}
+	}
+	return mult
+}
+
 func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLifeDays, velSmooth, temperature float64, recentImageIDs, recentAuthorIDs map[int64]struct{}, imagePenalty, authorPenalty float64) (float64, map[string]any, bool) {
 	wBookmark := weightOr(weights, "bookmark", 4.0)
 	wView := weightOr(weights, "view", 0.5)
@@ -816,28 +860,7 @@ func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLi
 		wFresh*fresh +
 		wVel*math.Log1p(vel)
 
-	mult := 1.0
-	if im.AIType == nil {
-		mult *= weightOr(multipliers, "unknown_ai", 1.0)
-	} else if *im.AIType == 1 {
-		mult *= weightOr(multipliers, "ai", 1.0)
-	} else {
-		mult *= weightOr(multipliers, "non_ai", 1.0)
-	}
-	if im.IllustType == nil {
-		mult *= weightOr(multipliers, "unknown_illust_type", 1.0)
-	} else {
-		switch *im.IllustType {
-		case 0:
-			mult *= weightOr(multipliers, "illust", 1.0)
-		case 1:
-			mult *= weightOr(multipliers, "manga", 1.0)
-		case 2:
-			mult *= weightOr(multipliers, "ugoira", 1.0)
-		default:
-			mult *= weightOr(multipliers, "unknown_illust_type", 1.0)
-		}
-	}
+	mult := imageMultiplier(im, multipliers)
 	if mult <= 0 {
 		// Python pick_by_quality: continue (drop candidate); do not clamp to epsilon.
 		return 0, nil, false
