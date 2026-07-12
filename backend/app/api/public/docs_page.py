@@ -511,7 +511,8 @@ def _build_docs_html(*, base_url: str, public_api_key_required: bool = False) ->
         <code>/i/&#123;id&#125;.&#123;ext&#125;</code>（出图 / Image Edge 302）、
         <code>/&#123;illust_id&#125;.&#123;ext&#125;</code> / <code>/&#123;illust_id&#125;-&#123;page&#125;.&#123;ext&#125;</code>（legacy 出图，优先改用 <code>/i/</code>）、
         <a href="{examples["version_api"]}">/version</a>（构建信息）、
-        <a href="{u('/healthz')}">/healthz</a>（进程健康 + modules 诚实字段，免 Key）。
+        <a href="{u('/healthz')}">/healthz</a>（进程健康 + modules 诚实字段，免 Key）、
+        <a href="{examples["status_json"]}">/status.json</a>（公开模块化状态快照，免 Key）。
         完整字段见 OpenAPI summary。<br/>
         OpenAPI：<a href="{examples["openapi"]}">/openapi.json</a>，Swagger：<a href="{examples["swagger"]}">/api/docs</a>。<br/>
       </div>

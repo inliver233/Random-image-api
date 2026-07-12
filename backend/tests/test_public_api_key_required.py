@@ -241,12 +241,16 @@ def test_openapi_documents_public_api_key_security_schemes(tmp_path: Path, monke
             ("/i/{image_id}.{ext}", "Deliver image bytes or edge redirect"),
             ("/version", "Build version metadata"),
             ("/healthz", "Process health and module readiness"),
+            ("/status.json", "Public modular status snapshot"),
             ("/{illust_id}-{page}.{ext}", "Legacy multi-page image delivery"),
             ("/{illust_id}.{ext}", "Legacy single-page image delivery"),
         ):
             op = (paths.get(path) or {}).get("get") or {}
             assert op.get("summary") == expected_summary, path
             assert op.get("description"), path
+        status_json_desc = str(((paths.get("/status.json") or {}).get("get") or {}).get("description") or "")
+        assert "data.random_engine" in status_json_desc or "random_engine" in status_json_desc
+        assert "modules" in status_json_desc
 
 
 def test_favicon_exempt_when_public_api_key_required(tmp_path: Path, monkeypatch) -> None:

@@ -735,7 +735,19 @@ def _build_status_html(
 """
 
 
-@router.get("/status.json", include_in_schema=False)
+@router.get(
+    "/status.json",
+    summary="Public modular status snapshot",
+    description=(
+        "Machine-readable public status: gallery/random counters plus local modular config "
+        "under `data.*` — same honesty shapes as `/healthz` → `modules.*` for "
+        "`random_engine` (incl. process circuit), `image_edge`, `cf_api_proxy`, `r2_prewarm`, "
+        "`api_key_rate_limit`, `job_queue`, `recent_dedup`, and dialect labels "
+        "`catalog`/`tags`/`random_service`/`random_pick`. No secrets and no outbound probes. "
+        "Middleware-exempt when `PUBLIC_API_KEY_REQUIRED` (same class as `/healthz`/`/docs`). "
+        "HTML twin: `/status`."
+    ),
+)
 async def status_json(request: Request) -> JSONResponse:
     rid = get_or_create_request_id(request)
     set_request_id_on_state(request, rid)

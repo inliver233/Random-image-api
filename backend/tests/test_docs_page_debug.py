@@ -44,6 +44,7 @@ def test_docs_html_documents_debug_engine_status() -> None:
     assert 'href="https://example.test/images"' in html
     assert 'href="https://example.test/version"' in html
     assert 'href="https://example.test/healthz"' in html
+    assert 'href="https://example.test/status.json"' in html
     assert "/i/" in html or "/i/{" in html
     assert "legacy" in html.lower() or "{illust_id}" in html
 
