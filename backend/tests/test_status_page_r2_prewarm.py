@@ -96,6 +96,25 @@ def test_status_json_r2_prewarm_flag_url_without_secret_not_ready(tmp_path: Path
         assert r2.get("ready") is False
 
 
+def test_status_html_r2_chip_no_secret_when_flag_url_not_ready(tmp_path: Path, monkeypatch) -> None:
+    """HTML chip surfaces no-secret when flag+url but not ready (without leaking secrets)."""
+    app = _seed_app(
+        tmp_path,
+        monkeypatch,
+        enabled="true",
+        url="https://img.example.com",
+        secret="",
+        edge_secret="",
+    )
+
+    with TestClient(app) as client:
+        resp = client.get("/status")
+        assert resp.status_code == 200
+        text = resp.text
+        assert "r2-prewarm: not ready · flag+url · no-secret" in text
+        assert "prewarm-secret" not in text
+
+
 def test_status_html_shows_r2_prewarm_chip(tmp_path: Path, monkeypatch) -> None:
     app = _seed_app(
         tmp_path,

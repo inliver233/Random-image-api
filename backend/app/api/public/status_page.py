@@ -292,7 +292,8 @@ def _build_status_html(
     else:
         cf_chip = f"cf-api: off · bases {cf_bases}"
 
-    # R2 prewarm readiness chip (config only; same as /healthz modules.r2_prewarm without secret flags).
+    # R2 prewarm readiness chip (config only; same as /healthz modules.r2_prewarm without secret values).
+    # Public JSON omits secret_configured; when flag+url but not ready, secret is the usual gap.
     r2 = payload.get("r2_prewarm") if isinstance(payload.get("r2_prewarm"), dict) else {}
     r2_ready = bool(r2.get("ready"))
     r2_flag = bool(r2.get("enabled_flag"))
@@ -300,7 +301,7 @@ def _build_status_html(
     if r2_ready:
         r2_chip = "r2-prewarm: ready"
     elif r2_flag and r2_url:
-        r2_chip = "r2-prewarm: not ready · flag+url"
+        r2_chip = "r2-prewarm: not ready · flag+url · no-secret"
     elif r2_flag:
         r2_chip = "r2-prewarm: not ready · flag on"
     else:

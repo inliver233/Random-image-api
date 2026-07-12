@@ -99,6 +99,7 @@ type ImageEdgeStatusResponse = {
   ready: boolean;
   base_url_count: number;
   has_secret: boolean;
+  has_secret_previous?: boolean;
   request_id: string;
 };
 
@@ -530,6 +531,9 @@ export function DashboardPage() {
                         bases={imageEdge.data.base_url_count}
                         {imageEdge.data.has_secret ? "" : " · no-secret"}
                       </Tag>
+                      {imageEdge.data.has_secret_previous ? (
+                        <Tag color="blue">dual-secret</Tag>
+                      ) : null}
                     </>
                   ) : null}
                   {cfApiProxy.data ? (

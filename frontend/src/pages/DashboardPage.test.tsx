@@ -174,6 +174,7 @@ describe("DashboardPage", () => {
               ready: false,
               base_url_count: 0,
               has_secret: false,
+              has_secret_previous: true,
               request_id: "req_edge",
             }),
             { status: 200, headers: { "Content-Type": "application/json" } },
@@ -292,6 +293,7 @@ describe("DashboardPage", () => {
     expect(await screen.findByText("no-redis-url")).toBeInTheDocument();
     expect(await screen.findByText("api_key required")).toBeInTheDocument();
     expect(await screen.findByText(/image_edge=flag-on-not-ready/)).toBeInTheDocument();
+    expect(await screen.findByText("dual-secret")).toBeInTheDocument();
     // image_edge + cf_api_proxy both surface bases= / no-secret (CF tag parity).
     expect((await screen.findAllByText(/bases=0\s*·\s*no-secret/)).length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText(/cf_api_proxy=off/)).toBeInTheDocument();
