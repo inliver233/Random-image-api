@@ -49,7 +49,7 @@ class Settings:
     redis_url: str
     # Short-window anti-repeat store: memory (default) | redis (requires REDIS_URL; fail-open).
     recent_dedup_backend: str
-    # Job claim/enqueue port: sqlite (default) | memory | redis | nats (redis/nats reserved → sqlite).
+    # Job claim/enqueue port: sqlite (default) | memory. redis/nats reserved and rejected at load.
     job_queue_backend: str
     random_totals_persist_interval_seconds: int
     # Optional Go random-engine BFF dual-run / cutover (empty = Python-only pick).
@@ -237,9 +237,14 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     recent_dedup_backend = _get(env, "RECENT_DEDUP_BACKEND", "memory").lower()
     if recent_dedup_backend not in {"memory", "redis"}:
         recent_dedup_backend = "memory"
-    # sqlite (default). redis/nats reserved labels fall back inside build_job_queue.
+    # sqlite (default) | memory. redis/nats are reserved and rejected (fail loud; no silent fallback).
     job_queue_backend = _get(env, "JOB_QUEUE_BACKEND", "sqlite").lower()
-    if job_queue_backend not in {"sqlite", "memory", "redis", "nats"}:
+    if job_queue_backend in {"redis", "nats"}:
+        raise ValueError(
+            f"JOB_QUEUE_BACKEND={job_queue_backend} is reserved and not implemented yet; "
+            "use sqlite (default) or memory."
+        )
+    if job_queue_backend not in {"sqlite", "memory"}:
         job_queue_backend = "sqlite"
 
     random_totals_persist_interval_seconds = parse_int_env(

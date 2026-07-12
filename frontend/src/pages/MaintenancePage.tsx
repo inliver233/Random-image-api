@@ -463,7 +463,7 @@ export function MaintenancePage() {
         <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
           Catalog / TagStore / JobQueue / RecentDedup / RandomService / RandomPick 端口只读状态。每行展示
           active（实际）与 requested/configured（配置意图）。JOB_QUEUE_BACKEND=memory 为 SQLite jobs
-          表的别名标签（仍持久化）。redis/nats 队列未实现时回落 sqlite。RecentDedup 支持
+          表的别名标签（仍持久化）。redis/nats 队列未实现 — 配置会直接启动失败（不再静默回落）。RecentDedup 支持
           RECENT_DEDUP_BACKEND=redis + REDIS_URL（失败回落 memory）。Catalog/TagStore/RandomPick 由
           DATABASE_URL 方言派生。不展示密钥或连接串。
         </Typography.Paragraph>

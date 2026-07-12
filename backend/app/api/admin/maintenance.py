@@ -306,7 +306,8 @@ async def modular_ports_status(
         if settings is not None
         else "sqlite"
     )
-    if job_requested not in {"sqlite", "memory", "redis", "nats"}:
+    if job_requested not in {"sqlite", "memory"}:
+        # Settings rejects redis/nats at boot; normalize any other label for honesty.
         job_requested = "sqlite"
     job_queue = getattr(request.app.state, "job_queue", None)
     job_queue_backend = str(getattr(job_queue, "backend", "sqlite") or "sqlite")
@@ -325,12 +326,12 @@ async def modular_ports_status(
                 "backend": tag_backend,
             },
             "job_queue": {
-                # Active port from app.state (sqlite until a real alternate ships).
+                # Active port from app.state (sqlite/memory only; redis/nats fail at settings load).
                 "backend": job_queue_backend,
                 "requested": job_requested,
                 "implemented": job_queue_implemented,
-                # True when redis/nats requested but factory still serves sqlite.
-                "using_sqlite_fallback": (not job_queue_implemented) and job_queue_backend == "sqlite",
+                # Always false under fail-loud settings; kept for API shape stability.
+                "using_sqlite_fallback": False,
             },
             "recent_dedup": {
                 "configured_backend": recent_cfg,

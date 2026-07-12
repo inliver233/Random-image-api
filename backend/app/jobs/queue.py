@@ -265,12 +265,18 @@ def build_job_queue(engine: AsyncEngine, *, backend: str = "sqlite") -> JobQueue
 
     - ``sqlite``: default SQLite jobs table
     - ``memory``: implemented alias of sqlite storage (process-local intent); backend label stays ``memory``
-    - ``redis`` / ``nats``: reserved → sqlite storage with backend label ``sqlite`` (ops: using_sqlite_fallback)
+    - ``redis`` / ``nats``: **not implemented** — raise (fail loud; no silent sqlite fallback)
     """
     backend_norm = (backend or "sqlite").strip().lower()
+    if backend_norm in {"redis", "nats"}:
+        raise ValueError(
+            f"JOB_QUEUE_BACKEND={backend_norm} is reserved and not implemented yet; "
+            "use sqlite (default) or memory. Redis/NATS job queues are not available."
+        )
     if backend_norm not in {"sqlite", "memory"}:
-        # redis/nats reserved — fall back to sqlite until implemented.
-        backend_norm = "sqlite"
+        raise ValueError(
+            f"Unknown JOB_QUEUE_BACKEND={backend_norm!r}; supported: sqlite, memory"
+        )
     queue = SqliteJobQueue(engine)
     # Label active backend for ops honesty (storage remains SQLite jobs table either way).
     queue.backend = "memory" if backend_norm == "memory" else "sqlite"

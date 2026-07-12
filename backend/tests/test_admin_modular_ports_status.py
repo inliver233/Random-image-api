@@ -57,7 +57,8 @@ def test_admin_modular_ports_status_recent_redis_fallback(tmp_path: Path, monkey
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
     monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
     monkeypatch.setenv("RECENT_DEDUP_BACKEND", "redis")
-    monkeypatch.setenv("JOB_QUEUE_BACKEND", "nats")
+    # Job queue redis/nats fail loud at settings load; keep implemented sqlite here.
+    monkeypatch.setenv("JOB_QUEUE_BACKEND", "sqlite")
 
     app = create_app()
     with TestClient(app) as client:
@@ -79,9 +80,9 @@ def test_admin_modular_ports_status_recent_redis_fallback(tmp_path: Path, monkey
         assert body["recent_dedup"]["active_backend"] == "memory"
         assert body["recent_dedup"]["using_memory_fallback"] is True
         assert body["job_queue"]["backend"] == "sqlite"
-        assert body["job_queue"]["requested"] == "nats"
-        assert body["job_queue"]["implemented"] is False
-        assert body["job_queue"]["using_sqlite_fallback"] is True
+        assert body["job_queue"]["requested"] == "sqlite"
+        assert body["job_queue"]["implemented"] is True
+        assert body["job_queue"]["using_sqlite_fallback"] is False
 
 
 def test_admin_modular_ports_status_recent_redis_active(tmp_path: Path, monkeypatch) -> None:

@@ -58,8 +58,8 @@ def test_healthz_ok_includes_request_id() -> None:
     assert modules["recent_dedup"]["using_memory_fallback"] is False
 
 
-def test_healthz_job_queue_reports_settings_fallback(tmp_path: Path, monkeypatch) -> None:
-    """JOB_QUEUE_BACKEND via Settings: reserved nats → sqlite active + fallback honesty."""
+def test_healthz_job_queue_rejects_reserved_backend(tmp_path: Path, monkeypatch) -> None:
+    """JOB_QUEUE_BACKEND=nats/redis must fail at settings/boot (no silent sqlite fallback)."""
     from app.main import create_app
 
     db_path = tmp_path / "healthz_job_queue.db"
@@ -71,23 +71,12 @@ def test_healthz_job_queue_reports_settings_fallback(tmp_path: Path, monkeypatch
     monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
     monkeypatch.setenv("JOB_QUEUE_BACKEND", "nats")
 
-    app = create_app()
-
-    async def _seed() -> None:
-        async with app.state.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-    asyncio.run(_seed())
-
-    with TestClient(app) as client:
-        resp = client.get("/healthz", headers={"X-Request-Id": "req_test"})
-        assert resp.status_code == 200
-        modules = resp.json().get("modules") or {}
-        jq = modules.get("job_queue") or {}
-        assert jq.get("backend") == "sqlite"
-        assert jq.get("requested") == "nats"
-        assert jq.get("implemented") is False
-        assert jq.get("using_sqlite_fallback") is True
+    try:
+        create_app()
+        raise AssertionError("expected ValueError for reserved JOB_QUEUE_BACKEND")
+    except ValueError as exc:
+        msg = str(exc).lower()
+        assert "not implemented" in msg or "reserved" in msg
 
 
 def test_healthz_job_queue_memory_alias_label(tmp_path: Path, monkeypatch) -> None:

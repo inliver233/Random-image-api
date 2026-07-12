@@ -92,9 +92,9 @@ function fixtureFor(url: string, mode: FixtureMode): Response {
         tags: { backend: "sqlite" },
         job_queue: {
           backend: "sqlite",
-          requested: "nats",
-          implemented: false,
-          using_sqlite_fallback: true,
+          requested: "sqlite",
+          implemented: true,
+          using_sqlite_fallback: false,
         },
         recent_dedup: {
           configured_backend: "redis",
@@ -178,7 +178,7 @@ describe("MaintenancePage", () => {
     stubFetch("fallback");
   });
 
-  it("renders honesty cards with redis/nats fallbacks and R2 missing secret", async () => {
+  it("renders honesty cards with redis→memory fallbacks and R2 missing secret", async () => {
     const qc = makeClient();
     render(
       <QueryClientProvider client={qc}>
@@ -191,9 +191,9 @@ describe("MaintenancePage", () => {
     await waitFor(() => {
       expect(screen.getAllByText("redis→memory fallback").length).toBeGreaterThanOrEqual(2);
     });
-    // modular ports + API key RL both show redis→memory; job queue shows nats→sqlite
-    expect(screen.getByText("nats→sqlite fallback")).toBeInTheDocument();
-    expect(screen.getByText("not implemented")).toBeInTheDocument();
+    // modular ports + API key RL both show redis→memory; job queue is implemented sqlite
+    expect(screen.queryByText("nats→sqlite fallback")).not.toBeInTheDocument();
+    expect(screen.getByText("implemented")).toBeInTheDocument();
     expect(screen.getByText("R2_PREWARM_SECRET|IMAGE_EDGE_SECRET")).toBeInTheDocument();
     expect(screen.getByText("缺失（R2_PREWARM_SECRET / IMAGE_EDGE_SECRET）")).toBeInTheDocument();
     expect(screen.getByText("paths（Worker 契约）")).toBeInTheDocument();
@@ -217,7 +217,6 @@ describe("MaintenancePage", () => {
       expect(screen.getByText("implemented")).toBeInTheDocument();
     });
     expect(screen.queryByText("redis→memory fallback")).not.toBeInTheDocument();
-    expect(screen.queryByText("nats→sqlite fallback")).not.toBeInTheDocument();
     expect(screen.getByText("active=memory (SQLite storage)")).toBeInTheDocument();
     // R2 ready tag (multiple "ready" tags exist across cards)
     expect(screen.getAllByText("ready").length).toBeGreaterThanOrEqual(1);

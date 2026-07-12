@@ -46,12 +46,11 @@ def test_load_settings_job_queue_backend() -> None:
     s = load_settings({})
     assert s.job_queue_backend == "sqlite"
 
-    s_redis = load_settings({"JOB_QUEUE_BACKEND": "redis"})
-    # redis/nats accepted as requested labels; factory still serves sqlite until implemented.
-    assert s_redis.job_queue_backend == "redis"
-
-    s_nats = load_settings({"JOB_QUEUE_BACKEND": "nats"})
-    assert s_nats.job_queue_backend == "nats"
+    # redis/nats reserved and not implemented — fail loud (no silent sqlite fallback).
+    with pytest.raises(ValueError, match="not implemented|reserved"):
+        load_settings({"JOB_QUEUE_BACKEND": "redis"})
+    with pytest.raises(ValueError, match="not implemented|reserved"):
+        load_settings({"JOB_QUEUE_BACKEND": "nats"})
 
     s_mem = load_settings({"JOB_QUEUE_BACKEND": "memory"})
     assert s_mem.job_queue_backend == "memory"

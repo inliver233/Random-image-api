@@ -18,9 +18,17 @@ def test_build_job_queue_defaults_to_sqlite(tmp_path: Path) -> None:
     assert q.backend == "sqlite"
     assert isinstance(q, JobQueuePort)
 
-    # Unknown / future backends fall back to sqlite (no hard fail).
-    q2 = build_job_queue(engine, backend="redis")
-    assert q2.backend == "sqlite"
+    # redis/nats are reserved — fail loud (no silent sqlite fallback).
+    try:
+        build_job_queue(engine, backend="redis")
+        raise AssertionError("expected ValueError for redis")
+    except ValueError as exc:
+        assert "not implemented" in str(exc).lower() or "reserved" in str(exc).lower()
+    try:
+        build_job_queue(engine, backend="nats")
+        raise AssertionError("expected ValueError for nats")
+    except ValueError as exc:
+        assert "not implemented" in str(exc).lower() or "reserved" in str(exc).lower()
 
     # memory is an implemented alias: same SqliteJobQueue, honest backend label.
     q_mem = build_job_queue(engine, backend="memory")

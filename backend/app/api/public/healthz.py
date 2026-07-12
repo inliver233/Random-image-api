@@ -147,7 +147,8 @@ async def healthz(request: Request) -> Any:
             if settings is not None
             else "sqlite"
         )
-        if job_queue_requested not in {"sqlite", "memory", "redis", "nats"}:
+        if job_queue_requested not in {"sqlite", "memory"}:
+            # Settings rejects redis/nats at boot; normalize any other label for honesty.
             job_queue_requested = "sqlite"
         recent_dedup_requested = (
             str(getattr(settings, "recent_dedup_backend", "memory") or "memory").strip().lower()
@@ -201,20 +202,15 @@ async def healthz(request: Request) -> Any:
                 "required": bool(getattr(settings, "public_api_key_required", False)) if settings is not None else False,
                 "using_memory_fallback": rl_backend == "redis" and rl_active == "memory",
             },
-            # Job claim port (SQLite today; Redis/NATS reserved). Active from app.state.
+            # Job claim port (sqlite/memory only; redis/nats rejected at settings load).
             "job_queue": {
                 "backend": (
                     str(getattr(getattr(request.app.state, "job_queue", None), "backend", "sqlite") or "sqlite")
                 ),
                 "requested": job_queue_requested,
                 "implemented": job_queue_requested in {"sqlite", "memory"},
-                "using_sqlite_fallback": (
-                    job_queue_requested not in {"sqlite", "memory"}
-                    and str(
-                        getattr(getattr(request.app.state, "job_queue", None), "backend", "sqlite") or "sqlite"
-                    )
-                    == "sqlite"
-                ),
+                # Always false under fail-loud settings; kept for API shape stability.
+                "using_sqlite_fallback": False,
             },
             # Catalog store dialect (sqlite default; postgres when DATABASE_URL is postgres*).
             "catalog": {

@@ -14,7 +14,7 @@ Implementation:
   - `easy_proxies/auto_refresh` → injected `queue=` (worker shares process queue)
   - `admin/imports`, `admin/hydration_runs` → `enqueue_pending_in_session` (coupled txn); inline import execute passes `queue=`
   - `handlers/import_images` bulk hydrate → `new_pending_job` batch add
-- Factory: `build_job_queue(engine, backend=...)` — unknown backends fall back to sqlite
+- Factory: `build_job_queue(engine, backend=...)` — `sqlite`/`memory` only; `redis`/`nats` raise (fail loud)
 - Resolve: `resolve_job_queue(queue, engine)` prefers injected port
 - Wire-up: `app.state.job_queue` in `main.py`; worker builds one queue for scheduler + auto_refresh
 
@@ -31,7 +31,7 @@ Implementation:
 
 | Env | Default | Role |
 | --- | --- | --- |
-| `JOB_QUEUE_BACKEND` | `sqlite` | Loaded into `Settings.job_queue_backend`. `sqlite` implemented. `memory` is an implemented **alias** of the same SQLite jobs table with active `backend` label `memory` (no `using_sqlite_fallback`). `redis` / `nats` reserved → factory serves `SqliteJobQueue` with `backend=sqlite` + ops `using_sqlite_fallback` |
+| `JOB_QUEUE_BACKEND` | `sqlite` | Loaded into `Settings.job_queue_backend`. `sqlite` implemented. `memory` is an implemented **alias** of the same SQLite jobs table with active `backend` label `memory`. `redis` / `nats` are **reserved and rejected** at settings/factory (no silent sqlite fallback) |
 
 Wire-up reads settings (not raw `os.environ` at call sites):
 
@@ -53,4 +53,4 @@ Wire-up reads settings (not raw `os.environ` at call sites):
 ## Ops
 
 `/healthz` → `modules.job_queue.backend` from `app.state.job_queue` (sqlite until a real alternate ships).
-Admin → `GET /admin/api/maintenance/modular-ports` → `job_queue.backend` / `requested` / `implemented` / `using_sqlite_fallback`.
+Admin → `GET /admin/api/maintenance/modular-ports` → `job_queue.backend` / `requested` / `implemented` / `using_sqlite_fallback` (always false under fail-loud settings).
