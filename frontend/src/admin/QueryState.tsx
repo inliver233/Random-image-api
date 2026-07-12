@@ -8,11 +8,16 @@ type QueryLike = Pick<UseQueryResult<unknown, unknown>, "isLoading" | "isError" 
 
 type QueryStateProps = {
   query?: QueryLike;
-  /** When set, all listed queries must finish loading and none may error. */
+  /** When set, all listed queries must finish loading and none may error (unless partial). */
   queries?: QueryLike[];
   errorMessage?: string;
   /** Per-query error messages aligned with `queries` (falls back to errorMessage). */
   errorMessages?: string[];
+  /**
+   * Multi-query soft mode: one failed endpoint does not blank siblings.
+   * Shows per-query error Alerts above children; skeleton only while all are still loading.
+   */
+  partial?: boolean;
   /** When true (and data is present / multi-query ready), show empty info instead of children. */
   empty?: boolean;
   emptyMessage?: string;
@@ -23,6 +28,7 @@ type QueryStateProps = {
 /**
  * Shared loading / error / empty shell for admin query pages that are not cursor tables.
  * Supports a single `query` or multiple `queries` (any loading → skeleton; first error wins).
+ * Use `partial` for dashboard-style multi-status cards.
  */
 export function QueryState(props: QueryStateProps) {
   const {
@@ -30,6 +36,7 @@ export function QueryState(props: QueryStateProps) {
     queries,
     errorMessage = "加载失败",
     errorMessages,
+    partial = false,
     empty = false,
     emptyMessage,
     emptyDescription,
@@ -40,6 +47,47 @@ export function QueryState(props: QueryStateProps) {
 
   if (list.length === 0) {
     return <Skeleton active />;
+  }
+
+  if (partial && queries && queries.length > 0) {
+    const allLoading = list.every((q) => q.isLoading);
+    const anyData = list.some((q) => q.data != null);
+    if (allLoading && !anyData) {
+      return <Skeleton active />;
+    }
+
+    const errorAlerts = list
+      .map((q, i) => {
+        if (!q.isError) return null;
+        const msg = (errorMessages && errorMessages[i]) || errorMessage;
+        return (
+          <Alert
+            key={`q-err-${i}`}
+            type="error"
+            showIcon
+            message={msg}
+            description={requestIdDescription(q.error)}
+            style={{ marginBottom: 8 }}
+          />
+        );
+      })
+      .filter(Boolean);
+
+    if (empty && anyData) {
+      return (
+        <>
+          {errorAlerts}
+          <Alert type="info" showIcon message={emptyMessage || "暂无数据"} description={emptyDescription || ""} />
+        </>
+      );
+    }
+
+    return (
+      <>
+        {errorAlerts}
+        {children}
+      </>
+    );
   }
 
   if (list.some((q) => q.isLoading)) {

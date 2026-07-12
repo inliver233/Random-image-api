@@ -430,6 +430,7 @@ export function DashboardPage() {
         <Col xs={24} md={24} xl={24}>
           <Card title="模块端口 / 边缘切流（Phase 4）">
             <QueryState
+              partial
               queries={[modularPorts, imageEdge, randomEngine, cfApiProxy, r2Prewarm, apiKeyRl]}
               errorMessages={[
                 "加载模块端口失败",
