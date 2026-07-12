@@ -350,6 +350,7 @@ def _build_docs_html(*, base_url: str, public_api_key_required: bool = False) ->
     <section class="card" style="margin-top: 14px;">
       <h2>5) 状态页 / 瀑布流</h2>
       <p><span class="kbd">/status</span> 为公开仪表盘：展示 API 状态、图库概览、/random 请求统计；<span class="kbd">/status.json</span> 为机器可读 JSON。</p>
+      <p class="muted">双跑诚实字段：<span class="kbd">/status.json</span> 的 <span class="kbd">data.random_engine</span> 含 <span class="kbd">url_configured</span> / <span class="kbd">enabled</span> / <span class="kbd">traffic_percent</span> 与进程本地 <span class="kbd">circuit</span>（与 <span class="kbd">/healthz</span> → <span class="kbd">modules.random_engine.circuit</span> 同形；无外呼探测）。HTML 页顶 chip 同步展示 circuit 状态。</p>
       <pre><code>{examples["status"]}
 {examples["status_json"]}</code></pre>
       <p><span class="kbd">/wtf</span> 为瀑布流：支持 <span class="kbd">/random</span> 的全部过滤参数（例如 r18/标签/分辨率/热度/排除标签等），默认会补上 <span class="kbd">adaptive=1</span> 以更适合不同屏幕。</p>
