@@ -1,5 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Descriptions, Form, InputNumber, Skeleton, Space, Switch, Tag, Typography } from "antd";
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Form,
+  Input,
+  InputNumber,
+  Select,
+  Skeleton,
+  Space,
+  Switch,
+  Tag,
+  Typography,
+} from "antd";
 import React from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
@@ -206,6 +220,21 @@ type CfWorkersProbeResponse = {
   request_id: string;
 };
 
+type CfPoolRegisterResponse = {
+  ok: true;
+  kind?: string;
+  base_url?: string;
+  runtime_base_urls?: string[];
+  registered?: boolean;
+  unregistered?: boolean;
+  request_id: string;
+};
+
+type CfPoolMemberForm = {
+  kind: "api" | "image";
+  base_url: string;
+};
+
 type ApiKeyRateLimitStatusResponse = {
   ok: true;
   required: boolean;
@@ -239,6 +268,7 @@ type ModularPortsStatusResponse = {
 
 export function MaintenancePage() {
   const [form] = Form.useForm<CleanupFormValues>();
+  const [cfPoolForm] = Form.useForm<CfPoolMemberForm>();
   const alerts = useActionAlerts();
   const engineAlerts = useActionAlerts();
   const cfPoolAlerts = useActionAlerts();
@@ -408,6 +438,58 @@ export function MaintenancePage() {
         data.request_id,
       );
       void queryClient.invalidateQueries({ queryKey: ["admin", "cf-workers", "pool"] });
+    },
+    onError: (err) => {
+      cfPoolAlerts.setError(err);
+    },
+  });
+
+  const registerCfBase = useMutation({
+    mutationFn: (values: CfPoolMemberForm) =>
+      apiJson<CfPoolRegisterResponse>("/admin/api/cf-workers/register", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: values.kind,
+          base_url: String(values.base_url || "").trim(),
+        }),
+      }),
+    onMutate: () => {
+      cfPoolAlerts.clear();
+    },
+    onSuccess: (data) => {
+      cfPoolAlerts.setSuccess(
+        `已注册 ${data.kind ?? "?"} → ${data.base_url ?? ""}（runtime=${data.runtime_base_urls?.length ?? 0}）`,
+        data.request_id,
+      );
+      void queryClient.invalidateQueries({ queryKey: ["admin", "cf-workers", "pool"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin", "maintenance", "image-edge"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin", "maintenance", "cf-api-proxy"] });
+    },
+    onError: (err) => {
+      cfPoolAlerts.setError(err);
+    },
+  });
+
+  const unregisterCfBase = useMutation({
+    mutationFn: (values: CfPoolMemberForm) =>
+      apiJson<CfPoolRegisterResponse>("/admin/api/cf-workers/unregister", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: values.kind,
+          base_url: String(values.base_url || "").trim(),
+        }),
+      }),
+    onMutate: () => {
+      cfPoolAlerts.clear();
+    },
+    onSuccess: (data) => {
+      cfPoolAlerts.setSuccess(
+        `已从 runtime 注销 ${data.kind ?? "?"} → ${data.base_url ?? ""}`,
+        data.request_id,
+      );
+      void queryClient.invalidateQueries({ queryKey: ["admin", "cf-workers", "pool"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin", "maintenance", "image-edge"] });
+      void queryClient.invalidateQueries({ queryKey: ["admin", "maintenance", "cf-api-proxy"] });
     },
     onError: (err) => {
       cfPoolAlerts.setError(err);
@@ -648,6 +730,65 @@ export function MaintenancePage() {
             </Descriptions.Item>
           </Descriptions>
         ) : null}
+
+        <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          注册/注销仅改 runtime overlay（持久化到 DB，多进程 ~5s 可见）；不删 env CSV；不翻 ENABLED。
+        </Typography.Paragraph>
+        <Form<CfPoolMemberForm>
+          form={cfPoolForm}
+          layout="inline"
+          initialValues={{ kind: "api", base_url: "" }}
+          style={{ marginBottom: 12, maxWidth: 960, rowGap: 8 }}
+          onFinish={(values) => registerCfBase.mutate(values)}
+        >
+          <Form.Item
+            name="kind"
+            label="kind"
+            rules={[{ required: true, message: "选择 api 或 image" }]}
+          >
+            <Select
+              style={{ width: 120 }}
+              options={[
+                { value: "api", label: "api" },
+                { value: "image", label: "image" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="base_url"
+            label="base_url"
+            rules={[{ required: true, message: "填写 Worker base URL" }]}
+            style={{ minWidth: 320, flex: 1 }}
+          >
+            <Input placeholder="https://ria-api-a.example.workers.dev" allowClear />
+          </Form.Item>
+          <Form.Item>
+            <Space wrap>
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={registerCfBase.isPending}
+              >
+                注册进池
+              </Button>
+              <Button
+                danger
+                loading={unregisterCfBase.isPending}
+                onClick={() => {
+                  void cfPoolForm.validateFields().then((values) => {
+                    const ok = window.confirm(
+                      `从 runtime 移除 ${values.kind} → ${String(values.base_url || "").trim()}？env 成员不受影响。`,
+                    );
+                    if (!ok) return;
+                    unregisterCfBase.mutate(values);
+                  });
+                }}
+              >
+                注销 runtime
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
 
         <Space wrap>
           <Button onClick={() => void cfWorkersPool.refetch()} loading={cfWorkersPool.isFetching}>

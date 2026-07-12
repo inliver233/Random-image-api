@@ -63,6 +63,26 @@ function fixtureFor(url: string, mode: FixtureMode): Response {
       request_id: "req_probe",
     });
   }
+  if (url.includes("/admin/api/cf-workers/register")) {
+    return json({
+      ok: true,
+      kind: "api",
+      base_url: "https://api-rt.example.workers.dev",
+      runtime_base_urls: ["https://api-rt.example.workers.dev"],
+      registered: true,
+      request_id: "req_register",
+    });
+  }
+  if (url.includes("/admin/api/cf-workers/unregister")) {
+    return json({
+      ok: true,
+      kind: "api",
+      base_url: "https://api-rt.example.workers.dev",
+      runtime_base_urls: [],
+      unregistered: true,
+      request_id: "req_unregister",
+    });
+  }
   if (url.includes("/admin/api/cf-workers/pool")) {
     return json({
       ok: true,
@@ -335,6 +355,30 @@ describe("MaintenancePage", () => {
       expect(screen.getByText(/探针完成：api ok=1\/1；image ok=1\/1/)).toBeInTheDocument();
     });
     expect(screen.getByText(/最近探针 API/)).toBeInTheDocument();
+  });
+
+  it("registers a runtime CF pool base from the form", async () => {
+    stubFetch("ready");
+    const qc = makeClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <MaintenancePage />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("CF Worker 池（成员 + 探针）")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "注册进池" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "注销 runtime" })).toBeInTheDocument();
+
+    const baseInput = screen.getByPlaceholderText("https://ria-api-a.example.workers.dev");
+    fireEvent.change(baseInput, { target: { value: "https://api-rt.example.workers.dev" } });
+    fireEvent.click(screen.getByRole("button", { name: "注册进池" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/已注册 api → https:\/\/api-rt\.example\.workers\.dev/),
+      ).toBeInTheDocument();
+    });
   });
 
   it("surfaces pick_probe on compare-filters success", async () => {
