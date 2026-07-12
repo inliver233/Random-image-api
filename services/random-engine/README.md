@@ -58,6 +58,7 @@ Admin:
 Public ops (no secrets, no outbound engine probe):
 
 - `/healthz` → `modules.random_engine` includes the same process-local **`circuit`** snapshot (closed / half_open / open)
+- `/status.json` → `data.random_engine` (`url_configured` / `enabled` / `traffic_percent` + **`circuit`**); `/status` HTML chip mirrors it
 
 Engine-internal (ops / BFF):
 
