@@ -45,6 +45,48 @@ func seedSnapshot(t *testing.T, mux *http.ServeMux, st *engineState) {
 	}
 }
 
+func TestRequireEngineSecret(t *testing.T) {
+	st := &engineState{
+		revision: "empty",
+		byID:     map[int64]int{},
+		tagIndex: map[string]map[int64]struct{}{},
+	}
+	inner := testMux(st)
+	h := requireEngineSecret(inner, "sekrit")
+
+	// healthz open
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if rr.Code != 200 {
+		t.Fatalf("healthz want 200 got %d", rr.Code)
+	}
+
+	// pick without secret → 403
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/pick", bytes.NewBufferString(`{}`)))
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("pick no secret want 403 got %d", rr.Code)
+	}
+
+	// pick with wrong secret → 403
+	req := httptest.NewRequest(http.MethodPost, "/v1/pick", bytes.NewBufferString(`{"filters":{},"strategy":"random","limit":1}`))
+	req.Header.Set("X-Engine-Secret", "wrong")
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("pick wrong secret want 403 got %d", rr.Code)
+	}
+
+	// pick with correct secret → reaches handler (INDEX_NOT_READY on empty)
+	req = httptest.NewRequest(http.MethodPost, "/v1/pick", bytes.NewBufferString(`{"filters":{},"strategy":"random","limit":1}`))
+	req.Header.Set("X-Engine-Secret", "sekrit")
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("pick ok secret want 200 got %d body %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestSnapshotAndRandomPick(t *testing.T) {
 	st := &engineState{
 		revision: "empty",

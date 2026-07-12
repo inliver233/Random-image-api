@@ -22,9 +22,12 @@ import {
   authorizeSecret,
   buildUpstreamHeaderPairs,
   hostAllowed,
+  hostFromAbsoluteUrl,
+  methodMayFollowWithBody,
   parseAllowedHosts,
   parseProxyPath,
   parseRateLimitConfig,
+  resolveRedirectLocation,
   takeRateLimitToken,
 } from "./pure.js";
 
@@ -126,33 +129,89 @@ export default {
 
     const targetURL = `https://${parsed.host}${parsed.pathWithQuery}`;
     const headers = buildUpstreamHeaders(request, parsed.host);
-
-    const init = {
-      method: request.method,
-      headers,
-      redirect: "follow",
-    };
-    // GET/HEAD must not send a body.
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      init.body = request.body;
+    const method = String(request.method || "GET").toUpperCase();
+    // Buffer body once so multi-hop same-host retries (POST OAuth) stay safe.
+    let bodyBuf = null;
+    if (methodMayFollowWithBody(method)) {
+      try {
+        bodyBuf = await request.arrayBuffer();
+      } catch {
+        return jsonError(400, "Failed to read request body");
+      }
     }
 
+    // Manual redirect loop: re-validate every Location host against allowlist.
+    // Never follow cross-host with a non-GET body (OAuth token exfil risk).
+    const maxHops = 5;
+    let currentURL = targetURL;
+    let currentHost = parsed.host;
     let upstream;
     try {
-      upstream = await fetch(targetURL, init);
-    } catch {
-      // One retry for cold POP / transient network blip.
-      try {
-        upstream = await fetch(targetURL, init);
-      } catch {
-        return jsonError(502, "Upstream fetch failed");
+      for (let hop = 0; hop <= maxHops; hop++) {
+        const hopHeaders = buildUpstreamHeaders(request, currentHost);
+        const init = {
+          method,
+          headers: hopHeaders,
+          redirect: "manual",
+        };
+        if (bodyBuf != null && methodMayFollowWithBody(method)) {
+          init.body = bodyBuf;
+        }
+        try {
+          upstream = await fetch(currentURL, init);
+        } catch {
+          // One retry for cold POP / transient network blip on this hop.
+          try {
+            upstream = await fetch(currentURL, init);
+          } catch {
+            return jsonError(502, "Upstream fetch failed");
+          }
+        }
+
+        if (upstream.status < 300 || upstream.status >= 400) {
+          break;
+        }
+        const loc = upstream.headers.get("Location");
+        const nextURL = resolveRedirectLocation(loc, currentURL);
+        if (!nextURL) {
+          // Unusable Location — surface redirect as-is (no open follow).
+          break;
+        }
+        const nextHost = hostFromAbsoluteUrl(nextURL);
+        if (!hostAllowed(nextHost, allowed)) {
+          return jsonError(403, "Redirect host not allowed", { host: nextHost || null });
+        }
+        if (methodMayFollowWithBody(method) && nextHost !== currentHost) {
+          // POST/PUT/… must not carry body off the original host.
+          return jsonError(403, "Cross-host redirect with body forbidden", {
+            host: nextHost,
+            from: currentHost,
+          });
+        }
+        // Consume redirect body before next hop (Workers require drain).
+        try {
+          await upstream.arrayBuffer();
+        } catch {
+          /* ignore */
+        }
+        currentURL = nextURL;
+        currentHost = nextHost;
+        if (hop === maxHops) {
+          return jsonError(502, "Too many redirects");
+        }
       }
+    } catch {
+      return jsonError(502, "Upstream fetch failed");
+    }
+
+    if (!upstream) {
+      return jsonError(502, "Upstream fetch failed");
     }
 
     const outHeaders = new Headers(upstream.headers);
     outHeaders.set("Access-Control-Allow-Origin", "*");
     outHeaders.set("X-Proxied-By", "random-image-api-proxy");
-    outHeaders.set("X-Proxy-Host", parsed.host);
+    outHeaders.set("X-Proxy-Host", currentHost);
     // Never let browsers cache authenticated API responses via this edge.
     outHeaders.set("Cache-Control", "no-store");
     outHeaders.delete("set-cookie");

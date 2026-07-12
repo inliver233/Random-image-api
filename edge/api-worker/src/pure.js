@@ -150,6 +150,49 @@ export function hostAllowed(host, allowed) {
 }
 
 /**
+ * Parse Location header value for a subsequent hop (relative or absolute).
+ * Returns absolute https URL string or null when unusable.
+ * @param {string} location
+ * @param {string} currentUrl absolute URL of the response that issued Location
+ */
+export function resolveRedirectLocation(location, currentUrl) {
+  const loc = String(location || "").trim();
+  if (!loc) return null;
+  try {
+    const base = String(currentUrl || "").trim();
+    const resolved = base ? new URL(loc, base) : new URL(loc);
+    if (resolved.protocol !== "https:") return null;
+    return resolved.toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract hostname from absolute URL for allowlist check.
+ * @param {string} absoluteUrl
+ */
+export function hostFromAbsoluteUrl(absoluteUrl) {
+  try {
+    const u = new URL(String(absoluteUrl || ""));
+    return String(u.hostname || "")
+      .trim()
+      .toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Whether method may carry a request body across redirects.
+ * POST/PUT/PATCH/DELETE must NOT follow cross-host with body (OAuth token risk).
+ */
+export function methodMayFollowWithBody(method) {
+  const m = String(method || "GET").toUpperCase();
+  return m !== "GET" && m !== "HEAD";
+}
+
+/**
  * Build upstream request headers: strip CF/client identity + cookie + gate secret.
  * @param {Iterable<[string, string]>} headerEntries request.headers.entries()
  * @param {string} host upstream Host

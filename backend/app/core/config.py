@@ -58,6 +58,8 @@ class Settings:
     random_engine_timeout_ms: int
     # Progressive cutover when engine enabled: 0=never call engine, 100=all eligible picks.
     random_engine_traffic_percent: int
+    # Shared secret for engine X-Engine-Secret (empty = engine open; match RANDOM_ENGINE_SECRET).
+    random_engine_secret: str
     # Optional R2 prewarm webhook after catalog upserts (Phase 2; default off).
     r2_prewarm_enabled: bool
     r2_prewarm_url: str
@@ -277,6 +279,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         max_v=100,
         env=env,
     )
+    random_engine_secret = _get(env, "RANDOM_ENGINE_SECRET", "")
     r2_prewarm_url = _get(env, "R2_PREWARM_URL", "").rstrip("/")
     r2_prewarm_enabled = parse_bool_env("R2_PREWARM_ENABLED", default=False, env=env) and bool(r2_prewarm_url)
     # Prefer dedicated prewarm secret; IMAGE_EDGE_SECRET is Worker fallback (authorizePrewarm).
@@ -328,6 +331,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         random_engine_enabled=random_engine_enabled,
         random_engine_timeout_ms=random_engine_timeout_ms,
         random_engine_traffic_percent=random_engine_traffic_percent,
+        random_engine_secret=random_engine_secret,
         r2_prewarm_enabled=r2_prewarm_enabled,
         r2_prewarm_url=r2_prewarm_url,
         r2_prewarm_secret=r2_prewarm_secret,

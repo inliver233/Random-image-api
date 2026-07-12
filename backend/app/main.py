@@ -253,7 +253,13 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def _unhandled_exception_handler(request: Request, exc: Exception):  # type: ignore[no-redef]
         try:
-            log.exception("unhandled_exception path=%s", str(getattr(request, "url", "")))
+            # Prefer redacted path so api_key query never lands in logs even without RedactFilter.
+            from app.core.redact import redact_text
+
+            log.exception(
+                "unhandled_exception path=%s",
+                redact_text(str(getattr(request, "url", ""))),
+            )
         except Exception:
             pass
         return json_error_response(

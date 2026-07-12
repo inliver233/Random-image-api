@@ -191,7 +191,11 @@ type engineState struct {
 }
 
 func main() {
-	addr := envOr("RANDOM_ENGINE_ADDR", ":8091")
+	// Prefer loopback in bare-metal dev; compose still maps host port intentionally.
+	addr := envOr("RANDOM_ENGINE_ADDR", "127.0.0.1:8091")
+	// Optional shared secret: when set, all non-/healthz routes require X-Engine-Secret.
+	// Empty = open (dev/default-off dual-run); production compose should set a secret.
+	engineSecret := strings.TrimSpace(os.Getenv("RANDOM_ENGINE_SECRET"))
 	st := &engineState{
 		revision:    "empty",
 		byID:        map[int64]int{},
@@ -226,10 +230,47 @@ func main() {
 		handleFilterCount(w, r, st)
 	})
 
+	var handler http.Handler = mux
+	if engineSecret != "" {
+		handler = requireEngineSecret(mux, engineSecret)
+		log.Printf("random-engine auth: X-Engine-Secret required (non-healthz)")
+	} else {
+		log.Printf("random-engine auth: open (RANDOM_ENGINE_SECRET unset)")
+	}
 	log.Printf("random-engine listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// requireEngineSecret gates pick/admin routes when RANDOM_ENGINE_SECRET is set.
+// /healthz stays open for compose healthchecks.
+func requireEngineSecret(next http.Handler, expected string) http.Handler {
+	expected = strings.TrimSpace(expected)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path == "/healthz" || path == "/" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		got := strings.TrimSpace(r.Header.Get("X-Engine-Secret"))
+		if expected == "" || !timingSafeEqual(got, expected) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func timingSafeEqual(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	var diff byte
+	for i := 0; i < len(a); i++ {
+		diff |= a[i] ^ b[i]
+	}
+	return diff == 0
 }
 
 func handleSnapshot(w http.ResponseWriter, r *http.Request, st *engineState) {

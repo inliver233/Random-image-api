@@ -50,6 +50,7 @@ Wire-up reads settings (not raw `os.environ` at call sites):
 4. `renew_lock` only for same `worker_id` while `running`
 5. Job **payload/status persistence** remains on SQLite `jobs` table for admin UI until a full external queue cutover
 6. Opportunistic hydrate: at most one `pending|running` row per `(hydrate_metadata, opportunistic_hydrate, illust_id)`
+7. **Lock-loss abort (P0):** if `renew_lock` returns false while a handler is running (TTL reclaim by another worker, admin cancel clearing lock/status, or status flipped off `running`), the executor **must** cancel the in-flight handler and **must not** apply a success/failure transition for that claim. Admin cancel is cooperative via this path (not a separate signal bus).
 
 ## Ops
 
@@ -59,6 +60,6 @@ Wire-up reads settings (not raw `os.environ` at call sites):
 | `/status.json` → `data.job_queue` | Same public shape; `/status` HTML chip mirrors it |
 | `GET /admin/api/maintenance/modular-ports` | Same honesty shape: `job_queue.backend` / `requested` / `implemented` (no `using_sqlite_fallback` field) |
 | `/metrics` (admin) → modular readiness | `new_pixiv_module_readiness{module="job_queue",flag="implemented"}` (sqlite/memory only). OpenAPI summary documents scrape-time modular + circuit gauges. Proxy state SQL uses `adapt_driver_sql_named_binds` |
-| Admin job CRUD (`/admin/api/jobs*`) | List/detail/retry/cancel/DLQ operate on SQLite `jobs` rows (payload + status for UI). OpenAPI summaries document that claim backends do not replace this table until full external-queue cutover |
+| Admin job CRUD (`/admin/api/jobs*`) | List/detail/retry/cancel/DLQ operate on SQLite `jobs` rows (payload + status for UI). Cancel is cooperative: clears status/lock so worker `renew_lock` fails and `execute_claimed_job` aborts the handler without overwriting reclaim/cancel. OpenAPI summaries document that claim backends do not replace this table until full external-queue cutover |
 | Admin imports / hydration-runs | Create paths use same-txn `enqueue_pending_in_session` (or inline claim via `resolve_job_queue`). OpenAPI summaries call out SQLite job persistence + CatalogStore where relevant |
 | `POST /admin/api/proxies/probe` | Enqueues `proxy_probe` via JobQueuePort `queue.enqueue` (returns `job_id`). OpenAPI summary documents claim-backend vs SQLite payload split |

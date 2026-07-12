@@ -22,7 +22,6 @@ from app.jobs.queue import JobQueuePort, resolve_job_queue
 log = logging.getLogger("app.jobs.executor")
 
 
-
 def _job_from_row(row: dict[str, Any]) -> Job:
     return Job(
         id=as_int(row.get("id")),
@@ -106,6 +105,7 @@ async def execute_claimed_job(
     job_queue = resolve_job_queue(queue, engine)
     now_dt = now or datetime.now(timezone.utc)
     stop_heartbeat = asyncio.Event()
+    lock_lost = asyncio.Event()
     renew_every = _renew_interval_s(int(lock_ttl_s))
 
     async def _heartbeat() -> None:
@@ -118,9 +118,12 @@ async def execute_claimed_job(
             try:
                 renewed = await job_queue.renew_lock(job_id=int(job.id), worker_id=worker_id)
                 if not renewed:
+                    # Cancel/reclaim/status flip: stop renewing and signal handler abort.
                     log.warning("job_lock_renew_lost job_id=%s worker_id=%s", job.id, worker_id)
+                    lock_lost.set()
                     return
             except Exception as exc:
+                # Transient DB errors: keep trying; only a hard False renew aborts.
                 log.warning(
                     "job_lock_renew_failed job_id=%s worker_id=%s err=%s",
                     job.id,
@@ -129,26 +132,36 @@ async def execute_claimed_job(
                 )
 
     hb_task = asyncio.create_task(_heartbeat())
+    handler_task = asyncio.create_task(dispatcher.dispatch(job_row))
+    lost_wait_task = asyncio.create_task(lock_lost.wait())
+    transition: JobTransition | None = None
+    aborted = False
     try:
-        try:
-            await dispatcher.dispatch(job_row)
-        except JobDeferError as exc:
-            transition = on_job_defer(job, run_after=exc.run_after, error=format_exc(exc), now=now_dt)
-        except JobPermanentError as exc:
-            forced = Job(
-                id=job.id,
-                status=job.status,
-                attempt=job.attempt,
-                max_attempts=max(1, job.attempt + 1),
-                run_after=job.run_after,
-                last_error=job.last_error,
-                locked_by=job.locked_by,
-                locked_at=job.locked_at,
+        done, _pending = await asyncio.wait(
+            {handler_task, lost_wait_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if lock_lost.is_set() and not handler_task.done():
+            handler_task.cancel()
+            try:
+                await handler_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                # Handler may surface its own error while cancelling; lock loss wins.
+                pass
+            aborted = True
+            log.warning(
+                "job_aborted_lock_lost job_id=%s worker_id=%s",
+                job.id,
+                worker_id,
             )
-            transition = on_job_failure(forced, error=format_exc(exc), now=now_dt)
-        except ValueError as exc:
-            msg = str(exc)
-            if "Unknown job type" in msg:
+        else:
+            try:
+                await handler_task
+            except JobDeferError as exc:
+                transition = on_job_defer(job, run_after=exc.run_after, error=format_exc(exc), now=now_dt)
+            except JobPermanentError as exc:
                 forced = Job(
                     id=job.id,
                     status=job.status,
@@ -160,19 +173,44 @@ async def execute_claimed_job(
                     locked_at=job.locked_at,
                 )
                 transition = on_job_failure(forced, error=format_exc(exc), now=now_dt)
+            except ValueError as exc:
+                msg = str(exc)
+                if "Unknown job type" in msg:
+                    forced = Job(
+                        id=job.id,
+                        status=job.status,
+                        attempt=job.attempt,
+                        max_attempts=max(1, job.attempt + 1),
+                        run_after=job.run_after,
+                        last_error=job.last_error,
+                        locked_by=job.locked_by,
+                        locked_at=job.locked_at,
+                    )
+                    transition = on_job_failure(forced, error=format_exc(exc), now=now_dt)
+                else:
+                    transition = on_job_failure(job, error=format_exc(exc), now=now_dt)
+            except Exception as exc:
+                if is_sqlite_busy_error(exc):
+                    delay_s = 2.0 + random.random() * 3.0
+                    run_after = iso_utc_ms(now_dt + timedelta(seconds=delay_s))
+                    transition = on_job_defer(job, run_after=run_after, error=format_exc(exc), now=now_dt)
+                else:
+                    transition = on_job_failure(job, error=format_exc(exc), now=now_dt)
             else:
-                transition = on_job_failure(job, error=format_exc(exc), now=now_dt)
-        except Exception as exc:
-            if is_sqlite_busy_error(exc):
-                delay_s = 2.0 + random.random() * 3.0
-                run_after = iso_utc_ms(now_dt + timedelta(seconds=delay_s))
-                transition = on_job_defer(job, run_after=run_after, error=format_exc(exc), now=now_dt)
-            else:
-                transition = on_job_failure(job, error=format_exc(exc), now=now_dt)
-        else:
-            transition = on_job_success(job, now=now_dt)
+                transition = on_job_success(job, now=now_dt)
+
+            # Lock loss always wins: never overwrite cancel/reclaim with terminal status.
+            if lock_lost.is_set():
+                aborted = True
+                transition = None
     finally:
         stop_heartbeat.set()
+        if not lost_wait_task.done():
+            lost_wait_task.cancel()
+            try:
+                await lost_wait_task
+            except asyncio.CancelledError:
+                pass
         hb_task.cancel()
         try:
             await hb_task
@@ -180,6 +218,18 @@ async def execute_claimed_job(
             pass
         except Exception:
             pass
+        if not handler_task.done():
+            handler_task.cancel()
+            try:
+                await handler_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+
+    if aborted or transition is None:
+        # Do not apply terminal transition: admin cancel or another worker may own the row.
+        return None
 
     ok = await _apply_transition(engine, job_id=job.id, worker_id=worker_id, transition=transition)
     if ok and transition.status in {JobStatus.FAILED, JobStatus.DLQ}:

@@ -47,14 +47,17 @@ services:
 
   # Go in-memory pick service (default OFF on BFF via RANDOM_ENGINE_ENABLED).
   # Compose always starts a healthy empty index; push snapshot from Admin → 维护工具.
+  # Host bind is loopback-only (P0): LAN cannot reach the unauthenticated pick surface by default.
+  # Set RANDOM_ENGINE_SECRET in deploy/.env and pass the same value to api/worker for dual-run.
   random-engine:
     build:
       context: ../services/random-engine
       dockerfile: Dockerfile
     environment:
       RANDOM_ENGINE_ADDR: ":8091"
+      RANDOM_ENGINE_SECRET: ${RANDOM_ENGINE_SECRET:-}
     ports:
-      - "8091:8091"
+      - "127.0.0.1:8091:8091"
     healthcheck:
       test:
         [

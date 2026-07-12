@@ -146,8 +146,29 @@ def should_route_pick_to_engine(settings: Settings | Any, *, rng: Any | None = N
     return (roll * 100.0) < float(pct)
 
 
+def engine_auth_headers(settings: Settings | Any | None = None, *, secret: str | None = None) -> dict[str, str]:
+    """Headers for engine pick/admin when RANDOM_ENGINE_SECRET is configured.
+
+    When ``settings``/``secret`` are omitted, fall back to process Settings so
+    existing call sites keep working once the env is set.
+    """
+    if secret is not None:
+        token = str(secret or "").strip()
+    elif settings is not None:
+        token = str(getattr(settings, "random_engine_secret", "") or "").strip()
+    else:
+        try:
+            from app.core.config import load_settings
+
+            token = str(getattr(load_settings(), "random_engine_secret", "") or "").strip()
+        except Exception:
+            token = ""
+    return {"X-Engine-Secret": token} if token else {}
+
+
 async def engine_health(client: httpx.AsyncClient, base_url: str, *, timeout_s: float = 0.5) -> dict[str, Any] | None:
     try:
+        # /healthz stays open even when RANDOM_ENGINE_SECRET is set.
         resp = await client.get(f"{base_url}/healthz", timeout=timeout_s)
         if resp.status_code != 200:
             return None
@@ -166,10 +187,17 @@ async def engine_pick(
     *,
     payload: dict[str, Any],
     timeout_s: float = 0.8,
+    settings: Settings | Any | None = None,
+    secret: str | None = None,
 ) -> dict[str, Any] | None:
     """POST /v1/pick. Returns parsed JSON or None on transport/5xx (BFF should fall back)."""
     try:
-        resp = await client.post(f"{base_url}/v1/pick", json=payload, timeout=timeout_s)
+        resp = await client.post(
+            f"{base_url}/v1/pick",
+            json=payload,
+            headers=engine_auth_headers(settings, secret=secret),
+            timeout=timeout_s,
+        )
         if resp.status_code >= 500:
             return None
         if resp.status_code != 200:
@@ -188,12 +216,15 @@ async def engine_filter_count(
     *,
     filters: dict[str, Any],
     timeout_s: float = 2.0,
+    settings: Settings | Any | None = None,
+    secret: str | None = None,
 ) -> dict[str, Any] | None:
     """POST /v1/admin/filter-count — dual-run cardinality check (no sampling)."""
     try:
         resp = await client.post(
             f"{base_url}/v1/admin/filter-count",
             json={"filters": filters or {}},
+            headers=engine_auth_headers(settings, secret=secret),
             timeout=timeout_s,
         )
         if resp.status_code != 200:
@@ -218,12 +249,19 @@ async def engine_apply_snapshot(
     images: list[dict[str, Any]],
     tag_postings: dict[str, list[int]] | None = None,
     timeout_s: float = 30.0,
+    settings: Settings | Any | None = None,
+    secret: str | None = None,
 ) -> dict[str, Any] | None:
     body: dict[str, Any] = {"revision": revision, "images": images}
     if tag_postings:
         body["tag_postings"] = tag_postings
     try:
-        resp = await client.post(f"{base_url}/v1/admin/snapshot", json=body, timeout=timeout_s)
+        resp = await client.post(
+            f"{base_url}/v1/admin/snapshot",
+            json=body,
+            headers=engine_auth_headers(settings, secret=secret),
+            timeout=timeout_s,
+        )
         if resp.status_code != 200:
             return None
         data = resp.json()
@@ -239,13 +277,20 @@ async def engine_apply_events(
     *,
     events: list[dict[str, Any]],
     timeout_s: float = 5.0,
+    settings: Settings | Any | None = None,
+    secret: str | None = None,
 ) -> dict[str, Any] | None:
     """POST /v1/admin/events. Best-effort catalog delta; None on transport/non-200."""
     if not events:
         return {"ok": True, "applied": 0}
     body: dict[str, Any] = {"events": list(events)}
     try:
-        resp = await client.post(f"{base_url}/v1/admin/events", json=body, timeout=timeout_s)
+        resp = await client.post(
+            f"{base_url}/v1/admin/events",
+            json=body,
+            headers=engine_auth_headers(settings, secret=secret),
+            timeout=timeout_s,
+        )
         if resp.status_code != 200:
             logger.debug(
                 "random-engine events status=%s body=%s",

@@ -52,6 +52,14 @@ def test_redact_refresh_token_query_param() -> None:
     assert "refresh_token=***" in redacted
 
 
+def test_redact_api_key_query_param() -> None:
+    raw = "unhandled_exception path=http://api.example/i/1.jpg?api_key=supersecret&x=1"
+    redacted = redact_text(raw)
+    assert "supersecret" not in redacted
+    assert "api_key=***" in redacted
+    assert "x=1" in redacted
+
+
 def test_logging_filter_redacts_output() -> None:
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)

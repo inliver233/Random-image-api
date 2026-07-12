@@ -13,9 +13,12 @@ import {
   buildUpstreamHeaderPairs,
   DEFAULT_ALLOWED,
   hostAllowed,
+  hostFromAbsoluteUrl,
+  methodMayFollowWithBody,
   parseAllowedHosts,
   parseProxyPath,
   parseRateLimitConfig,
+  resolveRedirectLocation,
   STRIP_REQ_HEADERS,
   takeRateLimitToken,
 } from "../src/pure.js";
@@ -147,5 +150,35 @@ describe("buildUpstreamHeaderPairs", () => {
     assert.equal(map.has("cf-connecting-ip"), false);
     assert.equal(map.has("x-forwarded-for"), false);
     assert.equal(map.has("x-proxy-secret"), false);
+  });
+});
+
+describe("manual redirect helpers", () => {
+  it("resolveRedirectLocation accepts absolute https and relative", () => {
+    assert.equal(
+      resolveRedirectLocation("https://oauth.secure.pixiv.net/auth/token", "https://app-api.pixiv.net/v1/x"),
+      "https://oauth.secure.pixiv.net/auth/token",
+    );
+    assert.equal(
+      resolveRedirectLocation("/v2/next", "https://app-api.pixiv.net/v1/x"),
+      "https://app-api.pixiv.net/v2/next",
+    );
+    assert.equal(resolveRedirectLocation("http://evil.example/", "https://app-api.pixiv.net/v1/x"), null);
+    assert.equal(resolveRedirectLocation("", "https://app-api.pixiv.net/v1/x"), null);
+  });
+  it("hostFromAbsoluteUrl extracts hostname", () => {
+    assert.equal(hostFromAbsoluteUrl("https://APP-API.Pixiv.Net/path"), "app-api.pixiv.net");
+    assert.equal(hostFromAbsoluteUrl("not-a-url"), "");
+  });
+  it("methodMayFollowWithBody is false for GET/HEAD", () => {
+    assert.equal(methodMayFollowWithBody("GET"), false);
+    assert.equal(methodMayFollowWithBody("HEAD"), false);
+    assert.equal(methodMayFollowWithBody("POST"), true);
+    assert.equal(methodMayFollowWithBody("PUT"), true);
+  });
+  it("hostAllowed rejects off-list redirect hosts", () => {
+    const allowed = parseAllowedHosts({});
+    assert.equal(hostAllowed("evil.com", allowed), false);
+    assert.equal(hostAllowed("oauth.secure.pixiv.net", allowed), true);
   });
 });

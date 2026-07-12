@@ -184,8 +184,9 @@ async def retry_job(
     "/jobs/{job_id}/cancel",
     summary="Cancel job",
     description=(
-        "Mark job `canceled` and clear locks. Does not interrupt an in-process handler; "
-        "stops further claim/retry via JobQueuePort until re-queued."
+        "Mark job `canceled` and clear locks. Cooperative abort: the running worker's "
+        "`renew_lock` fails (status/lock no longer match), so `execute_claimed_job` cancels "
+        "the in-process handler and skips terminal transitions. Pending jobs will not be claimed."
     ),
 )
 async def cancel_job(

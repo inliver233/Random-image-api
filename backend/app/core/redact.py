@@ -19,6 +19,8 @@ _SENSITIVE_KEY_PARTS = (
 
 _BEARER_RE = re.compile(r"(?i)\bBearer\s+([^\s]+)")
 _REFRESH_QUERY_RE = re.compile(r"(?i)(refresh_token=)([^&\s]+)")
+# Public browser fallback (?api_key=) and sibling secret-ish query keys.
+_API_KEY_QUERY_RE = re.compile(r"(?i)((?:^|[?&#])(?:api[_-]?key|access[_-]?token|token)=)([^&#\s\"']+)")
 _URI_IN_TEXT_RE = re.compile(r"(?i)(?:https?|socks[45])://[^\s\"']+")
 
 _TRAILING_PUNCT = ".,);:]}"
@@ -68,6 +70,7 @@ def redact_text(text: str) -> str:
     text = redact_proxy_uri(text)
     text = _BEARER_RE.sub("Bearer " + REDACTED, text)
     text = _REFRESH_QUERY_RE.sub(r"\1" + REDACTED, text)
+    text = _API_KEY_QUERY_RE.sub(r"\1" + REDACTED, text)
     return text
 
 

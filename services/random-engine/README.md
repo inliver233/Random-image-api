@@ -36,7 +36,10 @@ Env:
 
 | Var | Default | Meaning |
 | --- | --- | --- |
-| `RANDOM_ENGINE_ADDR` | `:8091` | Listen address |
+| `RANDOM_ENGINE_ADDR` | `127.0.0.1:8091` | Listen address (loopback default; compose uses `:8091` in-container) |
+| `RANDOM_ENGINE_SECRET` | empty | When set, non-`/healthz` routes require header `X-Engine-Secret` (BFF: same env) |
+
+Compose publishes host port as `127.0.0.1:8091` only (not `0.0.0.0`) so LAN cannot reach an open engine by default.
 
 ## BFF dual-run (Python)
 
@@ -48,6 +51,7 @@ Optional cutover — default **off** (Python SQLite pick remains primary):
 | `RANDOM_ENGINE_ENABLED` | `0` | set `1` to try engine first on `/random` / `/feed` |
 | `RANDOM_ENGINE_TIMEOUT_MS` | `800` | pick timeout; on fail → Python fallback |
 | `RANDOM_ENGINE_TRAFFIC_PERCENT` | `100` | progressive cutover 0–100 when enabled (100 = all eligible picks) |
+| `RANDOM_ENGINE_SECRET` | empty | optional; must match engine when engine auth is on |
 
 Admin:
 
