@@ -392,3 +392,19 @@ def test_admin_recompute_bindings_allows_over_capacity_when_strict_false(tmp_pat
         assert list_resp.status_code == 200
         items = list_resp.json()["items"]
         assert len(items) == 5
+
+
+def test_admin_bindings_openapi_documents_dialect_recompute() -> None:
+    """Bindings OpenAPI must document dialect-aware recompute (not bare Title-Case)."""
+    app = create_app()
+    schema = app.openapi()
+    paths = schema["paths"]
+
+    list_op = paths["/admin/api/bindings"]["get"]
+    assert list_op.get("summary") == "List token-proxy bindings"
+    assert "binding" in str(list_op.get("description") or "").lower()
+
+    recompute_op = paths["/admin/api/bindings/recompute"]["post"]
+    assert recompute_op.get("summary") == "Recompute token-proxy bindings"
+    recompute_desc = str(recompute_op.get("description") or "")
+    assert "dialect" in recompute_desc.lower() or "ON CONFLICT" in recompute_desc

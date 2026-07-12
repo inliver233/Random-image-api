@@ -20,7 +20,15 @@ from app.db.session import resolve_sessionmaker, with_sqlite_busy_retry
 router = APIRouter()
 
 
-@router.get("/api-keys")
+@router.get(
+    "/api-keys",
+    summary="List public API keys",
+    description=(
+        "Cursor-paged public API keys (hint only — never returns raw key or key_hash). "
+        "When `PUBLIC_API_KEY_REQUIRED`, these keys feed `require_public_api_key` + "
+        "ApiKeyRateLimiterPort (memory/redis fail-open). See maintenance api-key-rate-limit."
+    ),
+)
 async def list_api_keys(
     request: Request,
     limit: int = 50,
@@ -63,7 +71,15 @@ async def list_api_keys(
     return admin_cursor_list(request, items=items, next_cursor=next_cursor, request_id=rid)
 
 
-@router.post("/api-keys")
+@router.post(
+    "/api-keys",
+    summary="Create public API key",
+    description=(
+        "Store HMAC-hashed public API key (`key_hash` + `hint` only in responses). "
+        "Raw `api_key` is write-only. Used by public routes when key auth is required; "
+        "rate limits are separate (ApiKeyRateLimiterPort backend)."
+    ),
+)
 async def create_api_key(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
@@ -136,7 +152,14 @@ async def create_api_key(
     )
 
 
-@router.put("/api-keys/{api_key_id}")
+@router.put(
+    "/api-keys/{api_key_id}",
+    summary="Update public API key",
+    description=(
+        "Update enabled flag and/or description. Cannot rotate the secret in place — "
+        "create a new key. Disabled keys fail public auth before rate-limit."
+    ),
+)
 async def update_api_key(
     api_key_id: int,
     request: Request,

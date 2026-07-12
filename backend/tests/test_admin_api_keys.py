@@ -74,3 +74,21 @@ def test_admin_api_keys_create_list_disable_and_reject_duplicate_name(tmp_path: 
         assert dup_body["ok"] is False
         assert dup_body["code"] == "BAD_REQUEST"
 
+
+def test_admin_api_keys_openapi_documents_public_auth_coupling() -> None:
+    """API key OpenAPI must document public auth + rate-limit port (not Title-Case auto only)."""
+    app = create_app()
+    schema = app.openapi()
+    paths = schema["paths"]
+
+    list_op = paths["/admin/api/api-keys"]["get"]
+    assert list_op.get("summary") == "List public API keys"
+    list_desc = str(list_op.get("description") or "")
+    assert "rate" in list_desc.lower() or "ApiKeyRateLimiter" in list_desc
+
+    create_op = paths["/admin/api/api-keys"]["post"]
+    assert create_op.get("summary") == "Create public API key"
+    assert "hash" in str(create_op.get("description") or "").lower()
+
+    update_op = paths["/admin/api/api-keys/{api_key_id}"]["put"]
+    assert update_op.get("summary") == "Update public API key"

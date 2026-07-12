@@ -60,7 +60,14 @@ async def _load_override_json(request: Request) -> dict[str, Any]:
     return {"override_proxy_id": override_proxy_id, "ttl_ms": ttl_ms, "reason": reason}
 
 
-@router.get("/bindings")
+@router.get(
+    "/bindings",
+    summary="List token-proxy bindings",
+    description=(
+        "List TokenProxyBinding rows for a proxy pool (token + primary/override endpoints). "
+        "Bindings are written by recompute with dialect-aware ON CONFLICT upserts."
+    ),
+)
 async def list_bindings(
     request: Request,
     pool_id: int,
@@ -164,7 +171,15 @@ async def list_bindings(
         }}, request_id=rid)
 
 
-@router.post("/bindings/recompute")
+@router.post(
+    "/bindings/recompute",
+    summary="Recompute token-proxy bindings",
+    description=(
+        "Rebuild TokenProxyBinding for a pool (`max_tokens_per_proxy`, optional `strict`). "
+        "Upserts use dialect-aware `insert_for_dialect` ON CONFLICT (SQLite|Postgres). "
+        "Does not enqueue jobs — pure catalog/control-plane write."
+    ),
+)
 async def recompute_bindings(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),

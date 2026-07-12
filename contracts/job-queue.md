@@ -60,3 +60,4 @@ Wire-up reads settings (not raw `os.environ` at call sites):
 | `/metrics` (admin) → modular readiness | `new_pixiv_module_readiness{module="job_queue",flag="implemented"}` (sqlite/memory only). OpenAPI summary documents scrape-time modular + circuit gauges |
 | Admin job CRUD (`/admin/api/jobs*`) | List/detail/retry/cancel/DLQ operate on SQLite `jobs` rows (payload + status for UI). OpenAPI summaries document that claim backends do not replace this table until full external-queue cutover |
 | Admin imports / hydration-runs | Create paths use same-txn `enqueue_pending_in_session` (or inline claim via `resolve_job_queue`). OpenAPI summaries call out SQLite job persistence + CatalogStore where relevant |
+| `POST /admin/api/proxies/probe` | Enqueues `proxy_probe` via JobQueuePort `queue.enqueue` (returns `job_id`). OpenAPI summary documents claim-backend vs SQLite payload split |

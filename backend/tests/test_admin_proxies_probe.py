@@ -56,3 +56,13 @@ def test_admin_proxies_probe_enqueues_job(tmp_path: Path, monkeypatch) -> None:
         assert job_type == "proxy_probe"
         assert status == "pending"
 
+
+def test_admin_proxies_probe_openapi_documents_job_queue() -> None:
+    """Proxy probe OpenAPI must document JobQueuePort enqueue (not bare Title-Case)."""
+    app = create_app()
+    schema = app.openapi()
+    op = schema["paths"]["/admin/api/proxies/probe"]["post"]
+    assert op.get("summary") == "Enqueue proxy probe job"
+    desc = str(op.get("description") or "")
+    assert "JobQueuePort" in desc or "enqueue" in desc.lower()
+    assert "proxy_probe" in desc

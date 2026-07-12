@@ -979,7 +979,15 @@ async def import_easy_proxies(
     return admin_ok(request, payload=payload, request_id=rid)
 
 
-@router.post("/proxies/probe")
+@router.post(
+    "/proxies/probe",
+    summary="Enqueue proxy probe job",
+    description=(
+        "Enqueue a `proxy_probe` job via JobQueuePort (`resolve_job_queue` → `queue.enqueue`). "
+        "Payload/status land on the SQLite `jobs` table; worker claim uses the active queue backend "
+        "(sqlite/memory today; redis/nats fail-loud). Returns `job_id` only — does not run the probe inline."
+    ),
+)
 async def probe_proxies(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
