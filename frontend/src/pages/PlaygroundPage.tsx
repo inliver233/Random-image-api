@@ -279,7 +279,12 @@ export function PlaygroundPage() {
 
   const onCopyUrl = async () => {
     if (!publicUrl) return;
-    await copyText(publicUrl);
+    // Match displayed / openable link: include ?api_key= when debug key is set.
+    const openable = withPublicApiKeyQuery(
+      publicUrl,
+      form.getFieldValue("x_api_key") || getPublicDebugApiKey(),
+    );
+    await copyText(openable);
   };
 
   const onCopyCurl = async () => {

@@ -1,5 +1,5 @@
 ﻿import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -112,6 +112,18 @@ describe("PlaygroundPage", () => {
     expect(fetchMock).toHaveBeenCalled();
     // Displayed link must be browser-openable when key required (parity with Recommendation).
     expect(await screen.findByText(/请求链接:.*api_key=debug-public-key-1234567890/)).toBeInTheDocument();
+
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: { writeText },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "复制链接" }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalled();
+    });
+    const copied = String(writeText.mock.calls[0]?.[0] || "");
+    expect(copied).toContain("api_key=debug-public-key-1234567890");
   });
 
   it("shows NO_MATCH hints in image mode and keeps message Chinese", async () => {

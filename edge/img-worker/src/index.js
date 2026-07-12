@@ -120,6 +120,8 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,HEAD,OPTIONS,POST",
+    // Prewarm clients may send X-Prewarm-Secret; Range for partial GETs (parity with api-worker openness).
+    "Access-Control-Allow-Headers": "*",
     "Access-Control-Max-Age": "86400",
   };
 }
