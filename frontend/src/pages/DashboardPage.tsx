@@ -11,6 +11,13 @@ type SummaryResponse = {
   ok: true;
   counts: {
     images: { total: number; enabled: number };
+    hydration?: {
+      enabled_images_total?: number;
+      missing?: { r18?: number; tags?: number; geometry?: number };
+      cold_start_r18_risk?: boolean;
+      r18_unknown_ratio?: number;
+      cold_start_hint?: string | null;
+    };
     tokens: { total: number; enabled: number };
     proxies: { endpoints_total: number; endpoints_enabled: number };
     proxy_pools: { total: number; enabled: number };
@@ -292,6 +299,29 @@ export function DashboardPage() {
         />
       ) : null}
 
+      {summary.data?.counts?.hydration?.cold_start_r18_risk ? (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="冷启动风险：默认 /random 可能 NO_MATCH"
+          description={
+            summary.data.counts.hydration.cold_start_hint ||
+            "大量图片 x_restrict 未知。请在设置中关闭 default_r18_strict，或运行元数据补全；临时可用 r18_strict=0 / r18=2。"
+          }
+          action={
+            <Space>
+              <Button size="small" onClick={() => navigate("/admin/settings")}>
+                打开设置
+              </Button>
+              <Button size="small" onClick={() => navigate("/admin/hydration")}>
+                补全
+              </Button>
+            </Space>
+          }
+        />
+      ) : null}
+
       <Row gutter={[16, 16]}>
         <Col xs={24} md={12} xl={6}>
           <Card title="工作线程 / 队列">
@@ -550,73 +580,51 @@ export function DashboardPage() {
                       </Tag>
                     );
                   })()}
-                  {r2Prewarm.data ? (
+                  {r2Prewarm.data?.enabled_flag || r2Prewarm.data?.ready ? (
                     <Tag
                       color={
                         r2Prewarm.data.ready ? "green" : r2Prewarm.data.enabled_flag ? "orange" : undefined
                       }
+                      title="可选 R2 对象缓存（非出图主路径）"
                     >
-                      r2_prewarm=
+                      r2=
                       {r2Prewarm.data.ready
                         ? "ready"
                         : r2Prewarm.data.enabled_flag
-                          ? "flag-on-not-ready"
+                          ? "flag-on"
                           : "off"}
-                      {r2Prewarm.data.enabled_flag && !r2Prewarm.data.url_configured
-                        ? " · no-url"
-                        : ""}
-                      {r2Prewarm.data.enabled_flag && !r2Prewarm.data.secret_configured
-                        ? " · no-secret"
-                        : ""}
                     </Tag>
                   ) : null}
                   {randomEngine.data ? (
-                    <>
-                      <Tag
-                        color={
-                          randomEngine.data.ready_for_traffic
-                            ? "green"
-                            : randomEngine.data.enabled
-                              ? "orange"
-                              : undefined
-                        }
-                      >
-                        engine=
-                        {randomEngine.data.ready_for_traffic
-                          ? "ready"
+                    <Tag
+                      color={
+                        randomEngine.data.ready_for_traffic
+                          ? "green"
                           : randomEngine.data.enabled
-                            ? "enabled-not-ready"
-                            : "off"}
-                      </Tag>
-                      <Tag>traffic={randomEngine.data.traffic_percent ?? 0}%</Tag>
-                      {randomEngine.data.enabled &&
-                      !(typeof randomEngine.data.url === "string" && randomEngine.data.url.trim()) ? (
-                        <Tag color="orange">no-url</Tag>
-                      ) : null}
-                      {randomEngine.data.enabled && randomEngine.data.index_empty ? (
-                        <Tag color="orange">engine index empty</Tag>
-                      ) : null}
-                      {randomEngine.data.circuit?.state ? (
-                        <Tag
-                          color={
-                            randomEngine.data.circuit.state === "open"
-                              ? "red"
-                              : randomEngine.data.circuit.state === "half_open"
-                                ? "orange"
-                                : undefined
-                          }
-                        >
-                          circuit={randomEngine.data.circuit.state}
-                          {randomEngine.data.circuit.state === "open" &&
-                          typeof randomEngine.data.circuit.open_remaining_s === "number"
-                            ? ` ~${Math.ceil(randomEngine.data.circuit.open_remaining_s)}s`
-                            : ""}
-                        </Tag>
-                      ) : null}
-                      {randomEngine.data.cutover_warning ? (
-                        <Tag color="orange">cutover: {randomEngine.data.cutover_warning}</Tag>
-                      ) : null}
-                    </>
+                            ? "orange"
+                            : undefined
+                      }
+                      style={{ cursor: "pointer" }}
+                      onClick={() => navigate("/admin/maintenance")}
+                      title={
+                        randomEngine.data.cutover_warning
+                          ? String(randomEngine.data.cutover_warning)
+                          : "打开维护工具 · Random Engine"
+                      }
+                    >
+                      engine=
+                      {randomEngine.data.ready_for_traffic
+                        ? "ready"
+                        : randomEngine.data.enabled
+                          ? "not-ready"
+                          : "off"}
+                      {typeof randomEngine.data.traffic_percent === "number"
+                        ? ` · ${randomEngine.data.traffic_percent}%`
+                        : ""}
+                      {randomEngine.data.circuit?.state && randomEngine.data.circuit.state !== "closed"
+                        ? ` · ${randomEngine.data.circuit.state}`
+                        : ""}
+                    </Tag>
                   ) : null}
                 </Space>
 

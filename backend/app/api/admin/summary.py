@@ -127,6 +127,12 @@ WHERE status=1
                 str(worker_last_seen_json) if worker_last_seen_json is not None else None
             )
 
+        # D3 cold-start: default r18_strict=1 excludes x_restrict NULL → NO_MATCH.
+        r18_unknown_ratio = (
+            float(missing_r18) / float(images_enabled) if images_enabled > 0 else 0.0
+        )
+        cold_start_r18_risk = bool(images_enabled > 0 and r18_unknown_ratio >= 0.5)
+
         return {
             "images": {"total": images_total, "enabled": images_enabled},
             "hydration": {
@@ -142,6 +148,15 @@ WHERE status=1
                     "created_at": missing_created_at,
                     "popularity": missing_popularity,
                 },
+                "cold_start_r18_risk": cold_start_r18_risk,
+                "r18_unknown_ratio": round(r18_unknown_ratio, 4),
+                "cold_start_hint": (
+                    "≥50% enabled images have unknown x_restrict. Default /random "
+                    "(r18_strict=1) will often NO_MATCH. Set random.defaults.default_r18_strict=false "
+                    "or run hydrate; clients may use r18_strict=0 / r18=2."
+                    if cold_start_r18_risk
+                    else None
+                ),
             },
             "tokens": {"total": tokens_total, "enabled": tokens_enabled},
             "proxies": {"endpoints_total": proxies_total, "endpoints_enabled": proxies_enabled},
