@@ -162,7 +162,9 @@ Backend note: pure edge **302** does **not** call `mark_image_ok` (bytes not ver
 | `record_image_edge_base_outcome` / `order_image_edge_bases_for_failover` | Process-local ~30s cooldown after probe/egress hard fails (ops ordered lists only; public sticky 302 unchanged) |
 | `resolve_image_edge_signed_candidates(settings, original_url)` | Signs once per ordered base; empty when edge not ready / non-pximg |
 | Public 302 / `urls.proxy` | Sticky primary only (clients cannot walk a candidate list on a single Location) |
-| `POST /admin/api/cf-workers/probe` (`kind=image\|all`) | Outbound `GET {base}/healthz` for image pool; records image-edge base cooldown on hard fail; never enables `IMAGE_EDGE_ENABLED` |
+| `POST /admin/api/cf-workers/probe` (`kind=image\|all`) | Outbound `GET {base}/healthz` for image pool; `base_urls` override requires `kind=image` (not `all`); records image-edge base cooldown on hard fail; never enables `IMAGE_EDGE_ENABLED` |
+
+Prod enable gate: `IMAGE_EDGE_ENABLED` requires `IMAGE_EDGE_SECRET` in prod; bases may be env CSV and/or runtime overlay after boot (env CSV alone is not required).
 
 ### Secret rotation (zero-downtime)
 

@@ -217,3 +217,23 @@ def test_cf_workers_probe_rejects_bad_kind(tmp_path: Path, monkeypatch) -> None:
         )
         assert resp.status_code == 400
     reset_overlay_for_tests()
+
+
+def test_cf_workers_probe_rejects_all_with_base_urls_override(tmp_path: Path, monkeypatch) -> None:
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_probe_all_override")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        resp = client.post(
+            "/admin/api/cf-workers/probe",
+            headers=headers,
+            json={
+                "kind": "all",
+                "base_urls": ["https://a.example.workers.dev"],
+            },
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body.get("ok") is False
+        assert str(body.get("code") or "").upper() == "BAD_REQUEST"
+    reset_overlay_for_tests()

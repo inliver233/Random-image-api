@@ -11,6 +11,7 @@ from app.core.cf_api_proxy import (
     is_cf_api_proxy_host_allowed,
     is_cf_base_cooling,
     load_cf_api_proxy_config,
+    load_cf_api_proxy_config_from_settings,
     order_cf_bases_for_failover,
     pick_cf_api_proxy_base_url,
     record_cf_base_outcome,
@@ -226,17 +227,21 @@ def test_order_cf_bases_for_failover_and_extract() -> None:
     assert demoted[-1] == "https://hot.example.com"
 
 
-def test_settings_disables_flag_without_bases() -> None:
+def test_settings_keeps_flag_without_env_bases_for_runtime_overlay() -> None:
+    """Env CSV may be empty; runtime pool overlay can supply bases after boot."""
     settings = load_settings(
         {
             "APP_ENV": "dev",
             "SECRET_KEY": "x",
             "CF_API_PROXY_ENABLED": "1",
             "CF_API_PROXY_BASE_URLS": "",
+            "CF_API_PROXY_SECRET": "sec",
         }
     )
     assert isinstance(settings, Settings)
-    assert settings.cf_api_proxy_enabled is False
+    assert settings.cf_api_proxy_enabled is True
+    # No env bases and empty overlay → not ready yet.
+    assert load_cf_api_proxy_config_from_settings(settings) is None
 
 
 def test_cf_api_proxy_matches_frozen_proxy_vectors() -> None:

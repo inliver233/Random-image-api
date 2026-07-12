@@ -296,9 +296,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     cf_api_proxy_base_urls = parse_csv_urls(
         _get(env, "CF_API_PROXY_BASE_URLS", "") or _get(env, "CF_API_PROXY_BASE_URL", "")
     )
-    # Flag stays true with bases so admin can report missing secret; ready requires secret separately.
-    if not cf_api_proxy_base_urls:
-        cf_api_proxy_enabled = False
+    # Do not force-disable when env CSV is empty: runtime-registered overlay bases
+    # (cf_pool.api.base_urls) may supply membership after boot. Ready still requires
+    # enabled + merged bases + secret (see load_cf_api_proxy_config_from_settings).
     # Mandate default: residential emergency-only when CF/edge ready. Opt out for transition.
     residential_egress_emergency_only = parse_bool_env(
         "RESIDENTIAL_EGRESS_EMERGENCY_ONLY", default=True, env=env
@@ -357,12 +357,10 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             missing.append("ADMIN_PASSWORD")
         if settings.imgproxy_base_url and (not settings.imgproxy_key or not settings.imgproxy_salt):
             missing.append("IMGPROXY_KEY/IMGPROXY_SALT")
-        if settings.image_edge_enabled and (not settings.image_edge_secret or not settings.image_edge_base_urls):
-            missing.append("IMAGE_EDGE_SECRET/IMAGE_EDGE_BASE_URLS")
-        if bool(getattr(settings, "cf_api_proxy_enabled", False)) and not list(
-            getattr(settings, "cf_api_proxy_base_urls", None) or []
-        ):
-            missing.append("CF_API_PROXY_BASE_URLS")
+        # Image edge / CF API: secrets required when flags on. Bases may come from env CSV
+        # and/or runtime pool overlay after boot — do not require env CSV alone.
+        if settings.image_edge_enabled and not str(settings.image_edge_secret or "").strip():
+            missing.append("IMAGE_EDGE_SECRET")
         # Worker PROXY_SECRET is fail-closed; prod must not enable CF API proxy without secret.
         if bool(getattr(settings, "cf_api_proxy_enabled", False)) and not str(
             getattr(settings, "cf_api_proxy_secret", "") or ""

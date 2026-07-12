@@ -84,6 +84,58 @@ def test_load_settings_prod_requires_engine_secret_when_enabled() -> None:
     assert s.random_engine_secret == "engine-secret"
 
 
+def test_load_settings_prod_cf_flags_require_secrets_not_env_bases_alone() -> None:
+    """Prod may enable CF with secret only; bases can come from runtime pool overlay."""
+    base = {
+        "APP_ENV": "prod",
+        "SECRET_KEY": "prod-secret-key-long-enough",
+        "FIELD_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
+        "ADMIN_PASSWORD": "prod-admin-pass",
+        "PIXIV_OAUTH_CLIENT_ID": "cid",
+        "PIXIV_OAUTH_CLIENT_SECRET": "csec",
+        "PIXIV_OAUTH_HASH_SECRET": "hsec",
+    }
+    with pytest.raises(ValueError, match="CF_API_PROXY_SECRET"):
+        load_settings(
+            {
+                **base,
+                "CF_API_PROXY_ENABLED": "true",
+                "CF_API_PROXY_BASE_URLS": "",
+                "CF_API_PROXY_SECRET": "",
+            }
+        )
+    s = load_settings(
+        {
+            **base,
+            "CF_API_PROXY_ENABLED": "true",
+            "CF_API_PROXY_BASE_URLS": "",
+            "CF_API_PROXY_SECRET": "proxy-secret",
+        }
+    )
+    assert s.cf_api_proxy_enabled is True
+    assert s.cf_api_proxy_base_urls == []
+
+    with pytest.raises(ValueError, match="IMAGE_EDGE_SECRET"):
+        load_settings(
+            {
+                **base,
+                "IMAGE_EDGE_ENABLED": "true",
+                "IMAGE_EDGE_BASE_URLS": "",
+                "IMAGE_EDGE_SECRET": "",
+            }
+        )
+    s2 = load_settings(
+        {
+            **base,
+            "IMAGE_EDGE_ENABLED": "true",
+            "IMAGE_EDGE_BASE_URLS": "",
+            "IMAGE_EDGE_SECRET": "edge-secret",
+        }
+    )
+    assert s2.image_edge_enabled is True
+    assert s2.image_edge_base_urls == []
+
+
 def test_load_settings_dev_auto_generates_field_encryption_key(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("APP_ENV", "dev")

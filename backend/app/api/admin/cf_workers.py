@@ -347,7 +347,8 @@ async def cf_workers_egress_policy(
     description=(
         "Outbound GET {base}/healthz for each merged pool member (or body base_urls). "
         "Records process-local base cooldown on hard failure (does not flip enable flags). "
-        "Body optional: kind=api|image|all (default all), base_urls=[…] override, timeout_s."
+        "Body optional: kind=api|image|all (default all), base_urls=[…] override "
+        "(override requires kind=api|image, not all), timeout_s."
     ),
 )
 async def cf_workers_probe(
@@ -380,6 +381,14 @@ async def cf_workers_probe(
         override = [str(x) for x in override_raw if str(x or "").strip()]
     elif isinstance(override_raw, str) and override_raw.strip():
         override = [override_raw.strip()]
+    # Override bases apply to one kind only — probing the same list as both api+image
+    # would write cooldown into both maps. kind=all without override still uses each pool.
+    if override and kind_raw == "all":
+        raise ApiError(
+            code=ErrorCode.BAD_REQUEST,
+            message="base_urls override requires kind=api or kind=image (not all)",
+            status_code=400,
+        )
 
     http_client = getattr(request.app.state, "httpx_client", None)
     owns_client = False
