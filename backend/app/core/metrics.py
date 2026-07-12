@@ -217,8 +217,8 @@ CIRCUIT_STATES: tuple[str, ...] = ("closed", "open", "half_open")
 
 # module → readiness flag labels published on scrape (stable for dashboards).
 MODULE_READINESS_FLAGS: dict[str, tuple[str, ...]] = {
-    "image_edge": ("enabled", "ready"),
-    "cf_api_proxy": ("enabled", "ready"),
+    "image_edge": ("enabled", "ready", "has_secret"),
+    "cf_api_proxy": ("enabled", "ready", "has_secret"),
     "r2_prewarm": ("enabled", "ready", "url_configured", "secret_configured"),
     "api_key_rate_limit": ("required", "using_memory_fallback", "redis_url_configured"),
     "job_queue": ("implemented",),
@@ -434,8 +434,18 @@ def set_modular_readiness_snapshot(snapshot: dict[str, Any] | None) -> None:
     Expected shape (subset ok)::
 
         {
-          "image_edge": {"enabled": bool, "ready": bool, "base_url_count": int},
-          "cf_api_proxy": {"enabled": bool, "ready": bool, "base_url_count": int},
+          "image_edge": {
+              "enabled": bool,
+              "ready": bool,
+              "has_secret": bool,
+              "base_url_count": int,
+          },
+          "cf_api_proxy": {
+              "enabled": bool,
+              "ready": bool,
+              "has_secret": bool,
+              "base_url_count": int,
+          },
           "r2_prewarm": {
               "enabled": bool,
               "ready": bool,

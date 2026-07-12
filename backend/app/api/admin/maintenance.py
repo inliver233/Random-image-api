@@ -234,7 +234,8 @@ async def r2_prewarm_status(
         missing.append("R2_PREWARM_ENABLED")
     if not raw_url:
         missing.append("R2_PREWARM_URL")
-    if ready and not secret_configured:
+    # Always list secret when unset (parity with image_edge / cf_api_proxy missing[]).
+    if not secret_configured:
         missing.append("R2_PREWARM_SECRET|IMAGE_EDGE_SECRET")
     # Never return the full URL if it embeds credentials; only host-ish preview.
     url_preview = ""

@@ -212,6 +212,10 @@ def test_metrics_exposes_modular_readiness_when_edge_ready(tmp_path: Path, monke
             text,
         )
         assert re.search(
+            r'new_pixiv_module_readiness\{flag="has_secret",module="image_edge"\}\s+1(\.0+)?\b',
+            text,
+        )
+        assert re.search(
             r'new_pixiv_module_readiness\{flag="ready",module="r2_prewarm"\}\s+1(\.0+)?\b',
             text,
         )
@@ -269,6 +273,10 @@ def test_metrics_base_url_count_raw_when_edge_not_ready(tmp_path: Path, monkeypa
         )
         assert re.search(
             r'new_pixiv_module_base_url_count\{module="image_edge"\}\s+2(\.0+)?\b',
+            text,
+        )
+        assert re.search(
+            r'new_pixiv_module_readiness\{flag="has_secret",module="image_edge"\}\s+0(\.0+)?\b',
             text,
         )
         assert re.search(

@@ -510,6 +510,9 @@ export function DashboardPage() {
                     {apiKeyRl.data.using_memory_fallback ? (
                       <Tag color="orange">redis→memory fallback</Tag>
                     ) : null}
+                    {apiKeyRl.data.configured_backend === "redis" && !apiKeyRl.data.redis_url_configured ? (
+                      <Tag color="orange">no-redis-url</Tag>
+                    ) : null}
                     {apiKeyRl.data.required ? <Tag color="blue">api_key required</Tag> : null}
                     <Tag>
                       rpm={apiKeyRl.data.rpm}/{apiKeyRl.data.burst}

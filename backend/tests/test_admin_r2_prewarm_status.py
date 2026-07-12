@@ -39,6 +39,47 @@ def test_admin_r2_prewarm_status_default_not_ready(tmp_path: Path, monkeypatch) 
         assert body["url_configured"] is False
         assert "R2_PREWARM_ENABLED" in body["missing"]
         assert "R2_PREWARM_URL" in body["missing"]
+        assert "R2_PREWARM_SECRET|IMAGE_EDGE_SECRET" in body["missing"]
+
+
+def test_admin_r2_prewarm_status_flag_url_missing_secret(tmp_path: Path, monkeypatch) -> None:
+    """flag+url without secret → not ready and missing always lists secret."""
+    db_path = tmp_path / "admin_r2_prewarm_status_no_secret.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("ADMIN_PASSWORD", "pass_test")
+    monkeypatch.setenv("R2_PREWARM_ENABLED", "1")
+    monkeypatch.setenv("R2_PREWARM_URL", "https://prewarm.example.com/hook")
+    monkeypatch.delenv("R2_PREWARM_SECRET", raising=False)
+    monkeypatch.delenv("IMAGE_EDGE_SECRET", raising=False)
+    monkeypatch.delenv("PREWARM_SECRET", raising=False)
+
+    app = create_app()
+    with TestClient(app) as client:
+        token = client.post(
+            "/admin/api/login",
+            headers={"X-Request-Id": "req_test"},
+            json={"username": "admin", "password": "pass_test"},
+        ).json()["token"]
+
+        resp = client.get(
+            "/admin/api/maintenance/r2-prewarm",
+            headers={"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["enabled_flag"] is True
+        assert body["url_configured"] is True
+        assert body["secret_configured"] is False
+        assert body["ready"] is False
+        assert "R2_PREWARM_SECRET|IMAGE_EDGE_SECRET" in body["missing"]
+        assert "R2_PREWARM_ENABLED" not in body["missing"]
+        assert "R2_PREWARM_URL" not in body["missing"]
 
 
 def test_admin_r2_prewarm_status_ready_no_url_leak(tmp_path: Path, monkeypatch) -> None:

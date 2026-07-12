@@ -289,6 +289,7 @@ describe("DashboardPage", () => {
     expect(await screen.findByText("job_queue implemented")).toBeInTheDocument();
     expect((await screen.findAllByText("redis→memory fallback")).length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText(/api_key_rl=memory/)).toBeInTheDocument();
+    expect(await screen.findByText("no-redis-url")).toBeInTheDocument();
     expect(await screen.findByText("api_key required")).toBeInTheDocument();
     expect(await screen.findByText(/image_edge=flag-on-not-ready/)).toBeInTheDocument();
     // image_edge + cf_api_proxy both surface bases= / no-secret (CF tag parity).

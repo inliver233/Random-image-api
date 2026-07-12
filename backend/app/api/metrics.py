@@ -129,11 +129,21 @@ def _modular_readiness_from_request(request: Request) -> dict[str, Any]:
         "image_edge": {
             "enabled": bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False,
             "ready": edge_cfg is not None,
+            "has_secret": (
+                bool(str(getattr(settings, "image_edge_secret", "") or "").strip())
+                if settings is not None
+                else False
+            ),
             "base_url_count": len(edge_cfg.base_urls) if edge_cfg is not None else len(edge_raw_bases),
         },
         "cf_api_proxy": {
             "enabled": bool(getattr(settings, "cf_api_proxy_enabled", False)) if settings is not None else False,
             "ready": bool(cf_api_cfg is not None and cf_api_cfg.ready),
+            "has_secret": (
+                bool(str(getattr(settings, "cf_api_proxy_secret", "") or "").strip())
+                if settings is not None
+                else False
+            ),
             "base_url_count": len(cf_api_cfg.base_urls) if cf_api_cfg is not None else len(cf_raw_bases),
         },
         "r2_prewarm": {
