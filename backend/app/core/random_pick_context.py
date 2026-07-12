@@ -236,6 +236,7 @@ class RandomPickContext:
             payload=payload,
             timeout_s=timeout_s,
             catalog=catalog,
+            settings=settings,
         )
         engine_status = str((eng_meta or {}).get("engine_status") or "fallback")
         rtt = (eng_meta or {}).get("engine_rtt_s")

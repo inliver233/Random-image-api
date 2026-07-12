@@ -423,6 +423,7 @@ async def try_pick_via_engine(
     payload: dict[str, Any],
     timeout_s: float = 0.8,
     catalog: CatalogStore | None = None,
+    settings: Any | None = None,
 ) -> tuple[Any | None, dict[str, Any]]:
     """
     Call Go engine; prefer PickItem delivery DTO, catalog rehydrate only if incomplete.
@@ -430,7 +431,9 @@ async def try_pick_via_engine(
     """
     meta: dict[str, Any] = {"engine": True, "engine_url": base_url}
     t0 = time.perf_counter()
-    data = await engine_pick(client, base_url, payload=payload, timeout_s=timeout_s)
+    data = await engine_pick(
+        client, base_url, payload=payload, timeout_s=timeout_s, settings=settings
+    )
     meta["engine_rtt_s"] = max(0.0, time.perf_counter() - t0)
     if data is None:
         meta["engine_status"] = "unavailable"
@@ -475,11 +478,14 @@ async def try_pick_many_via_engine(
     payload: dict[str, Any],
     timeout_s: float = 0.8,
     catalog: CatalogStore | None = None,
+    settings: Any | None = None,
 ) -> tuple[list[Any], dict[str, Any]]:
     """Batch variant of try_pick_via_engine for /feed (limit>1)."""
     meta: dict[str, Any] = {"engine": True, "engine_url": base_url, "batch": True}
     t0 = time.perf_counter()
-    data = await engine_pick(client, base_url, payload=payload, timeout_s=timeout_s)
+    data = await engine_pick(
+        client, base_url, payload=payload, timeout_s=timeout_s, settings=settings
+    )
     meta["engine_rtt_s"] = max(0.0, time.perf_counter() - t0)
     if data is None:
         meta["engine_status"] = "unavailable"
@@ -579,6 +585,7 @@ async def pick_with_strategy(
             payload=payload,
             timeout_s=timeout_s,
             catalog=store,
+            settings=settings,
         )
         rtt = (eng_meta or {}).get("engine_rtt_s")
         if image is not None:
