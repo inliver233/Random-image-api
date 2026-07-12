@@ -3,6 +3,17 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
+from app.db.utc_text_now import utc_iso_now_server_default
+
+
+def _dialect_name() -> str:
+    try:
+        name = (getattr(getattr(op.get_bind(), "dialect", None), "name", None) or "").strip().lower()
+    except Exception:
+        name = ""
+    return name or "sqlite"
+
+
 revision = "20260210_0014"
 down_revision = "20260210_0013"
 branch_labels = None
@@ -17,7 +28,7 @@ def upgrade() -> None:
             "created_at",
             sa.Text(),
             nullable=False,
-            server_default=sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"),
+            server_default=utc_iso_now_server_default(_dialect_name()),
         ),
         sa.Column("actor", sa.Text(), nullable=True),
         sa.Column("action", sa.Text(), nullable=False),

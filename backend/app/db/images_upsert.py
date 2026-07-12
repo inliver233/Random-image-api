@@ -34,13 +34,9 @@ def insert_for_dialect(table: Any, *, dialect_name: str) -> Any:
 
 def now_expr_for_dialect(dialect_name: str) -> Any:
     """UTC ISO-ish timestamp expression for updated_at (string column parity)."""
-    name = (dialect_name or "sqlite").strip().lower() or "sqlite"
-    if name.startswith("postgres"):
-        # Approximate SQLite strftime('%Y-%m-%dT%H:%M:%fZ','now') without requiring pgcrypto.
-        return sa.text(
-            "(to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD\"T\"HH24:MI:SS.MS') || 'Z')"
-        )
-    return sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")
+    from app.db.utc_text_now import utc_iso_now_expr
+
+    return utc_iso_now_expr(dialect_name)
 
 
 def dialect_name_from_engine(engine: Any) -> str:

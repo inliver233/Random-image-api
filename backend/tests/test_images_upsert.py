@@ -89,6 +89,18 @@ def test_now_expr_for_dialect_sqlite_uses_strftime_postgres_uses_to_char() -> No
     assert "UTC" in pg_sql
 
 
+def test_utc_now_compiles_per_dialect() -> None:
+    from sqlalchemy.dialects import postgresql, sqlite
+
+    from app.db.utc_text_now import UtcNow
+
+    sqlite_sql = str(UtcNow().compile(dialect=sqlite.dialect()))
+    pg_sql = str(UtcNow().compile(dialect=postgresql.dialect()))
+    assert "strftime" in sqlite_sql
+    assert "to_char" in pg_sql
+    assert "UTC" in pg_sql
+
+
 def test_driver_param_marker_sqlite_question_postgres_percent_s() -> None:
     assert driver_param_marker("sqlite") == "?"
     assert driver_param_marker("postgresql") == "%s"

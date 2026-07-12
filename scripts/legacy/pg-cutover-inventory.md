@@ -13,7 +13,8 @@ Living product order: **CF egress productization → then deep PG**. SQLite rema
 | Backend label | `app/db/dialect.py` | `sqlite` \| `postgres` \| `other` from `DATABASE_URL` |
 | Engine pools | `app/db/engine.py` | SQLite: WAL/busy/pool; PG: `PG_POOL_*` + `pool_pre_ping` |
 | Contention retry | `app/db/session.py` | `with_sqlite_busy_retry` also matches PG deadlock/serialize |
-| Upsert / time SQL | `app/db/images_upsert.py` | `insert_for_dialect`, `now_expr_for_dialect`, `adapt_driver_sql_named_binds` |
+| UTC text now | `app/db/utc_text_now.py` | `UtcNow` + `utc_iso_now_*`; shared by models, alembic, upserts |
+| Upsert / time SQL | `app/db/images_upsert.py` | `insert_for_dialect`, `now_expr_for_dialect` → utc helper, `adapt_driver_sql_named_binds` |
 | Catalog / tag ports | `app/db/catalog.py`, `tag_store.py` | Protocol + `backend` label; handlers stay store-bound |
 | Job claim raw SQL | `app/jobs/claim.py` | Named binds adapted for asyncpg `$n` |
 | Alembic async strip | `backend/alembic/env.py` | Strips `+aiosqlite` / `+asyncpg` / `+psycopg` |
@@ -37,7 +38,7 @@ Unit coverage for dialect helpers: `backend/tests/test_images_upsert.py`.
 
 | Revision | Issue | PG behavior today | Cutover action (later) |
 | --- | --- | --- | --- |
-| `0001`–`0015` (+ most models) | `server_default=sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))")` on `created_at` / `updated_at` / `added_at` | **Fails** if Postgres runs these upgrades as written | Dual-default helper: SQLite keep strftime; PG use `to_char((now() AT TIME ZONE 'UTC'), …) \|\| 'Z'` (same shape as `now_expr_for_dialect`) **or** drop server default and always set in app |
+| `0001`–`0015` (+ models) | Was hard-coded SQLite `strftime` server defaults | **Dual-dialect:** alembic uses `utc_iso_now_server_default(_dialect_name())`; ORM models use portable `UtcNow()` (`app/db/utc_text_now.py`) | Dry-run `alembic upgrade head` on empty Postgres; keep string timestamps |
 | `0016` FTS | `CREATE VIRTUAL TABLE … USING fts5`, SQLite triggers, `sqlite`-style rowid FTS | **Upgrade/downgrade no-op on non-SQLite** (`_is_sqlite` gate) + `_try_create_fts5` still best-effort | Leave optional; runtime already falls back to `LIKE`. Later: GIN/`to_tsvector` or `pg_trgm` under TAGS-1 |
 | `0019` partial unique | `CREATE UNIQUE INDEX … WHERE status IN ('pending','running')` | **Supported** on modern Postgres | Keep; verify on target PG version in dry-run |
 

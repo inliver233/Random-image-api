@@ -4,6 +4,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.models.base import Base
+from app.db.utc_text_now import UtcNow
 
 
 class RequestLog(Base):
@@ -18,7 +19,7 @@ class RequestLog(Base):
     created_at: Mapped[str] = mapped_column(
         sa.Text(),
         nullable=False,
-        server_default=sa.text("(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"),
+        server_default=UtcNow(),
     )
     request_id: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
     method: Mapped[str] = mapped_column(sa.Text(), nullable=False)
