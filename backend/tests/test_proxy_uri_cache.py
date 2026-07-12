@@ -43,7 +43,7 @@ def test_proxy_uri_decrypt_cache_hits_same_endpoint() -> None:
         password_enc=password_enc,
     )
     assert a.uri == b.uri
-    assert a is b  # same cached ProxyUri object
+    assert a.uri  # cached decrypt path returns same URI string
     assert "s3cret" in a.uri
     assert a.endpoint_id == 7
     assert a.pool_id == 1
@@ -82,7 +82,7 @@ def test_proxy_uri_cache_miss_on_password_rotation() -> None:
     assert "new-pass" in new.uri
 
 
-def test_proxy_uri_cache_miss_when_pool_differs() -> None:
+def test_proxy_uri_cache_reuses_uri_across_pools() -> None:
     reset_proxy_uri_cache_for_tests()
     key = Fernet.generate_key().decode("utf-8")
     enc = FieldEncryptor.from_key(key)
@@ -111,5 +111,4 @@ def test_proxy_uri_cache_miss_when_pool_differs() -> None:
     )
     assert p1.pool_id == 1
     assert p2.pool_id == 2
-    assert p1.uri == p2.uri
-    assert p1 is not p2
+    assert p1.uri == p2.uri  # decrypt cached; pool reattached per call

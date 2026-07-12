@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.coerce import format_exc, truncate_text
 from app.core.config import Settings, load_settings
-from app.core.crypto import FieldEncryptor
 from app.core.metrics import PROXY_PROBE_LATENCY_MS
 from app.core.proxy_health import (
     PROBE_BLACKLIST_AFTER_FAILURES,
@@ -20,8 +19,7 @@ from app.core.proxy_health import (
     proxy_endpoint_fail_values_threshold,
     proxy_endpoint_ok_values,
 )
-from app.core.proxy_routing import invalidate_proxy_pool_caches
-from app.core.proxy_uri import build_proxy_uri
+from app.core.proxy_routing import _proxy_uri_from_endpoint_row, invalidate_proxy_pool_caches
 from app.core.redact import redact_text
 from app.core.time import iso_utc_ms
 from app.db.models.proxy_endpoints import ProxyEndpoint
@@ -91,7 +89,6 @@ def build_proxy_probe_handler(
 ) -> Any:
     if settings is None:
         settings = load_settings()
-    encryptor = FieldEncryptor.from_key(settings.field_encryption_key)
     Session = create_sessionmaker(engine)
 
     probe_fn = prober or _default_probe
@@ -140,14 +137,18 @@ def build_proxy_probe_handler(
         immediate_results: list[ProbeResult] = []
         for ep in endpoints:
             try:
-                proxy_uri = build_proxy_uri(
-                    encryptor,
+                # Share Fernet URI cache with residential pick path.
+                built = _proxy_uri_from_endpoint_row(
+                    settings,
+                    endpoint_id=int(ep.id),
+                    pool_id=0,
                     scheme=str(ep.scheme),
                     host=str(ep.host),
                     port=int(ep.port),
                     username=str(ep.username or ""),
                     password_enc=str(ep.password_enc or ""),
                 )
+                proxy_uri = built.uri
             except Exception as exc:
                 immediate_results.append(
                     ProbeResult(endpoint_id=int(ep.id), ok=False, latency_ms=None, error=format_exc(exc))
