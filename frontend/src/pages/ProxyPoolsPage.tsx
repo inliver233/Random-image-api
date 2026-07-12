@@ -484,10 +484,25 @@ export function ProxyPoolsPage() {
                 data-testid="pool-endpoints-save"
                 onClick={() => {
                   if (!configPool) return;
+                  // Replace semantics: never save while the membership list is still paging in.
+                  if (endpointsList.hasMore || endpointsList.isLoadingMore || endpoints.isLoading || endpoints.isFetching) {
+                    return;
+                  }
                   setPoolEndpoints.mutate({ poolId: configPool.id, endpointIds: selectedEndpointIds, config: memberConfig });
                 }}
-                loading={setPoolEndpoints.isPending}
-                disabled={!configPool}
+                loading={setPoolEndpoints.isPending || endpointsList.isLoadingMore || endpoints.isLoading || endpoints.isFetching}
+                disabled={
+                  !configPool ||
+                  endpointsList.hasMore ||
+                  endpointsList.isLoadingMore ||
+                  endpoints.isLoading ||
+                  endpoints.isFetching
+                }
+                title={
+                  endpointsList.hasMore || endpointsList.isLoadingMore || endpoints.isLoading || endpoints.isFetching
+                    ? "节点列表仍在加载，加载完成后再保存以免覆盖未加载成员"
+                    : undefined
+                }
               >
                 保存节点配置
               </Button>
@@ -512,7 +527,7 @@ export function ProxyPoolsPage() {
               type="info"
               showIcon
               message="提示"
-              description="勾选要加入该代理池的节点；未勾选的节点会从该池移除。成员启用/权重仅对当前代理池生效。列表会自动翻页加载，避免仅保存前 50 条。"
+              description="勾选要加入该代理池的节点；未勾选的节点会从该池移除。成员启用/权重仅对当前代理池生效。列表会自动翻页加载；加载完成前「保存节点配置」会禁用，避免仅保存已加载页导致误删成员。"
               style={{ marginTop: 12 }}
             />
             <Table<ProxyEndpointListItem>

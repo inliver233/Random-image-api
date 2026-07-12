@@ -3,7 +3,14 @@ import { Alert, Button, Card, Col, Form, Input, InputNumber, Row, Select, Skelet
 import React, { useEffect } from "react";
 import { useLocation } from "react-router-dom";
 
-import { ApiError, type ApiErrorBody, apiFetch, apiJson, formatApiErrorMessage } from "../api/client";
+import {
+  ApiError,
+  type ApiErrorBody,
+  apiFetch,
+  apiJson,
+  formatApiErrorMessage,
+  resolvePublicApiUrl,
+} from "../api/client";
 import { requestIdFromError } from "../admin/errors";
 import {
   getPublicDebugApiKey,
@@ -256,22 +263,24 @@ export function PlaygroundPage() {
   }, [m.data]);
 
   const url = m.data?.url || null;
+  // Split FE/API deploys: copy/open/curl must hit API origin, not the SPA host.
+  const publicUrl = url ? resolvePublicApiUrl(url) : null;
 
   const onCopyUrl = async () => {
-    if (!url) return;
-    await copyText(url);
+    if (!publicUrl) return;
+    await copyText(publicUrl);
   };
 
   const onCopyCurl = async () => {
-    if (!url) return;
+    if (!publicUrl) return;
     const key = String(form.getFieldValue("x_api_key") || getPublicDebugApiKey() || "").trim();
     const headerPart = key ? ` -H ${JSON.stringify(`X-API-Key: ${key}`)}` : "";
-    await copyText(`curl -i${headerPart} ${JSON.stringify(url)}`);
+    await copyText(`curl -i${headerPart} ${JSON.stringify(publicUrl)}`);
   };
 
   const onOpen = () => {
-    if (!url) return;
-    window.open(url, "_blank", "noopener,noreferrer");
+    if (!publicUrl) return;
+    window.open(publicUrl, "_blank", "noopener,noreferrer");
   };
 
   return (

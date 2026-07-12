@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ProxyPoolsPage } from "./ProxyPoolsPage";
 
@@ -11,6 +11,11 @@ function makeClient() {
 }
 
 describe("ProxyPoolsPage", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     vi.stubGlobal(
       "fetch",
@@ -84,7 +89,11 @@ describe("ProxyPoolsPage", () => {
     fireEvent.click(await screen.findByTestId("pool-config-1"));
     expect(await screen.findByText(/配置代理池节点/)).toBeInTheDocument();
 
-    fireEvent.click(await screen.findByTestId("pool-endpoints-save"));
+    const save = await screen.findByTestId("pool-endpoints-save");
+    await waitFor(() => {
+      expect(save).not.toBeDisabled();
+    });
+    fireEvent.click(save);
 
     await waitFor(() => {
       const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls;
@@ -95,6 +104,67 @@ describe("ProxyPoolsPage", () => {
       expect(String(init?.body)).toContain("\"endpoint_id\":10");
       expect(String(init?.body)).toContain("\"weight\":2");
     });
+  });
+
+  it("disables save while endpoint list still has more pages", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/admin/api/proxy-pools") && (!init || init.method === "GET" || !init.method)) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              items: [{ id: "1", name: "默认代理池", description: null, enabled: true }],
+              request_id: "req_pools",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.includes("/admin/api/proxies/endpoints")) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              items: [
+                {
+                  id: "10",
+                  uri_masked: "http://1.2.3.4:8080",
+                  enabled: true,
+                  pools: [{ id: "1", name: "默认代理池", pool_enabled: true, member_enabled: true, weight: 2 }],
+                },
+              ],
+              next_cursor: "cursor-more",
+              request_id: "req_eps_partial",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return new Response(JSON.stringify({ ok: false, code: "NOT_FOUND", message: "not found", request_id: "req_x", details: {} }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }),
+    );
+
+    const qc = makeClient();
+    render(
+      <MemoryRouter>
+        <QueryClientProvider client={qc}>
+          <ProxyPoolsPage />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByTestId("pool-config-1"));
+    // Wait until first page reports more pages — only then is save guard active.
+    expect(await screen.findByText(/还有更多/)).toBeInTheDocument();
+    const save = await screen.findByTestId("pool-endpoints-save");
+    expect(save).toBeDisabled();
+    fireEvent.click(save);
+    const posts = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => String(c[0]).includes("/admin/api/proxy-pools/1/endpoints") && (c[1] as RequestInit | undefined)?.method === "POST",
+    );
+    expect(posts).toHaveLength(0);
   });
 });
 

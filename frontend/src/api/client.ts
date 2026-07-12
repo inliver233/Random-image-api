@@ -82,9 +82,24 @@ export function formatApiErrorMessage(status: number, body: ApiErrorBody | null)
   return rawMessage || `HTTP ${status}`;
 }
 
-function getApiBaseUrl(): string {
+export function getApiBaseUrl(): string {
   const raw = (import.meta.env.VITE_API_BASE_URL || "").trim();
   return raw.endsWith("/") ? raw.slice(0, -1) : raw;
+}
+
+/** Join optional API origin with a public path (e.g. /random?…) for copy/open/curl. */
+export function joinApiBaseUrl(base: string, pathOrUrl: string): string {
+  const raw = String(pathOrUrl || "").trim();
+  if (!raw) return raw;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const path = raw.startsWith("/") ? raw : `/${raw}`;
+  const origin = String(base || "").trim().replace(/\/+$/, "");
+  return origin ? `${origin}${path}` : path;
+}
+
+/** Resolve a public API path against VITE_API_BASE_URL (empty base = same-origin relative). */
+export function resolvePublicApiUrl(pathOrUrl: string): string {
+  return joinApiBaseUrl(getApiBaseUrl(), pathOrUrl);
 }
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
