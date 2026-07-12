@@ -24,6 +24,11 @@ from app.core.time import iso_utc_ms
 from app.core.runtime_settings import set_runtime_setting
 from app.db.catalog import build_catalog_store
 from app.db.engine import create_engine
+from app.db.jobs_cleanup import (
+    DEFAULT_JOBS_KEEP_DAYS,
+    DEFAULT_JOBS_MAX_DELETE_ROWS,
+    cleanup_jobs,
+)
 from app.db.tag_store import build_tag_store
 from app.jobs.claim import DEFAULT_LOCK_TTL_S
 from app.jobs.dispatch import JobDispatcher
@@ -383,8 +388,37 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
         )
         last_heartbeat_m = 0.0
         last_auto_refresh_m = 0.0
+        last_jobs_purge_m = 0.0
         cached_enabled_tokens: int | None = None
         cached_desired_concurrency = 1
+
+        # QUEUE-1: optional terminal jobs purge on worker tick (default off — Admin/cron still primary).
+        jobs_purge_enabled = parse_bool_env("WORKER_JOBS_PURGE_ENABLED", default=False)
+        jobs_purge_interval_s = parse_float_env(
+            "WORKER_JOBS_PURGE_INTERVAL_SECONDS",
+            default=86_400.0,
+            min_v=60.0,
+            max_v=7 * 86_400.0,
+        )
+        jobs_purge_keep_days = parse_int_env(
+            "WORKER_JOBS_PURGE_KEEP_DAYS",
+            default=int(DEFAULT_JOBS_KEEP_DAYS),
+            min_v=0,
+            max_v=3650,
+        )
+        jobs_purge_max_rows = parse_int_env(
+            "WORKER_JOBS_PURGE_MAX_DELETE_ROWS",
+            default=int(DEFAULT_JOBS_MAX_DELETE_ROWS),
+            min_v=1,
+            max_v=10_000_000,
+        )
+        if jobs_purge_enabled:
+            log.info(
+                "worker_jobs_purge_enabled interval_s=%s keep_days=%s max_rows=%s",
+                jobs_purge_interval_s,
+                jobs_purge_keep_days,
+                jobs_purge_max_rows,
+            )
 
         job_queue = build_job_queue(
             engine,
@@ -425,6 +459,7 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
         async def _on_tick() -> None:
             nonlocal last_heartbeat_m
             nonlocal last_auto_refresh_m
+            nonlocal last_jobs_purge_m
             nonlocal cached_enabled_tokens
             nonlocal cached_desired_concurrency
             now_m = time.monotonic()
@@ -465,6 +500,23 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
                     )
                 except Exception:
                     log.warning("worker_heartbeat_update_failed")
+
+            if jobs_purge_enabled and (now_m - last_jobs_purge_m) >= float(jobs_purge_interval_s):
+                last_jobs_purge_m = now_m
+                try:
+                    result = await cleanup_jobs(
+                        engine,
+                        keep_days=int(jobs_purge_keep_days),
+                        max_delete_rows=int(jobs_purge_max_rows),
+                    )
+                    log.info(
+                        "worker_jobs_purge_ok deleted=%s has_more=%s cutoff=%s",
+                        int(result.deleted),
+                        bool(result.has_more),
+                        result.cutoff,
+                    )
+                except Exception:
+                    log.warning("worker_jobs_purge_failed err=%s", redact_text(format_exc()))
 
             await refresher.tick(engine)
 

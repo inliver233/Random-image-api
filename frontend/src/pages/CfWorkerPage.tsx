@@ -390,6 +390,16 @@ export function CfWorkerPage() {
                       setForceResidential.mutate(checked);
                     }}
                   />
+                  {policy?.force_residential_emergency ? (
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={setForceResidential.isPending}
+                      onClick={() => setForceResidential.mutate(false)}
+                    >
+                      确认默认 CF（关应急）
+                    </Button>
+                  ) : null}
                 </Space>
               </Descriptions.Item>
               <Descriptions.Item label="API base 冷却">
