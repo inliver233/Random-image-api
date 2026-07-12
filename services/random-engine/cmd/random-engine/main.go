@@ -783,7 +783,11 @@ func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLi
 	}
 	vel := 0.0
 	if age != nil {
-		den := *age + math.Max(0.1, velSmooth)
+		// Python: denom = age + smooth; log1p(bm / max(1.0, denom)).
+		den := *age + math.Max(0.0, velSmooth)
+		if den < 1.0 {
+			den = 1.0
+		}
 		vel = bm / den
 	}
 

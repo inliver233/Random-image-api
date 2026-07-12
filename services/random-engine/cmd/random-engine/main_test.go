@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"math"
 	"testing"
+	"time"
 )
 
 func testMux(st *engineState) *http.ServeMux {
@@ -348,5 +349,21 @@ func TestQualityTemperatureScalesScoreNotMultiplier(t *testing.T) {
 	want := score/2.0 + math.Log(2.0)
 	if math.Abs(logit-want) > 1e-9 {
 		t.Fatalf("logit want %v got %v dbg=%v", want, logit, dbg)
+	}
+}
+
+func TestQualityVelocityDenomFloor(t *testing.T) {
+	// age≈0, smooth=0.1 → Python max(1.0, 0.1)=1.0; vel=bm/1.
+	bm, vw := 10, 100
+	created := time.Now().UTC().Format(time.RFC3339)
+	im := indexImage{BookmarkCount: &bm, ViewCount: &vw, CreatedAtPixiv: &created}
+	weights := map[string]float64{
+		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
+		"bookmark_rate": 0, "freshness": 0, "bookmark_velocity": 1,
+	}
+	logit, dbg := qualityLogit(im, weights, map[string]float64{}, 21, 0.1, 1)
+	want := math.Log1p(10.0 / 1.0)
+	if math.Abs(logit-want) > 1e-6 {
+		t.Fatalf("velocity logit want %v got %v dbg=%v", want, logit, dbg)
 	}
 }
