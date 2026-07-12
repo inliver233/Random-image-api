@@ -8,6 +8,7 @@ import { CursorTableCard } from "../admin/CursorTableCard";
 import { dash, yesNo } from "../admin/format";
 import { useActionAlerts } from "../admin/useActionAlerts";
 import { apiJson } from "../api/client";
+import { setPublicDebugApiKey } from "../auth/publicApiKeyStorage";
 import { useCursorList } from "../hooks/useCursorList";
 
 type ApiKeyItem = {
@@ -92,10 +93,18 @@ export function ApiKeysPage() {
     onMutate: () => {
       alerts.clear();
     },
-    onSuccess: (data) => {
+    onSuccess: (data, values) => {
       setCreateOpen(false);
+      // Bridge plaintext (shown once) into Playground/public debug key storage.
+      const plain = String(values.api_key || "").trim();
+      if (plain) setPublicDebugApiKey(plain);
       createForm.resetFields();
-      alerts.setSuccess(`API Key 已创建：#${data.api_key_id}（hint=${data.hint}）`, data.request_id);
+      alerts.setSuccess(
+        plain
+          ? `API Key 已创建：#${data.api_key_id}（hint=${data.hint}）；已写入调试密钥供 Playground/公开接口使用`
+          : `API Key 已创建：#${data.api_key_id}（hint=${data.hint}）`,
+        data.request_id,
+      );
       queryClient.invalidateQueries({ queryKey: ["admin", "api-keys"] });
     },
     onError: (err) => {

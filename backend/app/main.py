@@ -6,6 +6,7 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import Response
 
 from app.api.admin.router import router as admin_router
@@ -207,6 +208,37 @@ def create_app() -> FastAPI:
         redoc_url="/api/redoc",
         lifespan=_lifespan,
     )
+
+    def custom_openapi():  # type: ignore[no-redef]
+        """Document public API key auth for Swagger/OpenAPI (middleware-enforced when configured)."""
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=getattr(app, "version", None) or "0.1.0",
+            description=app.description,
+            routes=app.routes,
+        )
+        components = schema.setdefault("components", {})
+        schemes = components.setdefault("securitySchemes", {})
+        schemes["ApiKeyHeader"] = {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+            "description": "Preferred for programmatic clients when PUBLIC_API_KEY_REQUIRED=true.",
+        }
+        schemes["ApiKeyQuery"] = {
+            "type": "apiKey",
+            "in": "query",
+            "name": "api_key",
+            "description": "Browser navigation fallback when the client cannot set headers (e.g. window.open /img).",
+        }
+        # Optional OR: either header or query satisfies auth when enforcement is on.
+        schema["security"] = [{"ApiKeyHeader": []}, {"ApiKeyQuery": []}]
+        app.openapi_schema = schema
+        return app.openapi_schema
+
+    app.openapi = custom_openapi  # type: ignore[method-assign]
 
     @app.exception_handler(ApiError)
     async def _api_error_handler(request: Request, exc: ApiError):  # type: ignore[no-redef]

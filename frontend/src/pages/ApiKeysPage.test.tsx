@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { getPublicDebugApiKey } from "../auth/publicApiKeyStorage";
 import { ApiKeysPage } from "./ApiKeysPage";
 
 function makeClient() {
@@ -13,6 +14,11 @@ describe("ApiKeysPage", () => {
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
+    try {
+      sessionStorage.clear();
+    } catch {
+      // ignore
+    }
   });
 
   beforeEach(() => {
@@ -114,6 +120,9 @@ describe("ApiKeysPage", () => {
 
     expect(await screen.findByText(/API Key 已创建：#9/)).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:\s*req_create_key/)).toBeInTheDocument();
+    // Plaintext is only available at create time — store for Playground/public debug use.
+    expect(getPublicDebugApiKey()).toBe("abcdefghijklmnopqrstuvwxyz12");
+    expect(await screen.findByText(/已写入调试密钥/)).toBeInTheDocument();
   });
 
   it("toggles enabled", async () => {

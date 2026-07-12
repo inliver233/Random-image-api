@@ -186,6 +186,40 @@ def test_wtf_page_injects_public_api_key_required_flag(tmp_path: Path, monkeypat
         assert "wtf_public_api_key" in body
 
 
+def test_openapi_documents_public_api_key_security_schemes(tmp_path: Path, monkeypatch) -> None:
+    """Swagger/OpenAPI must expose X-API-Key header + api_key query schemes."""
+    db_path = tmp_path / "openapi_public_api_key.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    # OpenAPI is always exempt; schemes should be present even when enforcement is off.
+    monkeypatch.setenv("PUBLIC_API_KEY_REQUIRED", "false")
+
+    app = create_app()
+
+    async def _seed() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await app.state.engine.dispose()
+
+    asyncio.run(_seed())
+
+    with TestClient(app) as client:
+        resp = client.get("/openapi.json")
+        assert resp.status_code == 200
+        body = resp.json()
+        schemes = body.get("components", {}).get("securitySchemes", {})
+        assert schemes.get("ApiKeyHeader", {}).get("name") == "X-API-Key"
+        assert schemes.get("ApiKeyHeader", {}).get("in") == "header"
+        assert schemes.get("ApiKeyQuery", {}).get("name") == "api_key"
+        assert schemes.get("ApiKeyQuery", {}).get("in") == "query"
+        security = body.get("security") or []
+        assert {"ApiKeyHeader": []} in security
+        assert {"ApiKeyQuery": []} in security
+
+
 def test_favicon_exempt_when_public_api_key_required(tmp_path: Path, monkeypatch) -> None:
     """Browsers auto-request /favicon.ico; it must stay middleware-exempt like /healthz."""
     db_path = tmp_path / "favicon_public_api_key.db"
