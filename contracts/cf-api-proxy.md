@@ -57,10 +57,11 @@ Env CSV bases merge with runtime-registered bases (`cf_pool.api.base_urls` in `r
 
 | Surface | Notes |
 | --- | --- |
-| `GET /admin/api/cf-workers/pool` | env + runtime + merged members + egress policy |
+| `GET /admin/api/cf-workers/pool` | env + runtime + merged members + egress policy + process-local `base_cooldown` |
 | `POST /admin/api/cf-workers/register` | add runtime base (`kind=api\|image`, `base_url`) |
-| `POST /admin/api/cf-workers/unregister` | remove runtime base |
-| `POST /admin/api/cf-workers/deploy` | CF API upload of **hardened** `edge/api-worker` or `edge/img-worker`, enable workers.dev, optional auto-register — **does not** flip enable flags; never stores CF API token |
+| `POST /admin/api/cf-workers/unregister` | remove runtime base only (does **not** delete CF script; env bases untouched) |
+| `POST /admin/api/cf-workers/deploy` | CF API upload of **hardened** `edge/api-worker` or `edge/img-worker`, enable workers.dev, auto-register (default), **default `enable_business=true`** writes runtime secret + enabled overlay (OR with env); never stores CF API token; advanced `enable_business=false` = deploy-only |
+| `POST /admin/api/cf-workers/delete-script` | optional hard teardown: CF API DELETE worker script; Token never stored; optional `unregister_pool` when `kind`+`base_url` provided |
 | `POST /admin/api/cf-workers/probe` | outbound `GET {base}/healthz` for merged pool (or body `base_urls`); optional `kind=api\|image\|all` (default all), `timeout_s`; `base_urls` override requires `kind=api` or `kind=image` (not `all`); records process-local base cooldown on hard fail — **never** flips enable flags |
 | `GET /admin/api/cf-workers/egress-policy` | residential emergency-only + process-local `force_residential_emergency` |
 | `POST /admin/api/cf-workers/egress-policy` | body `force_residential_emergency=true\|false` — process-local only; does not change env |
