@@ -23,7 +23,7 @@ Implementation:
 | `get_image_by_id_any_status` | Admin/manual resolve by PK (any status) |
 | `get_images_by_ids_any_status` | Engine event publish by id (any status; full row) |
 | `get_images_by_illust_id` | Engine event publish by illust (any status; page_index order) |
-| `list_enabled_images` | Engine full snapshot rows (status=1, id order; optional limit) |
+| `list_enabled_images` | Engine full snapshot rows (status=1, id order; optional `limit` + keyset `after_id` for ENGINE-1 large-catalog paging) |
 | `map_image_ids_by_illust_page` | Import tag link map: `(illust_id, page_index) → image_id` |
 | `get_image_by_illust_page` | Legacy public routes by (illust_id, page_index), status=1 only |
 | `list_images` | Public cursor list with filters (status=1); returns `(rows, next_cursor)` |
