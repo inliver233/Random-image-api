@@ -171,7 +171,8 @@ def _modular_readiness_from_request(request: Request) -> dict[str, Any]:
         "(`new_pixiv_module_readiness`, `new_pixiv_module_base_url_count`) from process "
         "config — same honesty shapes as `/healthz` `modules.*` / public `/status.json` "
         "`data.*` (no secrets, no outbound engine/R2 probes). Also exports job status "
-        "counts, proxy endpoint state counts, and delivery/random counters."
+        "counts, proxy endpoint state counts (dialect-aware named binds on raw driver SQL), "
+        "and delivery/random counters."
     ),
 )
 async def metrics(

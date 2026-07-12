@@ -8,6 +8,7 @@ Implementation:
 - Default: `SqliteCatalogStore` → existing `images_upsert` / `images_get` / `images_mark`
 - Postgres label: `PostgresCatalogStore` (same helpers; write path uses dialect-aware upsert)
 - Image upserts (`images_upsert.py`): `insert_for_dialect` + `now_expr_for_dialect` select SQLite vs PostgreSQL `INSERT … ON CONFLICT` builders and UTC timestamp expressions from the bound session dialect
+- Raw `exec_driver_sql` helpers (same module): `dialect_name_from_engine` / `driver_param_marker` (positional `?` vs `%s`) and `adapt_driver_sql_named_binds` (`:name` dict stays on sqlite; postgres → `$1..$n` + tuple for asyncpg). Used by healthz/admin summary/random totals (positional) and claim/metrics/executor/hydrate/proxy_routing (named)
 - Dialect map: `catalog_backend_from_database_url` → `db.dialect.backend_from_database_url` (shared with TagStore / RandomPickPort)
 - Wire-up: `app.state.catalog_store = build_catalog_store(database_url=...)` in `main.py`
 
@@ -66,4 +67,4 @@ Helpers remain available for non-public paths; injected store is preferred via `
 | `/status.json` → `data.catalog.backend` | Same public label; `/status` HTML `ports:` chip includes it |
 | `GET /admin/api/maintenance/modular-ports` | `catalog.backend` |
 
-**Not included:** schema migration, dual-write, or automatic cutover. Production Postgres still requires Alembic/ops work. Catalog/tag/runtime_settings/proxy-pool/bindings ON CONFLICT writers use shared `insert_for_dialect`; production Postgres still needs Alembic/ops cutover.
+**Not included:** schema migration, dual-write, or automatic cutover. Production Postgres still requires Alembic/ops work. Catalog/tag/runtime_settings/proxy-pool/bindings ON CONFLICT writers use shared `insert_for_dialect`; raw driver SQL hot paths use shared bind markers/adapters; production Postgres still needs Alembic/ops cutover.

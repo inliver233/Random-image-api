@@ -8,6 +8,7 @@ Implementation:
 - Default: `SqliteTagStore` → `tags_get` / `tags_list` / `tags_links`
 - Postgres label: `PostgresTagStore` (same helpers; write path uses dialect-aware inserts)
 - Tag/link inserts (`tags_links.py`): `ensure_tags_by_names` + `link_image_tags` use `insert_for_dialect` (shared with catalog image upserts) so ON CONFLICT is SQLite|PostgreSQL-safe
+- Shared dialect helpers live in `images_upsert.py` (`insert_for_dialect`, `driver_param_marker`, `adapt_driver_sql_named_binds`) — TagStore writers use the insert path; raw driver SQL elsewhere reuses the same module
 - Dialect map: `tag_backend_from_database_url` → `db.dialect.backend_from_database_url`
 - Wire-up: `app.state.tag_store = build_tag_store(database_url=...)` in `main.py`
 - Worker: `build_default_dispatcher` injects one store into import/hydrate handlers

@@ -230,3 +230,4 @@ def test_metrics_openapi_documents_modular_scrape() -> None:
     assert "new_pixiv_module_readiness" in desc
     assert "circuit" in desc.lower()
     assert "/healthz" in desc or "healthz" in desc
+    assert "dialect-aware" in desc.lower() or "named binds" in desc.lower()

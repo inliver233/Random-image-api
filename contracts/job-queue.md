@@ -58,7 +58,7 @@ Wire-up reads settings (not raw `os.environ` at call sites):
 | `/healthz` → `modules.job_queue` | `backend` (active), `requested` (Settings), `implemented` — redis/nats rejected at settings load (no silent sqlite fallback) |
 | `/status.json` → `data.job_queue` | Same public shape; `/status` HTML chip mirrors it |
 | `GET /admin/api/maintenance/modular-ports` | Same honesty shape: `job_queue.backend` / `requested` / `implemented` (no `using_sqlite_fallback` field) |
-| `/metrics` (admin) → modular readiness | `new_pixiv_module_readiness{module="job_queue",flag="implemented"}` (sqlite/memory only). OpenAPI summary documents scrape-time modular + circuit gauges |
+| `/metrics` (admin) → modular readiness | `new_pixiv_module_readiness{module="job_queue",flag="implemented"}` (sqlite/memory only). OpenAPI summary documents scrape-time modular + circuit gauges. Proxy state SQL uses `adapt_driver_sql_named_binds` |
 | Admin job CRUD (`/admin/api/jobs*`) | List/detail/retry/cancel/DLQ operate on SQLite `jobs` rows (payload + status for UI). OpenAPI summaries document that claim backends do not replace this table until full external-queue cutover |
 | Admin imports / hydration-runs | Create paths use same-txn `enqueue_pending_in_session` (or inline claim via `resolve_job_queue`). OpenAPI summaries call out SQLite job persistence + CatalogStore where relevant |
 | `POST /admin/api/proxies/probe` | Enqueues `proxy_probe` via JobQueuePort `queue.enqueue` (returns `job_id`). OpenAPI summary documents claim-backend vs SQLite payload split |
