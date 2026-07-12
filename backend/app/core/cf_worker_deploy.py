@@ -442,3 +442,59 @@ async def deploy_cf_worker(
             else "R2 not applicable for api-worker."
         ),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class CfWorkerDeleteResult:
+    worker_name: str
+    deleted: bool
+    already_absent: bool = False
+
+
+async def delete_cf_worker_script(
+    *,
+    api_token: str,
+    account_id: str,
+    worker_name: str,
+    client: httpx.AsyncClient | None = None,
+) -> CfWorkerDeleteResult:
+    """Delete a Worker **script** from the Cloudflare account (ds2api-parity teardown).
+
+    Does **not** touch BFF runtime pools — callers should unregister base_url
+    separately when desired. CF API token is never stored.
+    """
+    token = validate_api_token(api_token)
+    acc = validate_account_id(account_id)
+    name = validate_worker_name(worker_name)
+    url = _cf_script_url(acc, name)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    owns_client = client is None
+    http = client or httpx.AsyncClient()
+    try:
+        resp = await http.delete(url, headers=headers, timeout=30.0)
+        body = resp.content
+        if resp.status_code == 404:
+            log.info("cf_worker_delete_absent name=%s", name)
+            return CfWorkerDeleteResult(worker_name=name, deleted=False, already_absent=True)
+        if not _cf_success(body):
+            # Some CF responses use 200 + success=false; also treat explicit 404 JSON.
+            msg = _parse_cf_error(body, fallback=f"CF script delete failed status={resp.status_code}")
+            low = msg.lower()
+            if resp.status_code == 404 or "not found" in low or "could not find" in low:
+                log.info("cf_worker_delete_absent name=%s err=%s", name, msg)
+                return CfWorkerDeleteResult(worker_name=name, deleted=False, already_absent=True)
+            log.warning(
+                "cf_worker_delete_failed name=%s status=%s err=%s",
+                name,
+                resp.status_code,
+                msg,
+            )
+            raise CfWorkerDeployError(msg, status_code=502)
+    finally:
+        if owns_client:
+            await http.aclose()
+
+    log.info("cf_worker_deleted name=%s", name)
+    return CfWorkerDeleteResult(worker_name=name, deleted=True, already_absent=False)
+

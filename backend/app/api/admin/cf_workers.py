@@ -43,7 +43,11 @@ from app.core.cf_pool_registry import (
     unregister_base_url,
 )
 from app.core.cf_api_proxy import snapshot_cf_base_cooldown
-from app.core.cf_worker_deploy import CfWorkerDeployError, deploy_cf_worker
+from app.core.cf_worker_deploy import (
+    CfWorkerDeployError,
+    delete_cf_worker_script,
+    deploy_cf_worker,
+)
 from app.core.egress_policy import (
     egress_policy_snapshot,
     is_force_residential_emergency,
@@ -313,6 +317,95 @@ async def cf_workers_unregister(
             "base_url": base,
             "runtime_base_urls": list(next_bases),
             "unregistered": True,
+        },
+        request_id=rid,
+    )
+
+
+@router.post(
+    "/cf-workers/delete-script",
+    summary="Delete CF Worker script from Cloudflare account",
+    description=(
+        "Optional ds2api-parity teardown: DELETE the Worker script via Cloudflare API. "
+        "Requires api_token + account_id + worker_name (token never stored). "
+        "By default also unregisters matching workers.dev base from the runtime pool when "
+        "kind is provided. Does not flip env-only members; does not clear BFF secrets."
+    ),
+)
+async def cf_workers_delete_script(
+    request: Request,
+    claims: dict[str, Any] = Depends(get_admin_claims),
+) -> dict[str, Any]:
+    rid = get_or_create_request_id(request)
+    data = await load_json_object(request)
+    api_token = parse_required_str(data.get("api_token"), field="api_token", max_len=200)
+    account_id = parse_required_str(data.get("account_id"), field="account_id", max_len=64)
+    worker_name = parse_required_str(data.get("worker_name"), field="worker_name", max_len=63)
+    kind_raw = parse_optional_str(data.get("kind"))
+    kind = (kind_raw or "").strip().lower()
+    if kind and kind not in {"api", "image"}:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message="kind must be api or image", status_code=400)
+    unregister_pool = parse_bool(data.get("unregister_pool"), default=True)
+
+    try:
+        result = await delete_cf_worker_script(
+            api_token=api_token,
+            account_id=account_id,
+            worker_name=worker_name,
+            client=getattr(request.app.state, "httpx_client", None),
+        )
+    except CfWorkerDeployError as exc:
+        status = int(exc.status_code)
+        if status < 500:
+            raise ApiError(code=ErrorCode.BAD_REQUEST, message=str(exc), status_code=status) from exc
+        raise ApiError(code=ErrorCode.UPSTREAM_STREAM_ERROR, message=str(exc), status_code=502) from exc
+
+    unregistered = False
+    runtime_bases: list[str] = []
+    base_url: str | None = None
+    if unregister_pool and kind:
+        # Best-effort: derive workers.dev base from known account host if client passed base_url;
+        # else strip using provided base_url field, else skip if neither.
+        base_hint = parse_optional_str(data.get("base_url")) or ""
+        base = normalize_cf_base_url(base_hint) if base_hint else ""
+        if not base:
+            # Common workers.dev shape: https://{worker_name}.{subdomain}.workers.dev
+            # Without account host we cannot invent it — require base_url for pool cleanup.
+            base = ""
+        if base:
+            await ensure_overlay_fresh(_engine(request), force=True)
+            if kind == "api":
+                runtime_bases = unregister_base_url(get_api_overlay_bases(), base)
+                set_api_overlay_bases(runtime_bases)
+            else:
+                runtime_bases = unregister_base_url(get_image_overlay_bases(), base)
+                set_image_overlay_bases(runtime_bases)
+                try:
+                    from app.core.image_edge import _EDGE_CFG_FROM_SETTINGS
+
+                    _EDGE_CFG_FROM_SETTINGS.clear()
+                except Exception:
+                    pass
+            updated_by = str(claims.get("sub") or claims.get("username") or "admin")
+            await _persist_overlay(_engine(request), kind=kind, bases=runtime_bases, updated_by=updated_by)
+            unregistered = True
+            base_url = base
+
+    note = (
+        "CF script deleted (or already absent). Runtime pool unregister requires kind+base_url. "
+        "BFF secrets and env bases are unchanged."
+    )
+    return admin_ok(
+        request,
+        payload={
+            "worker_name": result.worker_name,
+            "deleted": bool(result.deleted),
+            "already_absent": bool(result.already_absent),
+            "kind": kind or None,
+            "base_url": base_url,
+            "unregistered": unregistered,
+            "runtime_base_urls": list(runtime_bases) if unregistered else None,
+            "note": note,
         },
         request_id=rid,
     )

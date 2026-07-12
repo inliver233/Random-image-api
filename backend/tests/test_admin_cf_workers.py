@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from app.core.cf_pool_overlay import reset_overlay_for_tests
-from app.core.cf_worker_deploy import CfWorkerDeployResult
+from app.core.cf_worker_deploy import CfWorkerDeleteResult, CfWorkerDeployResult
 from app.core.security import create_jwt
 from app.db.models.base import Base
 from app.main import create_app
@@ -384,4 +384,77 @@ def test_cf_workers_egress_policy_force_residential(tmp_path: Path, monkeypatch)
         assert off.json()["force_residential_emergency"] is False
         assert is_force_residential_emergency() is False
     reset_force_residential_emergency_for_tests()
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_delete_script_and_unregister_pool(tmp_path: Path, monkeypatch) -> None:
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_delete_script")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    del_result = CfWorkerDeleteResult(worker_name="ria-api-a", deleted=True, already_absent=False)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        reg = client.post(
+            "/admin/api/cf-workers/register",
+            headers=headers,
+            json={"kind": "api", "base_url": "https://ria-api-a.acct.workers.dev"},
+        )
+        assert reg.status_code == 200
+        with patch(
+            "app.api.admin.cf_workers.delete_cf_worker_script",
+            new_callable=AsyncMock,
+            return_value=del_result,
+        ) as delete_fn:
+            resp = client.post(
+                "/admin/api/cf-workers/delete-script",
+                headers=headers,
+                json={
+                    "kind": "api",
+                    "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
+                    "account_id": "0123456789abcdef0123456789abcdef",
+                    "worker_name": "ria-api-a",
+                    "base_url": "https://ria-api-a.acct.workers.dev",
+                    "unregister_pool": True,
+                },
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["ok"] is True
+            assert body["deleted"] is True
+            assert body["already_absent"] is False
+            assert body["unregistered"] is True
+            assert body["base_url"] == "https://ria-api-a.acct.workers.dev"
+            raw = resp.text
+            assert "cf-token-abcdefghijklmnopqrstuvwxyz" not in raw
+            delete_fn.assert_awaited_once()
+
+        pool = client.get("/admin/api/cf-workers/pool", headers=headers).json()
+        assert "https://ria-api-a.acct.workers.dev" not in pool["api"]["merged_base_urls"]
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_delete_script_already_absent(tmp_path: Path, monkeypatch) -> None:
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_delete_absent")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    del_result = CfWorkerDeleteResult(worker_name="gone-worker", deleted=False, already_absent=True)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        with patch(
+            "app.api.admin.cf_workers.delete_cf_worker_script",
+            new_callable=AsyncMock,
+            return_value=del_result,
+        ):
+            resp = client.post(
+                "/admin/api/cf-workers/delete-script",
+                headers=headers,
+                json={
+                    "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
+                    "account_id": "0123456789abcdef0123456789abcdef",
+                    "worker_name": "gone-worker",
+                },
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["deleted"] is False
+            assert body["already_absent"] is True
+            assert body["unregistered"] is False
     reset_overlay_for_tests()
