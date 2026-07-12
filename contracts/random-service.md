@@ -29,10 +29,15 @@ Prometheus / debug honesty:
 | --- | --- |
 | `skipped_traffic` | Engine enabled + URL set, but this request did **not** route to engine (traffic percent / no client) and `skip_engine` is false |
 | `skipped_sticky` | `skip_engine=True` (must **not** count as `skipped_traffic`) |
+| `skipped_circuit` | Dual-run process circuit open (or concurrent half-open probe blocked); pick fail-opens to Python without calling engine |
+
+Process circuit (BFF, not Go): 5 consecutive hard statuses (`unavailable` / `empty_index`) → open ~30s; success resets; soft miss does not trip. Snapshot shape: `{ state, consecutive_failures, open_remaining_s, failure_threshold, open_s }`.
 
 ## Ops
 
 - `/healthz` → `modules.random_service.backend` (default: `default`)
+- `/healthz` → `modules.random_engine.circuit` — process-local dual-run circuit (no outbound probe)
 - Admin → `GET /admin/api/maintenance/modular-ports` → `random_service.backend`
+- Admin → `GET /admin/api/maintenance/random-engine` → full engine readiness + same `circuit` object; open may set `cutover_warning`
 
 No env switch yet; factory is DI-swappable for tests and future alternate planners.

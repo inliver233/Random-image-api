@@ -51,15 +51,23 @@ Optional cutover — default **off** (Python SQLite pick remains primary):
 
 Admin:
 
-- `GET /admin/api/maintenance/random-engine` — health + traffic_percent / timeout_ms + `index_size` / `index_empty` / `ready_for_traffic` / `cutover_warning`
+- `GET /admin/api/maintenance/random-engine` — health + traffic_percent / timeout_ms + `index_size` / `index_empty` / `ready_for_traffic` / `cutover_warning` + process dual-run **`circuit`** snapshot (`state` / `consecutive_failures` / `open_remaining_s` / thresholds)
 - `POST /admin/api/maintenance/random-engine/snapshot` — push full enabled index from SQLite
 - `POST /admin/api/maintenance/random-engine/compare-filters` — SQLite vs engine filter cardinality (statistical dual-run; body optional public-style filters, default r18=0)
+
+Public ops (no secrets, no outbound engine probe):
+
+- `/healthz` → `modules.random_engine` includes the same process-local **`circuit`** snapshot (closed / half_open / open)
 
 Engine-internal (ops / BFF):
 
 - `POST /v1/admin/filter-count` — `{ "filters": {…} }` → `{ filtered, index_size, revision }`
 
 After starting the engine, push a snapshot before enabling the flag, or picks will fall through to Python.
+
+### BFF process dual-run circuit
+
+Process-local soft circuit in `random_engine_client` (not the Go service): after **5** consecutive hard dual-run failures (`unavailable` / `empty_index`), the BFF opens for **~30s** and fail-opens picks to Python (`engine_status=skipped_circuit`). Soft misses (`no_match`, etc.) do not trip. Admin UI surfaces open state on Maintenance / Dashboard; open while traffic>0 also sets `cutover_warning` (fail-open to Python).
 
 ### Empty index vs filter miss
 
