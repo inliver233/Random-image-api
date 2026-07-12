@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from prometheus_client import Counter, Gauge, Histogram
 
@@ -165,6 +166,26 @@ METRICS_LAST_SCRAPE_SUCCESS = Gauge(
     "Last /metrics scrape success (1=ok, 0=error).",
 )
 
+# Process dual-run circuit (local snapshot on scrape; no outbound engine probe).
+# state label: closed | open | half_open — only one is 1 at a time.
+RANDOM_ENGINE_CIRCUIT_STATE = Gauge(
+    "new_pixiv_random_engine_circuit_state",
+    "BFF dual-run circuit state (1=active state, 0=other).",
+    ["state"],
+)
+
+RANDOM_ENGINE_CIRCUIT_OPEN_REMAINING_SECONDS = Gauge(
+    "new_pixiv_random_engine_circuit_open_remaining_seconds",
+    "Seconds remaining while dual-run circuit is open (0 when closed/half_open).",
+)
+
+RANDOM_ENGINE_CIRCUIT_CONSECUTIVE_FAILURES = Gauge(
+    "new_pixiv_random_engine_circuit_consecutive_failures",
+    "Consecutive hard dual-run failures toward open threshold.",
+)
+
+CIRCUIT_STATES: tuple[str, ...] = ("closed", "open", "half_open")
+
 IMAGE_DELIVERY_PATHS: tuple[str, ...] = (
     "edge_redirect",
     "edge_unavailable",
@@ -210,6 +231,10 @@ def _init_labelsets() -> None:
         JOBS_STATUS_COUNT.labels(status=status).set(0)
     for state in PROXY_STATES:
         PROXY_ENDPOINTS_STATE_COUNT.labels(state=state).set(0)
+    for state in CIRCUIT_STATES:
+        RANDOM_ENGINE_CIRCUIT_STATE.labels(state=state).set(1.0 if state == "closed" else 0.0)
+    RANDOM_ENGINE_CIRCUIT_OPEN_REMAINING_SECONDS.set(0.0)
+    RANDOM_ENGINE_CIRCUIT_CONSECUTIVE_FAILURES.set(0.0)
     METRICS_LAST_SCRAPE_SUCCESS.set(1)
 
 
@@ -271,6 +296,33 @@ def observe_api_key_rate_limit(*, result: str, backend: str) -> None:
         backend_label = "memory"
     try:
         API_KEY_RATE_LIMIT_TOTAL.labels(result=result_label, backend=backend_label).inc()
+    except Exception:
+        pass
+
+
+def set_random_engine_circuit_snapshot(snapshot: dict[str, Any] | None) -> None:
+    """Publish process dual-run circuit gauges (best-effort; never raises)."""
+    try:
+        snap = snapshot if isinstance(snapshot, dict) else {}
+        state = str(snap.get("state") or "closed").strip().lower() or "closed"
+        if state not in CIRCUIT_STATES:
+            state = "closed"
+        for label in CIRCUIT_STATES:
+            RANDOM_ENGINE_CIRCUIT_STATE.labels(state=label).set(1.0 if label == state else 0.0)
+        try:
+            remaining = float(snap.get("open_remaining_s") or 0.0)
+        except Exception:
+            remaining = 0.0
+        if remaining < 0:
+            remaining = 0.0
+        RANDOM_ENGINE_CIRCUIT_OPEN_REMAINING_SECONDS.set(remaining)
+        try:
+            failures = int(snap.get("consecutive_failures") or 0)
+        except Exception:
+            failures = 0
+        if failures < 0:
+            failures = 0
+        RANDOM_ENGINE_CIRCUIT_CONSECUTIVE_FAILURES.set(float(failures))
     except Exception:
         pass
 

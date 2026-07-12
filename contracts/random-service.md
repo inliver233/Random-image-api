@@ -48,6 +48,7 @@ When dual-run is not routed for the batch (`try_engine_batch` → `eng_meta is N
 - `/healthz` → `modules.random_service.backend` (default: `default`)
 - `/healthz` → `modules.random_engine.circuit` — process-local dual-run circuit (no outbound probe)
 - `/status.json` → `data.random_engine` (`url_configured` / `enabled` / `traffic_percent` + same process-local `circuit`); `/status` HTML chip mirrors it (no outbound probe)
+- `/metrics` (admin) → circuit gauges: `new_pixiv_random_engine_circuit_state{state=…}`, `…_open_remaining_seconds`, `…_consecutive_failures` (refreshed from local snapshot each scrape)
 - Admin → `GET /admin/api/maintenance/modular-ports` → `random_service.backend`
 - Admin → `GET /admin/api/maintenance/random-engine` → full engine readiness + same `circuit` object; open may set `cutover_warning`
 

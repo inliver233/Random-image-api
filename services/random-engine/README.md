@@ -92,6 +92,12 @@ Public JSON (`?debug=1`):
 
 Prometheus dual-run skip labels (pre-registered zeros): `skipped_traffic`, `skipped_sticky`, `skipped_circuit` on `new_pixiv_random_engine_pick_total`
 
+Process circuit gauges (refreshed on `/metrics` scrape; local snapshot, no engine probe):
+
+- `new_pixiv_random_engine_circuit_state{state=closed|open|half_open}` — one-hot active state
+- `new_pixiv_random_engine_circuit_open_remaining_seconds`
+- `new_pixiv_random_engine_circuit_consecutive_failures`
+
 ### Catalog → engine events (best-effort)
 
 When `RANDOM_ENGINE_URL` is set (does **not** require `RANDOM_ENGINE_ENABLED`), control-plane writers publish deltas:

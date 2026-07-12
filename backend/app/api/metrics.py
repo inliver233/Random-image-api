@@ -14,7 +14,9 @@ from app.core.metrics import (
     ensure_known_keys,
     set_jobs_status_counts,
     set_proxy_state_counts,
+    set_random_engine_circuit_snapshot,
 )
+from app.core.random_engine_client import engine_circuit_snapshot
 from app.core.time import iso_utc_ms
 
 router = APIRouter()
@@ -68,6 +70,9 @@ async def metrics(
     request: Request,
     _claims: dict[str, Any] = Depends(get_admin_claims),
 ) -> Response:
+    # Local dual-run circuit gauges (no outbound engine probe; always refresh on scrape).
+    set_random_engine_circuit_snapshot(engine_circuit_snapshot())
+
     engine: AsyncEngine | None = getattr(request.app.state, "engine", None)
     if engine is not None:
         try:
