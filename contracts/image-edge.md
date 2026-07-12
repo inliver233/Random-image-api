@@ -162,6 +162,7 @@ When disabled or non-pximg `original_url`, public API falls back to local `/i/{i
 | Surface | Notes |
 | --- | --- |
 | `/healthz` → `modules.image_edge` | `enabled_flag`, `ready`, `base_url_count` — config only, no outbound edge probe / secrets |
+| `/status.json` → `data.image_edge` | Same public shape (`enabled_flag` / `ready` / `base_url_count`); `/status` HTML chip mirrors it (no secrets / no edge probe) |
 | `GET /admin/api/maintenance/image-edge` | Same readiness shape for Dashboard / Maintenance tags (never returns secret) |
 | Prometheus `new_pixiv_image_delivery_total{path=…}` | `edge_redirect` / `edge_unavailable` / local cascade paths |
 

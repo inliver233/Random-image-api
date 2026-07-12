@@ -16,6 +16,9 @@ def test_docs_html_documents_debug_engine_status() -> None:
     assert "data.random_engine" in html
     assert "modules.random_engine.circuit" in html
     assert "/status.json" in html
+    # Image Edge readiness on public status (parity with /healthz modules.image_edge).
+    assert "data.image_edge" in html
+    assert "modules.image_edge" in html
     # Catalog list + delivery + version links (parity with OpenAPI public summaries).
     assert 'href="https://example.test/tags"' in html
     assert 'href="https://example.test/authors"' in html
@@ -29,5 +32,6 @@ def test_docs_html_public_key_required_banner() -> None:
     assert "PUBLIC_API_KEY_REQUIRED" in html
     assert "engine_status" in html
     assert "data.random_engine" in html
+    assert "data.image_edge" in html
     assert "/images" in html
     assert "/version" in html

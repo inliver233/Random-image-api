@@ -9,6 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.core.coerce import clamp_float
+from app.core.image_edge import load_image_edge_config_from_settings
 from app.core.random_engine_client import engine_circuit_snapshot, random_engine_base_url
 from app.core.request_id import get_or_create_request_id, set_request_id_header, set_request_id_on_state
 from app.core.time import iso_utc_ms
@@ -39,6 +40,22 @@ def _random_engine_public_snapshot(settings: Any) -> dict[str, Any]:
         "traffic_percent": traffic,
         # Process dual-run circuit (same shape as /healthz modules.random_engine.circuit).
         "circuit": engine_circuit_snapshot(),
+    }
+
+
+def _image_edge_public_snapshot(settings: Any) -> dict[str, Any]:
+    """Local Image Edge readiness for public /status (config only; no secrets / no edge probe)."""
+    enabled_flag = bool(getattr(settings, "image_edge_enabled", False)) if settings is not None else False
+    cfg = load_image_edge_config_from_settings(settings) if settings is not None else None
+    if cfg is not None:
+        base_url_count = len(cfg.base_urls)
+    else:
+        raw_bases = list(getattr(settings, "image_edge_base_urls", None) or []) if settings is not None else []
+        base_url_count = len(raw_bases)
+    return {
+        "enabled_flag": enabled_flag,
+        "ready": cfg is not None,
+        "base_url_count": int(base_url_count),
     }
 
 
@@ -138,6 +155,18 @@ def _build_status_html(
         eng_chip = f"dual-run: off · circuit {eng_state}"
     else:
         eng_chip = f"dual-run: not configured · circuit {eng_state}"
+
+    # Image Edge readiness chip (config only; same shape as /healthz modules.image_edge).
+    edge = payload.get("image_edge") if isinstance(payload.get("image_edge"), dict) else {}
+    edge_ready = bool(edge.get("ready"))
+    edge_flag = bool(edge.get("enabled_flag"))
+    edge_bases = _as_nonneg_stat(edge.get("base_url_count"))
+    if edge_ready:
+        edge_chip = f"image-edge: ready · bases {edge_bases}"
+    elif edge_flag:
+        edge_chip = f"image-edge: not ready · flag on · bases {edge_bases}"
+    else:
+        edge_chip = f"image-edge: off · bases {edge_bases}"
 
     json_url = u("/status.json")
     docs_url = u("/docs")
@@ -397,6 +426,7 @@ def _build_status_html(
         <a class="chip" href="{docs_url}"><strong>/docs</strong> 使用文档</a>
         <a class="chip" href="{wtf_url}"><strong>/wtf</strong> 瀑布流</a>
         <span class="chip" title="process-local dual-run circuit (same as /healthz modules.random_engine.circuit; no outbound probe)">{eng_chip}</span>
+        <span class="chip" title="Image Edge config readiness (same as /healthz modules.image_edge; no secrets / no outbound edge probe)">{edge_chip}</span>
       </div>
     </div>
 
@@ -547,6 +577,8 @@ async def status_json(request: Request) -> JSONResponse:
 
     # Local dual-run circuit (same fields as /healthz modules.random_engine; no outbound probe).
     payload["random_engine"] = _random_engine_public_snapshot(settings)
+    # Image Edge config readiness (same fields as /healthz modules.image_edge; no secrets / probe).
+    payload["image_edge"] = _image_edge_public_snapshot(settings)
 
     try:
         payload.update(await _query_gallery_stats(engine))
@@ -580,6 +612,7 @@ async def status_page(request: Request) -> HTMLResponse:
 
     # Local dual-run circuit for HTML chip + DATA payload (no outbound probe).
     payload["random_engine"] = _random_engine_public_snapshot(settings)
+    payload["image_edge"] = _image_edge_public_snapshot(settings)
 
     try:
         payload.update(await _query_gallery_stats(engine))

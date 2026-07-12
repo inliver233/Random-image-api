@@ -13,7 +13,10 @@ router = APIRouter()
 @router.get(
     "/version",
     summary="Build version metadata",
-    description="Public build info (`version`, `build_time`, `git_commit` env). No catalog dependency.",
+    description=(
+        "Public build info (`version`, `build_time`, `git_commit` env). "
+        "Middleware-exempt even when `PUBLIC_API_KEY_REQUIRED` is on (same class as `/healthz`)."
+    ),
 )
 async def version(request: Request) -> Any:
     return public_ok_json(
