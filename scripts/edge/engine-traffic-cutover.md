@@ -13,12 +13,15 @@ Ops-only progressive dual-run for Go `random-engine`. Python SQLite pick remains
    - Admin → 维护工具 → Random Engine → 推送全量快照
    - or `POST /admin/api/maintenance/random-engine/snapshot`
    - `GET /admin/api/maintenance/random-engine` → `index_empty=false`, `ready_for_traffic` ok
+   - **ENGINE-1 large catalog:** BFF builds snapshot with keyset pages (`list_enabled_images` + `after_id`, default page 2000) and tag maps chunked at 900 IN binds — safe for ~62万 rows without single giant query.
 4. Optional filter parity:
    - `POST /admin/api/maintenance/random-engine/compare-filters`
 5. **Secrets**
    - Prefer `RANDOM_ENGINE_SECRET` on engine + BFF (same value).
    - **Prod:** if `RANDOM_ENGINE_ENABLED=true`, `RANDOM_ENGINE_SECRET` is **required** at settings load.
 6. Circuit closed: `modules.random_engine.circuit.state=closed` on `/healthz` / admin.
+
+**Default remains off:** compose may set `RANDOM_ENGINE_URL`, but `RANDOM_ENGINE_ENABLED` stays false and traffic% ramp is ops-only (this handbook). Code is cutover-ready; production flip is not automatic.
 
 ## Flags (default-off cutover)
 

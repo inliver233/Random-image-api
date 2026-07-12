@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 # Keep event batches modest for worker/admin best-effort publish.
 _ENGINE_EVENT_CHUNK = 200
 _ENGINE_EVENTS_TIMEOUT_S = 8.0
+# ENGINE-1: keyset page size when building full snapshot (tags mapped per page; avoids
+# loading entire enabled catalog + giant IN lists in one go on 62万-row galleries).
+_ENGINE_SNAPSHOT_PAGE = 2000
 
 
 def image_row_to_engine_payload(im: Any, *, tag_names: list[str] | None = None) -> dict[str, Any]:
@@ -115,19 +118,42 @@ async def build_engine_snapshot_payload(
     limit: int | None = None,
     catalog: CatalogStore | None = None,
     tag_store: TagStore | None = None,
+    page_size: int | None = None,
 ) -> dict[str, Any]:
-    """Build a full snapshot of enabled images + tag names for the Go engine."""
+    """Build a full snapshot of enabled images + tag names for the Go engine.
+
+    ENGINE-1: walks enabled images with keyset pagination (``after_id``) and maps
+    tags per page (IN lists already chunked at 900). Optional ``limit`` still caps
+    total rows for tests/partial warm.
+    """
     store = resolve_catalog_store(catalog)
     tags = resolve_tag_store(tag_store)
-    images = await store.list_enabled_images(session, limit=limit)
-    image_ids = [int(im.id) for im in images]
-    tag_names_by_image = await tags.map_tag_names_by_image_ids(session, image_ids=image_ids)
+    page = int(page_size) if page_size is not None and int(page_size) > 0 else _ENGINE_SNAPSHOT_PAGE
+    if page < 1:
+        page = _ENGINE_SNAPSHOT_PAGE
+    total_cap = int(limit) if limit is not None and int(limit) > 0 else None
 
     payload_images: list[dict[str, Any]] = []
-    for im in images:
-        payload_images.append(
-            image_row_to_engine_payload(im, tag_names=tag_names_by_image.get(int(im.id), []))
-        )
+    after_id: int | None = None
+    while True:
+        remaining = None if total_cap is None else max(0, total_cap - len(payload_images))
+        if remaining is not None and remaining == 0:
+            break
+        fetch_n = page if remaining is None else min(page, remaining)
+        batch = await store.list_enabled_images(session, limit=fetch_n, after_id=after_id)
+        if not batch:
+            break
+        image_ids = [int(im.id) for im in batch]
+        tag_names_by_image = await tags.map_tag_names_by_image_ids(session, image_ids=image_ids)
+        for im in batch:
+            payload_images.append(
+                image_row_to_engine_payload(im, tag_names=tag_names_by_image.get(int(im.id), []))
+            )
+        after_id = int(batch[-1].id)
+        if len(batch) < fetch_n:
+            break
+        if total_cap is not None and len(payload_images) >= total_cap:
+            break
     return {"images": payload_images, "count": len(payload_images)}
 
 

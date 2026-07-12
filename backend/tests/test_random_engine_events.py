@@ -7,6 +7,7 @@ from app.core.config import load_settings
 from app.core.random_engine_client import engine_apply_events
 from app.core.random_engine_sync import (
     build_delete_events,
+    build_engine_snapshot_payload,
     build_upsert_events,
     image_row_to_engine_payload,
     maybe_publish_engine_deletes,
@@ -63,6 +64,97 @@ def test_build_upsert_and_delete_events() -> None:
         {"type": "image_deleted", "image_id": 1},
         {"type": "image_deleted", "image_id": 2},
     ]
+
+
+def test_build_engine_snapshot_payload_keyset_pages(monkeypatch: Any) -> None:
+    """ENGINE-1: full snapshot walks list_enabled_images with after_id pages."""
+
+    class _Im:
+        def __init__(self, i: int) -> None:
+            self.id = i
+            self.illust_id = i
+            self.page_index = 0
+            self.ext = "jpg"
+            self.status = 1
+            self.random_key = 0.1
+            self.width = 1
+            self.height = 1
+            self.orientation = 1
+            self.x_restrict = 0
+            self.ai_type = 0
+            self.illust_type = 0
+            self.user_id = 1
+            self.user_name = "u"
+            self.title = "t"
+            self.created_at_pixiv = None
+            self.added_at = None
+            self.bookmark_count = 0
+            self.view_count = 0
+            self.comment_count = 0
+            self.original_url = "https://i.pximg.net/a.jpg"
+            self.last_fail_at = None
+            self.last_error_code = None
+
+    all_ids = [1, 2, 3, 4, 5]
+    calls: list[dict[str, Any]] = []
+
+    class _Store:
+        async def list_enabled_images(
+            self, _session: Any, *, limit: int | None = None, after_id: int | None = None
+        ) -> list[_Im]:
+            calls.append({"limit": limit, "after_id": after_id})
+            start = 0
+            if after_id is not None:
+                for idx, i in enumerate(all_ids):
+                    if i > int(after_id):
+                        start = idx
+                        break
+                else:
+                    return []
+            batch = all_ids[start:]
+            if limit is not None and int(limit) > 0:
+                batch = batch[: int(limit)]
+            return [_Im(i) for i in batch]
+
+        async def get_images_by_ids_any_status(self, *_a: Any, **_k: Any) -> list[Any]:
+            return []
+
+        async def get_images_by_illust_id(self, *_a: Any, **_k: Any) -> list[Any]:
+            return []
+
+    class _Tags:
+        async def map_tag_names_by_image_ids(
+            self, _session: Any, *, image_ids: list[int]
+        ) -> dict[int, list[str]]:
+            return {int(i): [f"t{i}"] for i in image_ids}
+
+    async def _run() -> None:
+        built = await build_engine_snapshot_payload(
+            None,  # type: ignore[arg-type]
+            catalog=_Store(),  # type: ignore[arg-type]
+            tag_store=_Tags(),  # type: ignore[arg-type]
+            page_size=2,
+        )
+        assert built["count"] == 5
+        assert [im["id"] for im in built["images"]] == all_ids
+        assert [im["tag_names"] for im in built["images"]] == [["t1"], ["t2"], ["t3"], ["t4"], ["t5"]]
+        # Three full pages of 2 then short final page of 1 (or 3 pages if last is size 1).
+        assert len(calls) >= 3
+        assert calls[0]["after_id"] is None
+        assert calls[1]["after_id"] == 2
+        assert calls[2]["after_id"] == 4
+
+        limited = await build_engine_snapshot_payload(
+            None,  # type: ignore[arg-type]
+            catalog=_Store(),  # type: ignore[arg-type]
+            tag_store=_Tags(),  # type: ignore[arg-type]
+            page_size=2,
+            limit=3,
+        )
+        assert limited["count"] == 3
+        assert [im["id"] for im in limited["images"]] == [1, 2, 3]
+
+    asyncio.run(_run())
 
 
 def test_engine_apply_events_empty() -> None:

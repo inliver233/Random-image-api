@@ -117,6 +117,7 @@ class CatalogStore(Protocol):
         session: AsyncSession,
         *,
         limit: int | None = None,
+        after_id: int | None = None,
     ) -> list[Image]: ...
 
     async def map_image_ids_by_illust_page(
@@ -334,8 +335,9 @@ class SqliteCatalogStore:
         session: AsyncSession,
         *,
         limit: int | None = None,
+        after_id: int | None = None,
     ) -> list[Image]:
-        return await list_enabled_images(session, limit=limit)
+        return await list_enabled_images(session, limit=limit, after_id=after_id)
 
     async def map_image_ids_by_illust_page(
         self,

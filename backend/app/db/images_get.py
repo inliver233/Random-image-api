@@ -130,9 +130,21 @@ async def get_images_by_illust_id(session: AsyncSession, *, illust_id: int) -> l
     )
 
 
-async def list_enabled_images(session: AsyncSession, *, limit: int | None = None) -> list[Image]:
-    """Load status=1 images ordered by id ascending (engine full snapshot)."""
-    stmt = select(Image).where(Image.status == 1).order_by(Image.id.asc())
+async def list_enabled_images(
+    session: AsyncSession,
+    *,
+    limit: int | None = None,
+    after_id: int | None = None,
+) -> list[Image]:
+    """Load status=1 images ordered by id ascending (engine full snapshot).
+
+    ENGINE-1: optional ``after_id`` keyset cursor for large-catalog paging
+    (id > after_id). Callers stream pages instead of materializing 62万 rows at once.
+    """
+    stmt = select(Image).where(Image.status == 1)
+    if after_id is not None and int(after_id) > 0:
+        stmt = stmt.where(Image.id > int(after_id))
+    stmt = stmt.order_by(Image.id.asc())
     if limit is not None and int(limit) > 0:
         stmt = stmt.limit(int(limit))
     return list((await session.execute(stmt)).scalars().all())

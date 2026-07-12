@@ -554,6 +554,11 @@ def test_sqlite_catalog_store_engine_loads(tmp_path: Path) -> None:
             assert [int(r.id) for r in enabled] == [int(ok.id), int(other.id)]
             limited = await store.list_enabled_images(session, limit=1)
             assert [int(r.id) for r in limited] == [int(ok.id)]
+            # ENGINE-1 keyset: after first enabled id returns only later rows.
+            after_first = await store.list_enabled_images(
+                session, after_id=int(ok.id)
+            )
+            assert [int(r.id) for r in after_first] == [int(other.id)]
         await engine.dispose()
 
     asyncio.run(_run())
