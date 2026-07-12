@@ -32,6 +32,7 @@ class _FakeImage:
         self.user_name = "u"
         self.title = "t"
         self.created_at_pixiv = "2020-01-01T00:00:00Z"
+        self.added_at = "2020-02-01T00:00:00Z"
         self.bookmark_count = 1
         self.view_count = 2
         self.comment_count = 3
@@ -47,6 +48,8 @@ def test_image_row_to_engine_payload_shape() -> None:
     assert payload["tag_names"] == ["foo", "bar"]
     assert payload["status"] == 1
     assert payload["random_key"] == 0.42
+    assert payload["added_at"] == "2020-02-01T00:00:00Z"
+    assert payload["created_at_pixiv"] == "2020-01-01T00:00:00Z"
 
 
 def test_build_upsert_and_delete_events() -> None:

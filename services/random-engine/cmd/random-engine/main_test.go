@@ -412,3 +412,37 @@ func TestQualityZeroMultiplierSkipped(t *testing.T) {
 		t.Fatal("expected zero AI multiplier to skip candidate")
 	}
 }
+
+func TestQualityFreshnessFallsBackToAddedAt(t *testing.T) {
+	// Python score_image_with_time_boosts uses added_at when created_at_pixiv is missing.
+	bm, vw := 0, 0
+	// ~10 days old via added_at only
+	added := time.Now().UTC().Add(-10 * 24 * time.Hour).Format(time.RFC3339)
+	im := indexImage{BookmarkCount: &bm, ViewCount: &vw, AddedAt: &added}
+	weights := map[string]float64{
+		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
+		"bookmark_rate": 0, "freshness": 1, "bookmark_velocity": 0,
+	}
+	logit, dbg, ok := qualityLogit(im, weights, map[string]float64{}, 10, 2, 1, nil, nil, 0, 0)
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	want := -10.0 / 10.0 // -age/half_life
+	if math.Abs(logit-want) > 0.05 { // allow clock skew
+		t.Fatalf("freshness from added_at want ~%v got %v dbg=%v", want, logit, dbg)
+	}
+	// Velocity must NOT use added_at fallback when created_at_pixiv is nil.
+	weightsVel := map[string]float64{
+		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
+		"bookmark_rate": 0, "freshness": 0, "bookmark_velocity": 1,
+	}
+	bm2 := 10
+	im.BookmarkCount = &bm2
+	logitVel, _, ok := qualityLogit(im, weightsVel, map[string]float64{}, 10, 2, 1, nil, nil, 0, 0)
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if math.Abs(logitVel) > 1e-9 {
+		t.Fatalf("velocity should be 0 without created_at_pixiv, got %v", logitVel)
+	}
+}

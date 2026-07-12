@@ -304,6 +304,8 @@ components:
         user_name: { type: string, nullable: true }
         title: { type: string, nullable: true }
         created_at_pixiv: { type: string, nullable: true }
+        # Freshness falls back to added_at when created_at_pixiv is missing (velocity does not).
+        added_at: { type: string, nullable: true }
         bookmark_count: { type: integer, nullable: true }
         view_count: { type: integer, nullable: true }
         comment_count: { type: integer, nullable: true }

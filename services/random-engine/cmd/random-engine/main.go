@@ -46,6 +46,7 @@ type indexImage struct {
 	UserName       *string  `json:"user_name"`
 	Title          *string  `json:"title"`
 	CreatedAtPixiv *string  `json:"created_at_pixiv"`
+	AddedAt        *string  `json:"added_at"`
 	BookmarkCount  *int     `json:"bookmark_count"`
 	ViewCount      *int     `json:"view_count"`
 	CommentCount   *int     `json:"comment_count"`
@@ -784,16 +785,22 @@ func qualityLogit(im indexImage, weights, multipliers map[string]float64, halfLi
 		rate = bm / vw
 	}
 
-	age := ageDaysFromPixiv(im.CreatedAtPixiv)
+	// Freshness: Python falls back to added_at when created_at_pixiv missing.
+	// Velocity: Python uses created_at_pixiv only (no added_at fallback).
+	ageFresh := ageDaysFromPixiv(im.CreatedAtPixiv)
+	if ageFresh == nil {
+		ageFresh = ageDaysFromPixiv(im.AddedAt)
+	}
+	ageVel := ageDaysFromPixiv(im.CreatedAtPixiv)
 	// Align Python score_image_with_time_boosts freshness: -age/half_life (not exp half-life).
 	fresh := 0.0
-	if age != nil && halfLifeDays > 0 {
-		fresh = -(*age) / halfLifeDays
+	if ageFresh != nil && halfLifeDays > 0 {
+		fresh = -(*ageFresh) / halfLifeDays
 	}
 	vel := 0.0
-	if age != nil {
+	if ageVel != nil {
 		// Python: denom = age + smooth; log1p(bm / max(1.0, denom)).
-		den := *age + math.Max(0.0, velSmooth)
+		den := *ageVel + math.Max(0.0, velSmooth)
 		if den < 1.0 {
 			den = 1.0
 		}

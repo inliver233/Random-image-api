@@ -44,6 +44,7 @@ def image_row_to_engine_payload(im: Any, *, tag_names: list[str] | None = None) 
         "user_name": im.user_name,
         "title": im.title,
         "created_at_pixiv": im.created_at_pixiv,
+        "added_at": getattr(im, "added_at", None),
         "bookmark_count": im.bookmark_count,
         "view_count": im.view_count,
         "comment_count": im.comment_count,
