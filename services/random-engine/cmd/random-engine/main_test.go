@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
-	"math"
 	"testing"
 	"time"
 )
@@ -19,9 +19,33 @@ func testMux(st *engineState) *http.ServeMux {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		st.mu.RLock()
 		defer st.mu.RUnlock()
-		writeJSON(w, 200, healthResponse{OK: true, Service: "random-engine", IndexSize: len(st.byKey), SnapshotRevision: st.revision})
+		writeJSON(w, 200, healthResponse{
+			OK: true, Service: "random-engine", Ready: st.ready, IndexSize: len(st.byKey),
+			SnapshotRevision: st.snapshotRevision, SnapshotManifestHash: st.snapshotManifestHash,
+			CurrentStateHash: st.currentStateHash, StateVersion: st.stateVersion,
+		})
 	})
 	return mux
+}
+
+func addSnapshotManifest(t *testing.T, st *engineState, body map[string]any) {
+	t.Helper()
+	raw, err := json.Marshal(body["images"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var images []indexImage
+	if err := json.Unmarshal(raw, &images); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := snapshotContentHash(images, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body["complete"] = true
+	body["expected_count"] = len(images)
+	body["content_hash"] = hash
+	body["base_state_version"] = st.stateVersion
 }
 
 func seedSnapshot(t *testing.T, mux *http.ServeMux, st *engineState) {
@@ -32,9 +56,9 @@ func seedSnapshot(t *testing.T, mux *http.ServeMux, st *engineState) {
 			{"id": 1, "illust_id": 100, "page_index": 0, "ext": "jpg", "status": 1, "random_key": 0.1, "x_restrict": 0, "bookmark_count": 10, "view_count": 100, "tag_names": []string{"cat"}},
 			{"id": 2, "illust_id": 200, "page_index": 0, "ext": "png", "status": 1, "random_key": 0.5, "x_restrict": 1, "bookmark_count": 50, "view_count": 200, "tag_names": []string{"dog"}},
 			{"id": 3, "illust_id": 300, "page_index": 0, "ext": "jpg", "status": 1, "random_key": 0.9, "x_restrict": 0, "bookmark_count": 5, "view_count": 50, "tag_names": []string{"cat", "cute"}},
-			{"id": 4, "illust_id": 400, "page_index": 0, "ext": "jpg", "status": 2, "random_key": 0.2, "x_restrict": 0, "bookmark_count": 99, "view_count": 999, "tag_names": []string{"cat"}},
 		},
 	}
+	addSnapshotManifest(t, st, body)
 	raw, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/snapshot", bytes.NewReader(raw))
 	rr := httptest.NewRecorder()
@@ -154,6 +178,9 @@ func TestFilterCountAndEvents(t *testing.T) {
 	}
 	mux := testMux(st)
 	seedSnapshot(t, mux, st)
+	verifiedRevision := st.snapshotRevision
+	verifiedManifestHash := st.snapshotManifestHash
+	previousStateHash := st.currentStateHash
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/filter-count", bytes.NewBufferString(`{"filters":{"r18":0,"r18_strict":1}}`))
 	rr := httptest.NewRecorder()
@@ -192,6 +219,12 @@ func TestFilterCountAndEvents(t *testing.T) {
 	if len(st.byKey) != 2 {
 		t.Fatalf("after delete index want 2 got %d", len(st.byKey))
 	}
+	if st.snapshotRevision != verifiedRevision || st.snapshotManifestHash != verifiedManifestHash {
+		t.Fatal("event overwrote verified snapshot identity")
+	}
+	if st.currentStateHash == previousStateHash {
+		t.Fatal("event did not advance current state hash")
+	}
 
 	req = httptest.NewRequest(http.MethodPost, "/v1/admin/filter-count", bytes.NewBufferString(`{"filters":{"r18":0,"r18_strict":1}}`))
 	rr = httptest.NewRecorder()
@@ -201,6 +234,161 @@ func TestFilterCountAndEvents(t *testing.T) {
 	}
 	if int(fc["filtered"].(float64)) != 1 {
 		t.Fatalf("after delete filtered want 1 got %#v", fc["filtered"])
+	}
+}
+
+func TestSnapshotManifestRejectsPartialAndEmptyStaysNotReady(t *testing.T) {
+	st := &engineState{
+		revision: "empty", currentStateHash: emptySnapshotContentHash(),
+		byID: map[int64]int{}, tagIndex: map[string]map[int64]struct{}{},
+	}
+	mux := testMux(st)
+	partial := map[string]any{
+		"revision": "partial",
+		"complete": false,
+		"images": []map[string]any{
+			{"id": 1, "illust_id": 10, "page_index": 0, "ext": "jpg", "status": 1, "random_key": 0.1},
+		},
+	}
+	addSnapshotManifest(t, st, partial)
+	partial["complete"] = false
+	raw, _ := json.Marshal(partial)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/admin/snapshot", bytes.NewReader(raw)))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("partial snapshot want 400 got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if st.ready || len(st.byKey) != 0 {
+		t.Fatalf("partial snapshot changed readiness/index: ready=%v size=%d", st.ready, len(st.byKey))
+	}
+	eventRaw, _ := json.Marshal(map[string]any{"events": []map[string]any{{
+		"type":  "image_upserted",
+		"image": map[string]any{"id": 7, "illust_id": 70, "page_index": 0, "ext": "jpg", "status": 1, "random_key": 0.7},
+	}}})
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/admin/events", bytes.NewReader(eventRaw)))
+	if rr.Code != http.StatusOK || len(st.byKey) != 1 || st.ready {
+		t.Fatalf("event-only index must remain not ready: code=%d ready=%v size=%d", rr.Code, st.ready, len(st.byKey))
+	}
+
+	empty := map[string]any{"revision": "empty-complete", "images": []map[string]any{}}
+	addSnapshotManifest(t, st, empty)
+	raw, _ = json.Marshal(empty)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/admin/snapshot", bytes.NewReader(raw)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("empty complete snapshot want 200 got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if st.ready || !st.initialized || len(st.byKey) != 0 {
+		t.Fatalf("empty snapshot must initialize but stay not ready: initialized=%v ready=%v size=%d", st.initialized, st.ready, len(st.byKey))
+	}
+}
+
+func TestStaleSnapshotCannotOverwriteNewerEvent(t *testing.T) {
+	st := &engineState{
+		revision: "empty", currentStateHash: emptySnapshotContentHash(),
+		byID: map[int64]int{}, tagIndex: map[string]map[int64]struct{}{},
+	}
+	mux := testMux(st)
+	seedSnapshot(t, mux, st)
+	verifiedRevision := st.snapshotRevision
+	verifiedManifestHash := st.snapshotManifestHash
+
+	stale := map[string]any{
+		"revision": "stale-r2",
+		"images": []map[string]any{
+			{"id": 1, "illust_id": 100, "page_index": 0, "ext": "jpg", "status": 1, "random_key": 0.1},
+			{"id": 2, "illust_id": 200, "page_index": 0, "ext": "png", "status": 1, "random_key": 0.5},
+			{"id": 3, "illust_id": 300, "page_index": 0, "ext": "jpg", "status": 1, "random_key": 0.9},
+		},
+	}
+	addSnapshotManifest(t, st, stale)
+
+	evRaw, _ := json.Marshal(map[string]any{"events": []map[string]any{{"type": "image_deleted", "image_id": 1}}})
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/admin/events", bytes.NewReader(evRaw)))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("event want 200 got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, exists := st.byID[1]; exists {
+		t.Fatal("delete event did not remove image 1")
+	}
+	if st.snapshotRevision != verifiedRevision || st.snapshotManifestHash != verifiedManifestHash {
+		t.Fatal("event overwrote verified snapshot identity")
+	}
+
+	raw, _ := json.Marshal(stale)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/admin/snapshot", bytes.NewReader(raw)))
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("stale snapshot want 409 got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if _, exists := st.byID[1]; exists {
+		t.Fatal("stale snapshot resurrected deleted image 1")
+	}
+	if st.revision == "stale-r2" {
+		t.Fatal("stale snapshot replaced revision")
+	}
+}
+
+func TestSnapshotManifestValidatesRevisionCountAndHash(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{name: "revision", mutate: func(body map[string]any) { body["revision"] = "" }},
+		{name: "count", mutate: func(body map[string]any) { body["expected_count"] = 2 }},
+		{name: "hash", mutate: func(body map[string]any) { body["content_hash"] = "deadbeef" }},
+		{name: "illust_id", mutate: func(body map[string]any) { body["images"].([]map[string]any)[0]["illust_id"] = 0 }},
+		{name: "page_index", mutate: func(body map[string]any) { body["images"].([]map[string]any)[0]["page_index"] = -1 }},
+		{name: "ext", mutate: func(body map[string]any) { body["images"].([]map[string]any)[0]["ext"] = "exe" }},
+		{name: "random_key", mutate: func(body map[string]any) { body["images"].([]map[string]any)[0]["random_key"] = 1.0 }},
+		{name: "status", mutate: func(body map[string]any) { body["images"].([]map[string]any)[0]["status"] = 2 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &engineState{
+				revision: "empty", currentStateHash: emptySnapshotContentHash(),
+				byID: map[int64]int{}, tagIndex: map[string]map[int64]struct{}{},
+			}
+			mux := testMux(st)
+			body := map[string]any{
+				"revision": "valid",
+				"images": []map[string]any{
+					{"id": 9, "illust_id": 90, "page_index": 0, "ext": "jpg", "status": 1, "random_key": 0.9},
+				},
+			}
+			addSnapshotManifest(t, st, body)
+			tc.mutate(body)
+			raw, _ := json.Marshal(body)
+			rr := httptest.NewRecorder()
+			mux.ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/v1/admin/snapshot", bytes.NewReader(raw)))
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("invalid %s manifest want 400 got %d body=%s", tc.name, rr.Code, rr.Body.String())
+			}
+			if st.initialized || st.ready || st.stateVersion != 0 {
+				t.Fatalf("invalid manifest changed state: initialized=%v ready=%v version=%d", st.initialized, st.ready, st.stateVersion)
+			}
+		})
+	}
+}
+
+func TestSnapshotContentHashGolden(t *testing.T) {
+	name := "作者"
+	title := "<猫>"
+	hash, err := snapshotContentHash([]indexImage{
+		{ID: 2, IllustID: 20, PageIndex: 1, Ext: "png", Status: 1, RandomKey: 0.75, UserName: &name, Title: &title, TagNames: []string{"猫", "blue"}},
+		{ID: 1, IllustID: 10, PageIndex: 0, Ext: "jpg", Status: 1, RandomKey: 0.25, TagNames: []string{}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const expected = "e247ea0d8ba8edffe3d4bd63e3f9475841e17c88b7bc8861e96fc668d41fd0a2"
+	if hash != expected {
+		t.Fatalf("hash want %s got %s", expected, hash)
+	}
+	valid := indexImage{ID: 1, IllustID: 10, PageIndex: 0, Ext: "jpg", Status: 1, RandomKey: 0.25}
+	if _, err := snapshotContentHash([]indexImage{valid, valid}, nil); err == nil {
+		t.Fatal("duplicate image ids must be rejected")
 	}
 }
 
@@ -220,7 +408,9 @@ func TestQualitySamplesCap(t *testing.T) {
 		tagIndex: map[string]map[int64]struct{}{},
 	}
 	mux := testMux(st)
-	raw, _ := json.Marshal(map[string]any{"revision": "big", "images": imgs})
+	body := map[string]any{"revision": "big", "images": imgs}
+	addSnapshotManifest(t, st, body)
+	raw, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/snapshot", bytes.NewReader(raw))
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
@@ -266,6 +456,7 @@ func TestClientDedupKeyShortWindow(t *testing.T) {
 			{"id": 22, "illust_id": 2200, "page_index": 0, "ext": "png", "status": 1, "random_key": 0.9, "x_restrict": 0, "bookmark_count": 1, "view_count": 1, "tag_names": []string{}},
 		},
 	}
+	addSnapshotManifest(t, st, body)
 	raw, _ := json.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/v1/admin/snapshot", bytes.NewReader(raw))
 	rr := httptest.NewRecorder()
@@ -324,11 +515,11 @@ func TestQualityBookmarkRatePerMille(t *testing.T) {
 	bm := 10
 	vw := 100
 	im := indexImage{BookmarkCount: &bm, ViewCount: &vw}
-logit, _, _ := qualityLogit(im, map[string]float64{
+	logit, _, _ := qualityLogit(im, map[string]float64{
 		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
 		"bookmark_rate": 1, "freshness": 0, "bookmark_velocity": 0,
 	}, map[string]float64{}, 21, 2, 1, nil, nil, 0, 0)
-	want := math.Log1p((10.0/100.0)*1000.0) // log1p(100)
+	want := math.Log1p((10.0 / 100.0) * 1000.0) // log1p(100)
 	if math.Abs(logit-want) > 1e-9 {
 		t.Fatalf("bookmark_rate logit want %v got %v", want, logit)
 	}
@@ -344,7 +535,7 @@ func TestQualityTemperatureScalesScoreNotMultiplier(t *testing.T) {
 		"bookmark_rate": 1, "freshness": 0, "bookmark_velocity": 0,
 	}
 	mults := map[string]float64{"ai": 2, "non_ai": 1, "unknown_ai": 1}
-logit, dbg, _ := qualityLogit(im, weights, mults, 21, 2, 2, nil, nil, 0, 0)
+	logit, dbg, _ := qualityLogit(im, weights, mults, 21, 2, 2, nil, nil, 0, 0)
 	score := math.Log1p(100.0) // only bookmark_rate term
 	want := score/2.0 + math.Log(2.0)
 	if math.Abs(logit-want) > 1e-9 {
@@ -361,7 +552,7 @@ func TestQualityVelocityDenomFloor(t *testing.T) {
 		"bookmark": 0, "view": 0, "comment": 0, "pixels": 0,
 		"bookmark_rate": 0, "freshness": 0, "bookmark_velocity": 1,
 	}
-logit, dbg, _ := qualityLogit(im, weights, map[string]float64{}, 21, 0.1, 1, nil, nil, 0, 0)
+	logit, dbg, _ := qualityLogit(im, weights, map[string]float64{}, 21, 0.1, 1, nil, nil, 0, 0)
 	want := math.Log1p(10.0 / 1.0)
 	if math.Abs(logit-want) > 1e-6 {
 		t.Fatalf("velocity logit want %v got %v dbg=%v", want, logit, dbg)
@@ -427,7 +618,7 @@ func TestQualityFreshnessFallsBackToAddedAt(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ok")
 	}
-	want := -10.0 / 10.0 // -age/half_life
+	want := -10.0 / 10.0             // -age/half_life
 	if math.Abs(logit-want) > 0.05 { // allow clock skew
 		t.Fatalf("freshness from added_at want ~%v got %v dbg=%v", want, logit, dbg)
 	}

@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import logging
+import math
+import struct
 from typing import Any
 
 import httpx
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.core.config import Settings, load_settings
@@ -11,6 +17,7 @@ from app.core.random_delivery import resolve_catalog_store
 from app.core.random_engine_client import (
     engine_apply_events,
     engine_apply_snapshot,
+    engine_health,
     random_engine_base_url,
 )
 from app.db.catalog import CatalogStore
@@ -25,6 +32,140 @@ _ENGINE_EVENTS_TIMEOUT_S = 8.0
 # ENGINE-1: keyset page size when building full snapshot (tags mapped per page; avoids
 # loading entire enabled catalog + giant IN lists in one go on 62万-row galleries).
 _ENGINE_SNAPSHOT_PAGE = 2000
+_ENGINE_IMAGE_EXTS = frozenset({"jpg", "jpeg", "png", "gif", "webp", "zip"})
+
+
+def _snapshot_b64(value: Any) -> str | None:
+    if value is None:
+        return None
+    return base64.b64encode(str(value).encode("utf-8")).decode("ascii")
+
+
+def _snapshot_optional_int(value: Any) -> int | None:
+    return None if value is None else int(value)
+
+
+def engine_snapshot_content_hash(
+    images: list[dict[str, Any]],
+    *,
+    tag_postings: dict[str, list[int]] | None = None,
+) -> str:
+    """Hash the complete normalized Engine payload with a cross-language encoding."""
+    rows: list[list[Any]] = []
+    seen: set[int] = set()
+    for image in images:
+        try:
+            image_id = int(image.get("id"))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError("snapshot contains invalid image id") from exc
+        if image_id <= 0:
+            raise ValueError("snapshot contains invalid image id")
+        if image_id in seen:
+            raise ValueError("snapshot contains duplicate image id")
+        seen.add(image_id)
+        illust_id = int(image.get("illust_id"))
+        page_index = int(image.get("page_index"))
+        ext = str(image.get("ext") or "")
+        status = int(image.get("status"))
+        if illust_id <= 0:
+            raise ValueError("snapshot contains invalid illust_id")
+        if page_index < 0:
+            raise ValueError("snapshot contains invalid page_index")
+        if ext not in _ENGINE_IMAGE_EXTS:
+            raise ValueError("snapshot contains invalid ext")
+        if status != 1:
+            raise ValueError("snapshot contains disabled image")
+        random_key = float(image.get("random_key"))
+        if not math.isfinite(random_key) or random_key < 0 or random_key >= 1:
+            raise ValueError("snapshot contains invalid random_key")
+        tag_ids = sorted(int(tag_id) for tag_id in (image.get("tag_ids") or []))
+        if any(tag_id <= 0 for tag_id in tag_ids) or len(tag_ids) != len(set(tag_ids)):
+            raise ValueError("snapshot contains invalid tag_ids")
+        tag_names = sorted(str(name) for name in (image.get("tag_names") or []))
+        if any(not name or name.strip() != name for name in tag_names) or len(tag_names) != len(set(tag_names)):
+            raise ValueError("snapshot contains invalid tag_names")
+        rows.append(
+            [
+                image_id,
+                illust_id,
+                page_index,
+                _snapshot_b64(ext),
+                status,
+                struct.pack(">d", random_key).hex(),
+                _snapshot_optional_int(image.get("width")),
+                _snapshot_optional_int(image.get("height")),
+                _snapshot_optional_int(image.get("orientation")),
+                _snapshot_optional_int(image.get("x_restrict")),
+                _snapshot_optional_int(image.get("ai_type")),
+                _snapshot_optional_int(image.get("illust_type")),
+                _snapshot_optional_int(image.get("user_id")),
+                _snapshot_b64(image.get("user_name")),
+                _snapshot_b64(image.get("title")),
+                _snapshot_b64(image.get("created_at_pixiv")),
+                _snapshot_b64(image.get("added_at")),
+                _snapshot_optional_int(image.get("bookmark_count")),
+                _snapshot_optional_int(image.get("view_count")),
+                _snapshot_optional_int(image.get("comment_count")),
+                _snapshot_b64(image.get("original_url")),
+                [_snapshot_b64(name) for name in tag_names],
+                tag_ids,
+                _snapshot_b64(image.get("last_fail_at")),
+                _snapshot_b64(image.get("last_error_code")),
+            ]
+        )
+    rows.sort(key=lambda row: int(row[0]))
+
+    posting_rows: list[list[Any]] = []
+    for raw_name, raw_ids in (tag_postings or {}).items():
+        name = str(raw_name)
+        ids = sorted(int(image_id) for image_id in raw_ids)
+        if not name or name.strip() != name or len(ids) != len(set(ids)):
+            raise ValueError("snapshot contains invalid tag_postings")
+        if any(image_id not in seen for image_id in ids):
+            raise ValueError("snapshot tag_postings reference unknown image")
+        posting_rows.append([_snapshot_b64(name), ids])
+    posting_rows.sort(key=lambda row: str(row[0]))
+
+    encoded = json.dumps([rows, posting_rows], ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _snapshot_ack_matches(
+    result: dict[str, Any] | None,
+    *,
+    revision: str,
+    expected_count: int,
+    content_hash: str,
+    base_state_version: int,
+) -> bool:
+    if not isinstance(result, dict):
+        return False
+    expected_ready = int(expected_count) > 0
+    try:
+        return bool(
+            result.get("ok") is True
+            and str(result.get("revision") or "") == str(revision)
+            and int(result.get("index_size")) == int(expected_count)
+            and str(result.get("content_hash") or "") == str(content_hash)
+            and result.get("ready") is expected_ready
+            and int(result.get("state_version")) == int(base_state_version) + 1
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+async def _begin_consistent_snapshot_read(session: AsyncSession) -> None:
+    """Begin one explicit read snapshot for count plus every keyset page."""
+    bind = session.get_bind()
+    dialect = str(getattr(getattr(bind, "dialect", None), "name", "") or "").lower()
+    if dialect == "postgresql":
+        await session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
+        return
+    if dialect == "sqlite":
+        # Python 3.11 sqlite legacy transaction control does not BEGIN for SELECT.
+        await session.execute(text("BEGIN"))
+        return
+    await session.begin()
 
 
 def image_row_to_engine_payload(im: Any, *, tag_names: list[str] | None = None) -> dict[str, Any]:
@@ -128,6 +269,7 @@ async def build_engine_snapshot_payload(
     """
     store = resolve_catalog_store(catalog)
     tags = resolve_tag_store(tag_store)
+    authoritative_count = await store.count_enabled_images(session)
     page = int(page_size) if page_size is not None and int(page_size) > 0 else _ENGINE_SNAPSHOT_PAGE
     if page < 1:
         page = _ENGINE_SNAPSHOT_PAGE
@@ -154,7 +296,13 @@ async def build_engine_snapshot_payload(
             break
         if total_cap is not None and len(payload_images) >= total_cap:
             break
-    return {"images": payload_images, "count": len(payload_images)}
+    content_hash = engine_snapshot_content_hash(payload_images)
+    return {
+        "images": payload_images,
+        "count": len(payload_images),
+        "authoritative_count": int(authoritative_count),
+        "content_hash": content_hash,
+    }
 
 
 async def push_engine_snapshot(
@@ -171,21 +319,55 @@ async def push_engine_snapshot(
 ) -> dict[str, Any] | None:
     if limit is not None:
         raise ValueError("partial snapshot limits cannot be applied to the random engine")
+    revision = str(revision or "").strip()
+    if not revision:
+        raise ValueError("snapshot revision is required")
+    health = await engine_health(client, base_url, timeout_s=min(float(timeout_s), 2.0))
+    try:
+        base_state_version = int((health or {}).get("state_version"))
+    except (TypeError, ValueError):
+        logger.warning("random-engine snapshot preflight missing state_version")
+        return None
+    if base_state_version < 0:
+        logger.warning("random-engine snapshot preflight invalid state_version=%s", base_state_version)
+        return None
     Session = create_sessionmaker(engine)
     async with Session() as session:
+        await _begin_consistent_snapshot_read(session)
         built = await build_engine_snapshot_payload(
             session, limit=limit, catalog=catalog, tag_store=tag_store
         )
+    if int(built["count"]) != int(built["authoritative_count"]):
+        logger.warning(
+            "random-engine snapshot incomplete built=%s authoritative=%s",
+            built["count"],
+            built["authoritative_count"],
+        )
+        return None
     result = await engine_apply_snapshot(
         client,
         base_url,
         revision=revision,
         images=list(built["images"]),
+        complete=True,
+        expected_count=int(built["count"]),
+        content_hash=str(built["content_hash"]),
+        base_state_version=base_state_version,
         timeout_s=timeout_s,
         settings=settings,
     )
     if result is None:
         logger.warning("random-engine snapshot push failed revision=%s count=%s", revision, built["count"])
+        return None
+    if not _snapshot_ack_matches(
+        result,
+        revision=revision,
+        expected_count=int(built["count"]),
+        content_hash=str(built["content_hash"]),
+        base_state_version=base_state_version,
+    ):
+        logger.warning("random-engine snapshot acknowledgement mismatch revision=%s", revision)
+        return None
     return result
 
 
@@ -392,16 +574,40 @@ async def maybe_publish_engine_empty_snapshot(
         base, use_client, owned = await _resolve_publish_client(settings=settings, client=client)
         if not base or use_client is None:
             return None
+        health = await engine_health(use_client, base, timeout_s=2.0)
+        try:
+            base_state_version = int((health or {}).get("state_version"))
+        except (TypeError, ValueError):
+            logger.warning("random-engine empty snapshot preflight missing state_version")
+            return None
+        if base_state_version < 0:
+            logger.warning("random-engine empty snapshot preflight invalid state_version=%s", base_state_version)
+            return None
+        content_hash = engine_snapshot_content_hash([])
         result = await engine_apply_snapshot(
             use_client,
             base,
             revision=revision,
             images=[],
+            complete=True,
+            expected_count=0,
+            content_hash=content_hash,
+            base_state_version=base_state_version,
             timeout_s=30.0,
             settings=settings,
         )
         if result is None:
             logger.warning("random-engine empty snapshot after clear failed")
+            return None
+        if not _snapshot_ack_matches(
+            result,
+            revision=revision,
+            expected_count=0,
+            content_hash=content_hash,
+            base_state_version=base_state_version,
+        ):
+            logger.warning("random-engine empty snapshot acknowledgement mismatch")
+            return None
         return result
     except Exception as exc:
         logger.warning("random-engine empty snapshot error: %s", exc)

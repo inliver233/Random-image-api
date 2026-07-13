@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
@@ -148,6 +148,12 @@ async def list_enabled_images(
     if limit is not None and int(limit) > 0:
         stmt = stmt.limit(int(limit))
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def count_enabled_images(session: AsyncSession) -> int:
+    """Return the authoritative number of status=1 rows for snapshot validation."""
+    stmt = select(func.count()).select_from(Image).where(Image.status == 1)
+    return int((await session.execute(stmt)).scalar_one() or 0)
 
 
 async def map_image_ids_by_illust_page(

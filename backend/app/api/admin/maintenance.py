@@ -592,7 +592,7 @@ async def modular_ports_status(
         "`timeout_ms`) plus process circuit snapshot and optional outbound engine `/health` "
         "probe. `circuit` mirrors public `/status` / `/healthz` dual-run honesty "
         "(closed/half_open/open; fail-open to Python when open). "
-        "`ready_for_traffic` requires enabled + traffic>0 + healthy + non-empty index. "
+        "`ready_for_traffic` requires enabled + traffic>0 + a manifest-verified Engine `ready=true`. "
         "`cutover_warning` is operator-facing English (FE may localize)."
     ),
 )
@@ -624,6 +624,7 @@ async def random_engine_status(
         "health": None,
         "index_size": None,
         "index_empty": None,
+        "engine_ready": False,
         "ready_for_traffic": False,
         "cutover_warning": None,
         "circuit": circuit,
@@ -647,19 +648,29 @@ async def random_engine_status(
         except Exception:
             index_size = None
     payload["index_size"] = index_size
+    engine_ready = bool(isinstance(health, dict) and health.get("ready") is True)
+    payload["engine_ready"] = engine_ready
     if index_size is None:
         payload["index_empty"] = None if health is None else False
     else:
         payload["index_empty"] = index_size <= 0
-    # Safe progressive cutover: dual-run flag on, traffic > 0, healthy, non-empty index.
+    # Fail closed for old/partial Engine versions: index_size alone cannot prove that
+    # a complete manifest-verified snapshot has ever been committed.
     payload["ready_for_traffic"] = bool(
-        enabled and traffic_percent > 0 and health is not None and index_size is not None and index_size > 0
+        enabled
+        and traffic_percent > 0
+        and health is not None
+        and engine_ready
+        and index_size is not None
+        and index_size > 0
     )
     if enabled and traffic_percent > 0:
         if health is None:
             payload["cutover_warning"] = "engine unreachable while dual-run traffic enabled"
         elif index_size is not None and index_size <= 0:
             payload["cutover_warning"] = "engine index empty — push snapshot before cutover"
+        elif not engine_ready:
+            payload["cutover_warning"] = "engine index is not backed by a complete verified snapshot"
         elif str(circuit.get("state") or "") == "open":
             payload["cutover_warning"] = (
                 f"dual-run circuit open (~{float(circuit.get('open_remaining_s') or 0):.0f}s); picks fail-open to Python"

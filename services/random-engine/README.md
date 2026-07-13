@@ -56,7 +56,7 @@ Optional cutover — default **off** (Python SQLite pick remains primary):
 Admin:
 
 - `GET /admin/api/maintenance/random-engine` — health + traffic_percent / timeout_ms + `index_size` / `index_empty` / `ready_for_traffic` / `cutover_warning` + process dual-run **`circuit`** snapshot (`state` / `consecutive_failures` / `open_remaining_s` / thresholds)
-- `POST /admin/api/maintenance/random-engine/snapshot` — push full enabled index from SQLite
+- `POST /admin/api/maintenance/random-engine/snapshot` — push a full enabled index through the manifest/CAS protocol
 - `POST /admin/api/maintenance/random-engine/compare-filters` — SQLite vs engine filter cardinality (statistical dual-run; body optional public-style filters, default r18=0)
 
 Public ops (no secrets, no outbound engine probe):
@@ -68,7 +68,15 @@ Engine-internal (ops / BFF):
 
 - `POST /v1/admin/filter-count` — `{ "filters": {…} }` → `{ filtered, index_size, revision }`
 
-After starting the engine, push a snapshot before enabling the flag, or picks will fall through to Python.
+After starting the engine, push a snapshot before enabling the flag, or picks will fall through to Python. A non-empty event-only index is deliberately **not ready**.
+
+### Snapshot safety protocol
+
+Formal `/v1/admin/snapshot` requests require `complete=true`, a non-empty `revision`, exact `expected_count`, a full canonical `content_hash`, and `base_state_version` read from `/healthz` before the database read begins. Python reads the authoritative count and every keyset page in one explicit consistent transaction. Go validates required image fields, count, duplicate ids, tags, the complete cross-language payload hash, then commits only when the state version still equals the preflight token. A newer event causes `409 STALE_SNAPSHOT`; the old snapshot never replaces it.
+
+`/healthz` separates the last verified `snapshot_revision` / `snapshot_manifest_hash` from `current_state_hash` / `state_version`. Events advance only current state. `ready=true` requires a verified complete snapshot and a non-empty current index; an accepted empty snapshot clears the index but remains not ready.
+
+The canonical hash is SHA-256 of a fixed JSON array representation of all Engine image fields and tag postings. Strings are UTF-8 base64, floats are 16-character IEEE-754 bit hex, nullable fields remain `null`, images/tags/postings are sorted, and duplicate or invalid values are rejected. Python and Go share a Unicode/NULL/float golden vector in their tests.
 
 ### BFF process dual-run circuit
 
@@ -78,7 +86,7 @@ Process-local soft circuit in `random_engine_client` (not the Go service): after
 
 | Engine `code` | When | BFF `engine_status` metric label |
 | --- | --- | --- |
-| `INDEX_NOT_READY` | in-memory index size 0 (no snapshot yet) | `empty_index` |
+| `INDEX_NOT_READY` | no verified complete snapshot, or current index is empty | `empty_index` |
 | `NO_MATCH` | filters excluded all candidates | `no_match` |
 | `OK` + items | successful pick | `ok` (PickItem DTO delivery; catalog rehydrate only if item incomplete) |
 
@@ -121,7 +129,7 @@ Failures are logged and never fail the job/API. Python pick remains correct with
 1. In-memory index sorted by `random_key` (ring sample)
 2. Filters aligned with Python `random_pick` (r18, tags, geometry, popularity, fail cooldown, …)
 3. `strategy=random` and `strategy=quality` (weighted / best; samples hard-capped at 64)
-4. `POST /v1/admin/snapshot` full replace
+4. Manifest-verified, generation-fenced `POST /v1/admin/snapshot` full replace
 5. `POST /v1/admin/events` incremental rebuild
 6. `POST /v1/admin/filter-count` dual-run cardinality
 7. BFF feature flag + traffic % cutover + admin snapshot / compare-filters

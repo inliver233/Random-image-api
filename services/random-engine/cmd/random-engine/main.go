@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"hash/fnv"
 	"log"
 	"math"
@@ -87,10 +90,14 @@ type pickResponse struct {
 }
 
 type healthResponse struct {
-	OK               bool   `json:"ok"`
-	Service          string `json:"service"`
-	IndexSize        int    `json:"index_size"`
-	SnapshotRevision string `json:"snapshot_revision"`
+	OK                   bool   `json:"ok"`
+	Service              string `json:"service"`
+	Ready                bool   `json:"ready"`
+	IndexSize            int    `json:"index_size"`
+	SnapshotRevision     string `json:"snapshot_revision"`
+	SnapshotManifestHash string `json:"snapshot_manifest_hash"`
+	CurrentStateHash     string `json:"current_state_hash"`
+	StateVersion         uint64 `json:"state_version"`
 }
 
 // Short-window per-client anti-repeat (process-local). Complements filters.exclude_image_ids.
@@ -181,6 +188,14 @@ func (s *clientDedupStore) record(key string, ids []int64) {
 type engineState struct {
 	mu       sync.RWMutex
 	revision string
+	// initialized is set only by a complete, manifest-verified snapshot. Events
+	// may update an initialized index, but can never turn a partial boot state ready.
+	initialized          bool
+	ready                bool
+	snapshotRevision     string
+	snapshotManifestHash string
+	currentStateHash     string
+	stateVersion         uint64
 	// sorted by random_key ascending for ring sampling
 	byKey []indexImage
 	// id -> index in byKey (rebuilt on snapshot)
@@ -198,10 +213,11 @@ func main() {
 	// Empty = open (dev/default-off dual-run); production compose should set a secret.
 	engineSecret := strings.TrimSpace(os.Getenv("RANDOM_ENGINE_SECRET"))
 	st := &engineState{
-		revision:    "empty",
-		byID:        map[int64]int{},
-		tagIndex:    map[string]map[int64]struct{}{},
-		clientDedup: newClientDedupStore(),
+		revision:         "empty",
+		currentStateHash: emptySnapshotContentHash(),
+		byID:             map[int64]int{},
+		tagIndex:         map[string]map[int64]struct{}{},
+		clientDedup:      newClientDedupStore(),
 	}
 
 	mux := http.NewServeMux()
@@ -209,10 +225,14 @@ func main() {
 		st.mu.RLock()
 		defer st.mu.RUnlock()
 		writeJSON(w, http.StatusOK, healthResponse{
-			OK:               true,
-			Service:          "random-engine",
-			IndexSize:        len(st.byKey),
-			SnapshotRevision: st.revision,
+			OK:                   true,
+			Service:              "random-engine",
+			Ready:                st.ready,
+			IndexSize:            len(st.byKey),
+			SnapshotRevision:     st.snapshotRevision,
+			SnapshotManifestHash: st.snapshotManifestHash,
+			CurrentStateHash:     st.currentStateHash,
+			StateVersion:         st.stateVersion,
 		})
 	})
 	mux.HandleFunc("/v1/pick", func(w http.ResponseWriter, r *http.Request) {
@@ -280,26 +300,45 @@ func handleSnapshot(w http.ResponseWriter, r *http.Request, st *engineState) {
 		return
 	}
 	var body struct {
-		Revision    string               `json:"revision"`
-		Images      []indexImage         `json:"images"`
-		TagPostings map[string][]int64   `json:"tag_postings"`
+		Revision         string             `json:"revision"`
+		Complete         bool               `json:"complete"`
+		ExpectedCount    *int               `json:"expected_count"`
+		ContentHash      string             `json:"content_hash"`
+		BaseStateVersion *uint64            `json:"base_state_version"`
+		Images           []indexImage       `json:"images"`
+		TagPostings      map[string][]int64 `json:"tag_postings"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
 
-	// Keep only enabled images (status == 1), matching Python Image.status == 1.
+	rev := strings.TrimSpace(body.Revision)
+	if rev == "" || !body.Complete || body.ExpectedCount == nil || body.BaseStateVersion == nil {
+		http.Error(w, "complete snapshot manifest required", http.StatusBadRequest)
+		return
+	}
+	if *body.ExpectedCount < 0 || len(body.Images) != *body.ExpectedCount {
+		http.Error(w, "snapshot count mismatch", http.StatusBadRequest)
+		return
+	}
+	calculatedHash, err := snapshotContentHash(body.Images, body.TagPostings)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(body.ContentHash), calculatedHash) {
+		http.Error(w, "snapshot content hash mismatch", http.StatusBadRequest)
+		return
+	}
+
+	// A formal snapshot contains enabled catalog rows only. Silently filtering a
+	// disabled row would make a non-empty partial index look complete and ready.
 	imgs := make([]indexImage, 0, len(body.Images))
 	for _, im := range body.Images {
-		if !isEnabledStatus(im.Status) {
-			continue
-		}
-		if im.RandomKey < 0 {
-			im.RandomKey = 0
-		}
-		if im.RandomKey >= 1 {
-			im.RandomKey = math.Mod(im.RandomKey, 1.0)
+		if !isFormalSnapshotEnabledStatus(im.Status) {
+			http.Error(w, "snapshot contains disabled image", http.StatusBadRequest)
+			return
 		}
 		imgs = append(imgs, im)
 	}
@@ -334,26 +373,200 @@ func handleSnapshot(w http.ResponseWriter, r *http.Request, st *engineState) {
 			tagIndex[k] = map[int64]struct{}{}
 		}
 		for _, id := range ids {
-			if _, ok := byID[id]; ok {
+			if index, ok := byID[id]; ok {
 				tagIndex[k][id] = struct{}{}
+				found := false
+				for _, existing := range imgs[index].TagNames {
+					if existing == k {
+						found = true
+						break
+					}
+				}
+				if !found {
+					imgs[index].TagNames = append(imgs[index].TagNames, k)
+					sort.Strings(imgs[index].TagNames)
+				}
 			}
 		}
 	}
-
-	rev := body.Revision
-	if rev == "" {
-		rev = time.Now().UTC().Format(time.RFC3339Nano)
+	currentStateHash, err := snapshotContentHash(imgs, nil)
+	if err != nil {
+		http.Error(w, "snapshot state hash failed", http.StatusBadRequest)
+		return
 	}
 
 	st.mu.Lock()
+	if st.stateVersion != *body.BaseStateVersion {
+		currentVersion := st.stateVersion
+		st.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"ok":                     false,
+			"code":                   "STALE_SNAPSHOT",
+			"expected_state_version": *body.BaseStateVersion,
+			"current_state_version":  currentVersion,
+		})
+		return
+	}
 	st.byKey = imgs
 	st.byID = byID
 	st.tagIndex = tagIndex
 	st.revision = rev
+	st.initialized = true
+	st.ready = len(imgs) > 0
+	st.snapshotRevision = rev
+	st.snapshotManifestHash = calculatedHash
+	st.currentStateHash = currentStateHash
+	st.stateVersion++
 	size := len(imgs)
+	ready := st.ready
+	stateVersion := st.stateVersion
 	st.mu.Unlock()
 
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "index_size": size, "revision": rev})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":            true,
+		"ready":         ready,
+		"index_size":    size,
+		"revision":      rev,
+		"content_hash":  calculatedHash,
+		"state_version": stateVersion,
+	})
+}
+
+func emptySnapshotContentHash() string {
+	hash, err := snapshotContentHash(nil, nil)
+	if err != nil {
+		panic(err)
+	}
+	return hash
+}
+
+func snapshotB64(value string) string {
+	return base64.StdEncoding.EncodeToString([]byte(value))
+}
+
+func snapshotOptionalString(value *string) any {
+	if value == nil {
+		return nil
+	}
+	return snapshotB64(*value)
+}
+
+func snapshotOptionalInt(value *int) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func snapshotOptionalInt64(value *int64) any {
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+// snapshotContentHash hashes the complete normalized payload through a fixed
+// JSON array schema shared with Python. Strings are base64 and floats use their
+// IEEE-754 bits, avoiding JSON escaping/formatting differences across languages.
+func snapshotContentHash(images []indexImage, tagPostings map[string][]int64) (string, error) {
+	rows := make([][]any, 0, len(images))
+	seen := make(map[int64]struct{}, len(images))
+	for _, im := range images {
+		if im.ID <= 0 {
+			return "", fmt.Errorf("snapshot contains invalid image id")
+		}
+		if _, ok := seen[im.ID]; ok {
+			return "", fmt.Errorf("snapshot contains duplicate image id")
+		}
+		seen[im.ID] = struct{}{}
+		if im.IllustID <= 0 {
+			return "", fmt.Errorf("snapshot contains invalid illust_id")
+		}
+		if im.PageIndex < 0 {
+			return "", fmt.Errorf("snapshot contains invalid page_index")
+		}
+		ext := strings.ToLower(strings.TrimSpace(im.Ext))
+		if ext != im.Ext || (ext != "jpg" && ext != "jpeg" && ext != "png" && ext != "gif" && ext != "webp" && ext != "zip") {
+			return "", fmt.Errorf("snapshot contains invalid ext")
+		}
+		if !isFormalSnapshotEnabledStatus(im.Status) {
+			return "", fmt.Errorf("snapshot contains disabled image")
+		}
+		if math.IsNaN(im.RandomKey) || math.IsInf(im.RandomKey, 0) || im.RandomKey < 0 || im.RandomKey >= 1 {
+			return "", fmt.Errorf("snapshot contains invalid random_key")
+		}
+
+		tagNames := append([]string(nil), im.TagNames...)
+		sort.Strings(tagNames)
+		encodedTagNames := make([]string, 0, len(tagNames))
+		previousName := ""
+		for _, name := range tagNames {
+			if name == "" || strings.TrimSpace(name) != name || name == previousName {
+				return "", fmt.Errorf("snapshot contains invalid tag_names")
+			}
+			previousName = name
+			encodedTagNames = append(encodedTagNames, snapshotB64(name))
+		}
+		tagIDs := append([]int64{}, im.TagIDs...)
+		sort.Slice(tagIDs, func(i, j int) bool { return tagIDs[i] < tagIDs[j] })
+		for i, tagID := range tagIDs {
+			if tagID <= 0 || (i > 0 && tagID == tagIDs[i-1]) {
+				return "", fmt.Errorf("snapshot contains invalid tag_ids")
+			}
+		}
+		rows = append(rows, []any{
+			im.ID, im.IllustID, im.PageIndex, snapshotB64(im.Ext), 1,
+			fmt.Sprintf("%016x", math.Float64bits(im.RandomKey)),
+			snapshotOptionalInt(im.Width), snapshotOptionalInt(im.Height), snapshotOptionalInt(im.Orientation),
+			snapshotOptionalInt(im.XRestrict), snapshotOptionalInt(im.AIType), snapshotOptionalInt(im.IllustType),
+			snapshotOptionalInt64(im.UserID), snapshotOptionalString(im.UserName), snapshotOptionalString(im.Title),
+			snapshotOptionalString(im.CreatedAtPixiv), snapshotOptionalString(im.AddedAt),
+			snapshotOptionalInt(im.BookmarkCount), snapshotOptionalInt(im.ViewCount), snapshotOptionalInt(im.CommentCount),
+			snapshotOptionalString(im.OriginalURL), encodedTagNames, tagIDs,
+			snapshotOptionalString(im.LastFailAt), snapshotOptionalString(im.LastErrorCode),
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i][0].(int64) < rows[j][0].(int64) })
+
+	postingRows := make([][]any, 0, len(tagPostings))
+	for name, postingIDs := range tagPostings {
+		if name == "" || strings.TrimSpace(name) != name {
+			return "", fmt.Errorf("snapshot contains invalid tag_postings")
+		}
+		ids := append([]int64{}, postingIDs...)
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		for i, id := range ids {
+			if _, ok := seen[id]; !ok {
+				return "", fmt.Errorf("snapshot tag_postings reference unknown image")
+			}
+			if i > 0 && id == ids[i-1] {
+				return "", fmt.Errorf("snapshot contains invalid tag_postings")
+			}
+		}
+		postingRows = append(postingRows, []any{snapshotB64(name), ids})
+	}
+	sort.Slice(postingRows, func(i, j int) bool { return postingRows[i][0].(string) < postingRows[j][0].(string) })
+	canonical, err := json.Marshal([]any{rows, postingRows})
+	if err != nil {
+		return "", fmt.Errorf("snapshot canonical encoding failed: %w", err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(canonical)), nil
+}
+
+func isFormalSnapshotEnabledStatus(v any) bool {
+	switch value := v.(type) {
+	case int:
+		return value == 1
+	case int64:
+		return value == 1
+	case float64:
+		return value == 1
+	case json.Number:
+		parsed, err := value.Int64()
+		return err == nil && parsed == 1
+	default:
+		return false
+	}
 }
 
 func handleEvents(w http.ResponseWriter, r *http.Request, st *engineState) {
@@ -474,9 +687,23 @@ func handleEvents(w http.ResponseWriter, r *http.Request, st *engineState) {
 	st.byKey = imgs
 	st.byID = byID
 	st.tagIndex = tagIndex
+	if contentHash, err := snapshotContentHash(imgs, nil); err == nil {
+		st.currentStateHash = contentHash
+	}
 	st.revision = time.Now().UTC().Format(time.RFC3339Nano)
+	if applied > 0 {
+		st.stateVersion++
+	}
+	st.ready = st.initialized && len(imgs) > 0
 
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "applied": applied, "index_size": len(imgs), "revision": st.revision})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":            true,
+		"applied":       applied,
+		"ready":         st.ready,
+		"index_size":    len(imgs),
+		"revision":      st.revision,
+		"state_version": st.stateVersion,
+	})
 }
 
 func handleFilterCount(w http.ResponseWriter, r *http.Request, st *engineState) {
@@ -530,11 +757,11 @@ func handlePick(w http.ResponseWriter, r *http.Request, st *engineState) {
 	st.mu.RLock()
 	defer st.mu.RUnlock()
 
-	if len(st.byKey) == 0 {
+	if !st.ready {
 		// Distinct from filter NO_MATCH so BFF dual-run can warm/snapshot before cutover.
 		resp := pickResponse{OK: true, Code: "INDEX_NOT_READY", Items: []pickItem{}}
 		if req.Debug {
-			resp.Debug = map[string]any{"reason": "empty_index", "revision": st.revision, "index_size": 0}
+			resp.Debug = map[string]any{"reason": "index_not_ready", "revision": st.revision, "index_size": len(st.byKey)}
 		}
 		writeJSON(w, http.StatusOK, resp)
 		return
@@ -768,13 +995,14 @@ func pickFromScored(scored []scoredImg, pickMode string, limit int, rng *rand.Ra
 	return out
 }
 
-
 // filterByMultiplierAllow mirrors Python pick_by_quality ai_type_allowed /
 // illust_type_allowed via allowed_int_or_null_clause (NOT imageMultiplier).
 //
 // Python builds allow sets as:
-//   ai: 1 | non_ai: 0 | unknown_ai: NULL only
-//   illust: 0 | manga: 1 | ugoira: 2 | unknown_illust_type: NULL only
+//
+//	ai: 1 | non_ai: 0 | unknown_ai: NULL only
+//	illust: 0 | manga: 1 | ugoira: 2 | unknown_illust_type: NULL only
+//
 // Then allowed_int_or_null_clause returns NO clause when the set is "complete"
 // ({0,1}+NULL for AI, {0,1,2}+NULL for illust) — so out-of-range values still
 // sample. Partial sets filter exact members only (out-of-range excluded).
@@ -1076,7 +1304,7 @@ func filterImages(st *engineState, filters map[string]any) []indexImage {
 				}
 			}
 		}
-				if minW > 0 && (im.Width == nil || *im.Width < minW) {
+		if minW > 0 && (im.Width == nil || *im.Width < minW) {
 			continue
 		}
 		if minH > 0 && (im.Height == nil || *im.Height < minH) {
@@ -1465,7 +1693,6 @@ func stringFromAny(v any, def string) string {
 		return def
 	}
 }
-
 
 func int64SetFromAny(v any) map[int64]struct{} {
 	out := map[int64]struct{}{}

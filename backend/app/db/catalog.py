@@ -10,6 +10,7 @@ from app.db.dialect import backend_from_database_url
 from app.db.images_admin_list import list_admin_images as list_admin_images_helper
 from app.db.images_delete import clear_all_images, delete_images_by_ids
 from app.db.images_get import (
+    count_enabled_images,
     get_image_by_id,
     get_image_by_id_any_status,
     get_images_by_ids,
@@ -119,6 +120,8 @@ class CatalogStore(Protocol):
         limit: int | None = None,
         after_id: int | None = None,
     ) -> list[Image]: ...
+
+    async def count_enabled_images(self, session: AsyncSession) -> int: ...
 
     async def map_image_ids_by_illust_page(
         self,
@@ -338,6 +341,9 @@ class SqliteCatalogStore:
         after_id: int | None = None,
     ) -> list[Image]:
         return await list_enabled_images(session, limit=limit, after_id=after_id)
+
+    async def count_enabled_images(self, session: AsyncSession) -> int:
+        return await count_enabled_images(session)
 
     async def map_image_ids_by_illust_page(
         self,

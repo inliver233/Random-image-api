@@ -20,12 +20,16 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [ok, service]
+                required: [ok, service, ready, index_size, snapshot_revision, snapshot_manifest_hash, current_state_hash, state_version]
                 properties:
                   ok: { type: boolean }
                   service: { type: string }
+                  ready: { type: boolean }
                   index_size: { type: integer }
                   snapshot_revision: { type: string }
+                  snapshot_manifest_hash: { type: string, pattern: "^$|^[0-9a-f]{64}$" }
+                  current_state_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+                  state_version: { type: integer, minimum: 0 }
   /v1/pick:
     post:
       operationId: pick
@@ -77,6 +81,18 @@ paths:
       responses:
         "200":
           description: applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnapshotApplyResponse"
+        "400":
+          description: incomplete or invalid snapshot manifest
+        "409":
+          description: stale base_state_version; a newer event or snapshot already committed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StaleSnapshotResponse"
   /v1/admin/events:
     post:
       operationId: applyEvents
@@ -90,6 +106,10 @@ paths:
       responses:
         "200":
           description: applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventApplyResponse"
   /v1/admin/filter-count:
     post:
       operationId: filterCount
@@ -271,20 +291,61 @@ components:
           additionalProperties: true
     SnapshotEnvelope:
       type: object
-      required: [revision, images]
+      required: [revision, complete, expected_count, content_hash, base_state_version, images]
       properties:
-        revision: { type: string }
+        revision: { type: string, minLength: 1 }
+        complete:
+          type: boolean
+          enum: [true]
+          description: Must be true. Partial/chunk payloads cannot replace the live index.
+        expected_count: { type: integer, minimum: 0 }
+        content_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: SHA-256 of the complete normalized image and tag-posting payload using the documented cross-language canonical array encoding.
+        base_state_version:
+          type: integer
+          minimum: 0
+          description: CAS token read from /healthz before the database snapshot build.
         generated_at: { type: string }
         images:
           type: array
           items:
-            $ref: "#/components/schemas/IndexImage"
+            $ref: "#/components/schemas/SnapshotIndexImage"
         tag_postings:
           type: object
           additionalProperties:
             type: array
             items: { type: integer }
             description: map tag_name -> image ids
+    SnapshotApplyResponse:
+      type: object
+      required: [ok, ready, index_size, revision, content_hash, state_version]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        ready: { type: boolean }
+        index_size: { type: integer, minimum: 0 }
+        revision: { type: string, minLength: 1 }
+        content_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+        state_version: { type: integer, minimum: 1 }
+    StaleSnapshotResponse:
+      type: object
+      required: [ok, code, expected_state_version, current_state_version]
+      properties:
+        ok: { type: boolean, enum: [false] }
+        code: { type: string, enum: [STALE_SNAPSHOT] }
+        expected_state_version: { type: integer, minimum: 0 }
+        current_state_version: { type: integer, minimum: 0 }
+    EventApplyResponse:
+      type: object
+      required: [ok, applied, ready, index_size, revision, state_version]
+      properties:
+        ok: { type: boolean, enum: [true] }
+        applied: { type: integer, minimum: 0 }
+        ready: { type: boolean }
+        index_size: { type: integer, minimum: 0 }
+        revision: { type: string }
+        state_version: { type: integer, minimum: 0 }
     IndexImage:
       type: object
       required: [id, illust_id, page_index, ext, random_key, status]
@@ -293,10 +354,11 @@ components:
         illust_id: { type: integer }
         page_index: { type: integer }
         ext: { type: string }
-        status: { type: string }
+        status: { type: integer, enum: [1, 2, 3, 4] }
         random_key: { type: number }
         width: { type: integer, nullable: true }
         height: { type: integer, nullable: true }
+        orientation: { type: integer, nullable: true }
         x_restrict: { type: integer, nullable: true }
         ai_type: { type: integer, nullable: true }
         illust_type: { type: integer, nullable: true }
@@ -313,9 +375,17 @@ components:
         tag_ids:
           type: array
           items: { type: integer }
-        score_components:
-          type: object
-          additionalProperties: { type: number }
+        tag_names:
+          type: array
+          items: { type: string }
+        last_fail_at: { type: string, nullable: true }
+        last_error_code: { type: string, nullable: true }
+    SnapshotIndexImage:
+      allOf:
+        - $ref: "#/components/schemas/IndexImage"
+        - type: object
+          properties:
+            status: { type: integer, enum: [1] }
     EventBatch:
       type: object
       required: [events]
@@ -338,7 +408,7 @@ components:
         image:
           $ref: "#/components/schemas/IndexImage"
         image_id: { type: integer }
-        status: { type: string }
+        status: { type: integer, enum: [1, 2, 3, 4] }
         tag_ids:
           type: array
           items: { type: integer }

@@ -247,12 +247,23 @@ async def engine_apply_snapshot(
     *,
     revision: str,
     images: list[dict[str, Any]],
+    complete: bool,
+    expected_count: int,
+    content_hash: str,
+    base_state_version: int,
     tag_postings: dict[str, list[int]] | None = None,
     timeout_s: float = 30.0,
     settings: Settings | Any | None = None,
     secret: str | None = None,
 ) -> dict[str, Any] | None:
-    body: dict[str, Any] = {"revision": revision, "images": images}
+    body: dict[str, Any] = {
+        "revision": revision,
+        "complete": bool(complete),
+        "expected_count": int(expected_count),
+        "content_hash": str(content_hash),
+        "base_state_version": int(base_state_version),
+        "images": images,
+    }
     if tag_postings:
         body["tag_postings"] = tag_postings
     try:
