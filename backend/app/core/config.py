@@ -16,6 +16,15 @@ log = get_logger(__name__)
 _DEFAULT_PIXIV_OAUTH_CLIENT_ID = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
 _DEFAULT_PIXIV_OAUTH_CLIENT_SECRET = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
 _DEFAULT_PIXIV_OAUTH_HASH_SECRET = "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c"
+_PRODUCTION_ENVIRONMENTS = frozenset({"prod", "production"})
+_INSECURE_PRODUCTION_VALUES = {
+    "SECRET_KEY": frozenset({"dev-secret-key", "dev-secret-key-change-me"}),
+    "ADMIN_PASSWORD": frozenset({"admin", "admin-change-me"}),
+}
+
+
+def _is_prod_env(app_env: str) -> bool:
+    return app_env.strip().lower() in _PRODUCTION_ENVIRONMENTS
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +83,7 @@ class Settings:
 
     @property
     def is_prod(self) -> bool:
-        return self.app_env in {"prod", "production"}
+        return _is_prod_env(self.app_env)
 
 
 def _get(env: Mapping[str, str], key: str, default: str) -> str:
@@ -135,7 +144,7 @@ def _ensure_field_encryption_key(env: Mapping[str, str], *, app_env: str) -> str
         FieldEncryptor.from_key(from_file)
         return from_file
 
-    if app_env in {"prod", "production"}:
+    if _is_prod_env(app_env):
         return ""
 
     generated = Fernet.generate_key().decode("utf-8")
@@ -156,7 +165,7 @@ def _ensure_pixiv_oauth_config(env: Mapping[str, str], *, app_env: str) -> tuple
     client_secret = _get(env, "PIXIV_OAUTH_CLIENT_SECRET", "")
     hash_secret = _get(env, "PIXIV_OAUTH_HASH_SECRET", "")
 
-    if app_env not in {"prod", "production"}:
+    if not _is_prod_env(app_env):
         client_id = client_id or _DEFAULT_PIXIV_OAUTH_CLIENT_ID
         client_secret = client_secret or _DEFAULT_PIXIV_OAUTH_CLIENT_SECRET
         hash_secret = hash_secret or _DEFAULT_PIXIV_OAUTH_HASH_SECRET
@@ -168,12 +177,13 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     env = env or os.environ
 
     app_env = _get(env, "APP_ENV", "dev").lower()
+    is_prod_env = _is_prod_env(app_env)
     database_url = _get(env, "DATABASE_URL", "sqlite+aiosqlite:///./data/app.db")
-    secret_key = _get(env, "SECRET_KEY", "dev-secret-key" if app_env != "prod" else "")
+    secret_key = _get(env, "SECRET_KEY", "" if is_prod_env else "dev-secret-key")
     field_encryption_key = _ensure_field_encryption_key(env, app_env=app_env)
 
     admin_username = _get(env, "ADMIN_USERNAME", "admin")
-    admin_password = _get(env, "ADMIN_PASSWORD", "admin" if app_env != "prod" else "")
+    admin_password = _get(env, "ADMIN_PASSWORD", "" if is_prod_env else "admin")
 
     pixiv_oauth_client_id, pixiv_oauth_client_secret, pixiv_oauth_hash_secret = _ensure_pixiv_oauth_config(
         env, app_env=app_env
@@ -373,5 +383,13 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
             missing.append("RANDOM_ENGINE_SECRET")
         if missing:
             raise ValueError(f"Missing required env vars for prod: {', '.join(missing)}")
+
+        insecure = [
+            key
+            for key, insecure_values in _INSECURE_PRODUCTION_VALUES.items()
+            if str(getattr(settings, key.lower())).strip().lower() in insecure_values
+        ]
+        if insecure:
+            raise ValueError(f"Insecure placeholder env vars are not allowed in prod: {', '.join(insecure)}")
 
     return settings

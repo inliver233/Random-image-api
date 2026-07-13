@@ -65,6 +65,49 @@ def test_load_settings_prod_requires_secrets() -> None:
         load_settings({"APP_ENV": "prod"})
 
 
+@pytest.mark.parametrize("app_env", ["prod", "production", "PRODUCTION"])
+def test_load_settings_all_production_aliases_require_explicit_credentials(app_env: str) -> None:
+    with pytest.raises(ValueError, match="SECRET_KEY.*ADMIN_PASSWORD"):
+        load_settings({"APP_ENV": app_env})
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("SECRET_KEY", "dev-secret-key"),
+        ("SECRET_KEY", "dev-secret-key-change-me"),
+        ("ADMIN_PASSWORD", "admin"),
+        ("ADMIN_PASSWORD", "admin-change-me"),
+    ],
+)
+def test_load_settings_prod_rejects_known_insecure_credentials(key: str, value: str) -> None:
+    env = {
+        "APP_ENV": "production",
+        "SECRET_KEY": "prod-secret-key-long-enough",
+        "FIELD_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
+        "ADMIN_PASSWORD": "prod-admin-pass",
+    }
+    env[key] = value
+
+    with pytest.raises(ValueError, match=key):
+        load_settings(env)
+
+
+def test_load_settings_production_accepts_explicit_non_placeholder_credentials() -> None:
+    settings = load_settings(
+        {
+            "APP_ENV": "production",
+            "SECRET_KEY": "prod-secret-key-long-enough",
+            "FIELD_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
+            "ADMIN_PASSWORD": "prod-admin-pass",
+        }
+    )
+
+    assert settings.is_prod is True
+    assert settings.secret_key == "prod-secret-key-long-enough"
+    assert settings.admin_password == "prod-admin-pass"
+
+
 def test_load_settings_prod_requires_engine_secret_when_enabled() -> None:
     base = {
         "APP_ENV": "prod",
