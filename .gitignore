@@ -43,6 +43,11 @@ deploy/.env
 plan/
 issues/
 docs/
+!docs/
+docs/*
+!docs/codexreview-remediation-plan.md
+!docs/benchmarks/
+!docs/benchmarks/**
 参考资料/
 
 ## Data exports / plans
