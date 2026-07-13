@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.db.models.base import Base
@@ -220,3 +221,106 @@ def test_compare_filters_engine_failure_502(tmp_path: Path, monkeypatch) -> None
             json={},
         )
         assert resp.status_code == 502
+
+
+def test_snapshot_limit_is_dry_run_and_never_replaces_engine(tmp_path: Path, monkeypatch) -> None:
+    app = _bootstrap_app(
+        tmp_path,
+        monkeypatch,
+        name="snapshot_dry_run",
+        engine_url="http://127.0.0.1:18091",
+    )
+    pushed = False
+
+    async def _fake_build(*_args: Any, **kwargs: Any) -> dict[str, Any]:
+        assert kwargs.get("limit") == 3
+        return {"images": [{"id": 1}, {"id": 2}, {"id": 3}], "count": 3}
+
+    async def _fake_push(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal pushed
+        pushed = True
+        return {"ok": True}
+
+    monkeypatch.setattr("app.api.admin.maintenance.build_engine_snapshot_payload", _fake_build)
+    monkeypatch.setattr("app.api.admin.maintenance.push_engine_snapshot", _fake_push)
+
+    with TestClient(app) as client:
+        token = _login(client)
+        resp = client.post(
+            "/admin/api/maintenance/random-engine/snapshot",
+            headers={"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"},
+            json={"limit": 3},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["dry_run"] is True
+    assert body["count"] == 3
+    assert body["limit"] == 3
+    assert body["engine"] is None
+    assert pushed is False
+
+
+@pytest.mark.parametrize("invalid_limit", [None, 0, "invalid"])
+def test_snapshot_invalid_limit_fails_closed(tmp_path: Path, monkeypatch, invalid_limit: Any) -> None:
+    app = _bootstrap_app(
+        tmp_path,
+        monkeypatch,
+        name=f"snapshot_invalid_{invalid_limit!s}",
+        engine_url="http://127.0.0.1:18091",
+    )
+    pushed = False
+
+    async def _fake_push(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        nonlocal pushed
+        pushed = True
+        return {"ok": True}
+
+    monkeypatch.setattr("app.api.admin.maintenance.push_engine_snapshot", _fake_push)
+
+    with TestClient(app) as client:
+        token = _login(client)
+        resp = client.post(
+            "/admin/api/maintenance/random-engine/snapshot",
+            headers={"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"},
+            json={"limit": invalid_limit},
+        )
+
+    assert resp.status_code == 400
+    assert pushed is False
+
+
+def test_snapshot_without_limit_pushes_complete_snapshot(tmp_path: Path, monkeypatch) -> None:
+    app = _bootstrap_app(
+        tmp_path,
+        monkeypatch,
+        name="snapshot_complete",
+        engine_url="http://127.0.0.1:18091",
+    )
+    pushed_kwargs: dict[str, Any] = {}
+    push_calls = 0
+
+    async def _fake_push(*_args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal push_calls
+        push_calls += 1
+        pushed_kwargs.update(kwargs)
+        return {"ok": True, "index_size": 10}
+
+    monkeypatch.setattr("app.api.admin.maintenance.push_engine_snapshot", _fake_push)
+
+    with TestClient(app) as client:
+        token = _login(client)
+        resp = client.post(
+            "/admin/api/maintenance/random-engine/snapshot",
+            headers={"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"},
+            json={},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["engine"]["index_size"] == 10
+    assert body["revision"]
+    assert push_calls == 1
+    assert "limit" not in pushed_kwargs

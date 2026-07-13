@@ -169,6 +169,8 @@ async def push_engine_snapshot(
     tag_store: TagStore | None = None,
     settings: Settings | Any | None = None,
 ) -> dict[str, Any] | None:
+    if limit is not None:
+        raise ValueError("partial snapshot limits cannot be applied to the random engine")
     Session = create_sessionmaker(engine)
     async with Session() as session:
         built = await build_engine_snapshot_payload(

@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+import pytest
+
 from app.core.config import load_settings
 from app.core.random_engine_client import engine_apply_events
 from app.core.random_engine_sync import (
@@ -12,6 +14,7 @@ from app.core.random_engine_sync import (
     image_row_to_engine_payload,
     maybe_publish_engine_deletes,
     maybe_publish_engine_upserts,
+    push_engine_snapshot,
 )
 
 
@@ -162,6 +165,24 @@ def test_engine_apply_events_empty() -> None:
         # No HTTP call for empty events.
         out = await engine_apply_events(None, "http://127.0.0.1:9", events=[])  # type: ignore[arg-type]
         assert out == {"ok": True, "applied": 0}
+
+    asyncio.run(_run())
+
+
+def test_push_engine_snapshot_rejects_partial_limit_before_loading_or_posting() -> None:
+    class _Client:
+        async def post(self, *_args: Any, **_kwargs: Any) -> None:
+            raise AssertionError("partial snapshot must not be posted")
+
+    async def _run() -> None:
+        with pytest.raises(ValueError, match="partial snapshot"):
+            await push_engine_snapshot(
+                None,  # type: ignore[arg-type]
+                base_url="http://engine.local",
+                client=_Client(),
+                revision="partial-test",
+                limit=3,
+            )
 
     asyncio.run(_run())
 

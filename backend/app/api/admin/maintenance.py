@@ -22,7 +22,7 @@ from app.core.random_engine_client import (
 )
 from app.core.random_engine_pick import build_engine_filters, build_engine_pick_payload
 from app.core.random_delivery import resolve_catalog_store
-from app.core.random_engine_sync import push_engine_snapshot
+from app.core.random_engine_sync import build_engine_snapshot_payload, push_engine_snapshot
 from app.core.recommendation import quality_score
 from app.core.random_request import parse_random_filters
 from app.core.request_id import get_or_create_request_id
@@ -674,9 +674,10 @@ async def random_engine_status(
     summary="Push random engine snapshot",
     description=(
         "Push catalog snapshot (enabled images + tags) to the Go random engine. "
-        "Requires `RANDOM_ENGINE_URL`. Optional body `limit` caps rows for dry probes. "
-        "Uses process `catalog_store` / `tag_store` ports when present. Returns revision "
-        "and engine ack payload, or 502 on upstream failure."
+        "Requires `RANDOM_ENGINE_URL`. Optional body `limit` performs a catalog-only dry probe "
+        "and never replaces the engine index. Formal pushes are always complete snapshots. Uses "
+        "process `catalog_store` / `tag_store` ports when present. Returns revision and engine ack "
+        "payload, or 502 on upstream failure."
     ),
 )
 async def random_engine_push_snapshot(
@@ -699,13 +700,34 @@ async def random_engine_push_snapshot(
 
     limit: int | None = None
     body = await load_json_object_optional(request)
-    if body.get("limit") is not None:
-        try:
-            n = int(body["limit"])
-            if n >= 1:
-                limit = n
-        except Exception:
-            limit = None
+    if "limit" in body:
+        limit = parse_int_in_range(
+            body["limit"],
+            field="limit",
+            min_value=1,
+            max_value=100_000,
+        )
+
+    if limit is not None:
+        Session = resolve_sessionmaker(request)
+        async with Session() as session:
+            built = await build_engine_snapshot_payload(
+                session,
+                limit=int(limit),
+                catalog=getattr(request.app.state, "catalog_store", None),
+                tag_store=getattr(request.app.state, "tag_store", None),
+            )
+        return admin_ok(
+            request,
+            payload={
+                "dry_run": True,
+                "limit": int(limit),
+                "count": int(built["count"]),
+                "revision": None,
+                "engine": None,
+            },
+            request_id=rid,
+        )
 
     revision = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
     result = await push_engine_snapshot(
@@ -713,7 +735,6 @@ async def random_engine_push_snapshot(
         base_url=base,
         client=client,
         revision=revision,
-        limit=limit,
         timeout_s=120.0,
         catalog=getattr(request.app.state, "catalog_store", None),
         tag_store=getattr(request.app.state, "tag_store", None),
@@ -972,4 +993,3 @@ async def random_engine_compare_filters(
         },
         request_id=rid,
     )
-
