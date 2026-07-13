@@ -161,6 +161,8 @@ def build_import_images_handler(
                 imp = await session.get(Import, import_id)
                 if imp is None:
                     raise JobPermanentError("Import not found")
+                if str(imp.rollback_mode or "").strip():
+                    raise JobPermanentError("Import was rolled back")
 
         await with_sqlite_busy_retry(_ensure_import_exists)
 
@@ -192,6 +194,18 @@ def build_import_images_handler(
 
             async def _op() -> list[int]:
                 async with Session() as session:
+                    import_row = (
+                        await session.execute(
+                            sa.select(Import)
+                            .where(Import.id == int(import_id))
+                            .with_for_update()
+                        )
+                    ).scalar_one_or_none()
+                    if import_row is None:
+                        raise JobPermanentError("Import not found")
+                    if str(import_row.rollback_mode or "").strip():
+                        raise JobPermanentError("Import was rolled back")
+
                     published_ids = await catalog_store.bulk_upsert_import_rows(
                         session,
                         rows=rows,
@@ -248,20 +262,43 @@ def build_import_images_handler(
 
             image_ids = await with_sqlite_busy_retry(_op)
             if image_ids:
-                # Best-effort: warm random-engine index (+ optional R2 prewarm) after each import chunk.
-                await maybe_publish_engine_upserts(
-                    engine,
-                    image_ids=list(image_ids),
-                    settings=s,
-                    catalog=catalog_store,
-                    tag_store=tag_store_port,
-                )
-                await maybe_enqueue_r2_prewarm(
-                    image_ids=list(image_ids),
-                    settings=s,
-                    engine=engine,
-                    catalog=catalog_store,
-                )
+                async def _rollback_mode() -> str:
+                    async with Session() as session:
+                        value = await session.scalar(
+                            sa.select(Import.rollback_mode).where(Import.id == int(import_id))
+                        )
+                        return str(value or "").strip()
+
+                mode_before_publish = await with_sqlite_busy_retry(_rollback_mode)
+                if not mode_before_publish:
+                    # Best-effort: warm random-engine index (+ optional R2 prewarm)
+                    # after each import chunk that is still active.
+                    await maybe_publish_engine_upserts(
+                        engine,
+                        image_ids=list(image_ids),
+                        settings=s,
+                        catalog=catalog_store,
+                        tag_store=tag_store_port,
+                    )
+                    await maybe_enqueue_r2_prewarm(
+                        image_ids=list(image_ids),
+                        settings=s,
+                        engine=engine,
+                        catalog=catalog_store,
+                    )
+
+                # Rollback can commit while the first Engine request is in flight.
+                # Re-read the durable tombstone and publish current DB statuses so
+                # a late active upsert cannot be the final Engine state.
+                mode_after_publish = await with_sqlite_busy_retry(_rollback_mode)
+                if mode_after_publish:
+                    await maybe_publish_engine_upserts(
+                        engine,
+                        image_ids=list(image_ids),
+                        settings=s,
+                        catalog=catalog_store,
+                        tag_store=tag_store_port,
+                    )
             return list(image_ids or [])
 
         if input_format == "pixiv_batch_downloader_json":
@@ -485,6 +522,18 @@ def build_import_images_handler(
         if hydrate_on_import and illust_ids:
             async def _enqueue_hydrate_jobs() -> None:
                 async with Session() as session:
+                    async def _lock_active_import() -> bool:
+                        import_row = (
+                            await session.execute(
+                                sa.select(Import)
+                                .where(Import.id == int(import_id))
+                                .with_for_update()
+                            )
+                        ).scalar_one_or_none()
+                        return bool(import_row is not None and not str(import_row.rollback_mode or "").strip())
+
+                    if not await _lock_active_import():
+                        return
                     existing = set(
                         (
                             await session.execute(
@@ -518,6 +567,8 @@ def build_import_images_handler(
                         added += 1
                         if added % 500 == 0:
                             await session.commit()
+                            if not await _lock_active_import():
+                                return
                     if added:
                         await session.commit()
 

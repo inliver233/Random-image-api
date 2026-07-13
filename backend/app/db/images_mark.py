@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from app.core.coerce import truncate_text
 from app.core.redact import redact_text
 from app.db.images_upsert import dialect_name_from_session, now_expr_for_dialect
+from app.db.models.import_images import ImportImage
 from app.db.models.images import Image
 from app.db.session import create_sessionmaker, with_sqlite_busy_retry
 
@@ -95,22 +96,29 @@ async def set_status_for_import(
     import_id: int,
     status: int,
     now_expr: object | None = None,
-) -> int:
-    """Bulk-set status for all images created by an import (admin rollback).
+) -> list[int]:
+    """Bulk-set status for images whose creation is owned by an import.
 
-    Caller owns commit. Returns rowcount when available (0 if unknown).
+    Caller owns commit. Returns the exact changed image ids for Engine sync.
     """
     values: dict[str, object] = {"status": int(status)}
     if now_expr is not None:
         values["updated_at"] = now_expr
     else:
         values["updated_at"] = now_expr_for_dialect(dialect_name_from_session(session))
-    result = await session.execute(
-        update(Image).where(Image.created_import_id == int(import_id)).values(**values)
-    )
-    try:
-        rc = int(getattr(result, "rowcount", 0) or 0)
-    except Exception:
-        return 0
-    return rc if rc > 0 else 0
+    image_ids = [
+        int(value)
+        for value in (
+            await session.execute(
+                select(ImportImage.image_id)
+                .where(ImportImage.import_id == int(import_id))
+                .where(ImportImage.was_created.is_(True))
+                .order_by(ImportImage.image_id.asc())
+            )
+        ).scalars()
+    ]
+    if not image_ids:
+        return []
+    await session.execute(update(Image).where(Image.id.in_(image_ids)).values(**values))
+    return image_ids
 

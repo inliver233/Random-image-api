@@ -14,6 +14,7 @@ from app.db.models import api_keys as _api_keys  # noqa: F401,E402
 from app.db.models import hydration_runs as _hydration_runs  # noqa: F401,E402
 from app.db.models import image_tags as _image_tags  # noqa: F401,E402
 from app.db.models import images as _images  # noqa: F401,E402
+from app.db.models import import_images as _import_images  # noqa: F401,E402
 from app.db.models import imports as _imports  # noqa: F401,E402
 from app.db.models import jobs as _jobs  # noqa: F401,E402
 from app.db.models import pixiv_tokens as _pixiv_tokens  # noqa: F401,E402

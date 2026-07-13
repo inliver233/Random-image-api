@@ -13,6 +13,7 @@ from app.core.crypto import FieldEncryptor
 from app.core.runtime_settings import set_runtime_setting
 from app.db.engine import create_engine
 from app.db.models.base import Base
+from app.db.models.import_images import ImportImage
 from app.db.models.images import Image
 from app.db.models.imports import Import
 from app.db.models.jobs import JobRow
@@ -195,6 +196,20 @@ def test_job_handler_hydrate_metadata_happy_path_updates_images_and_tags(tmp_pat
             assert images[1].proxy_path == f"/i/{int(images[1].id)}.png"
             assert images[0].created_import_id == import_id
             assert images[1].created_import_id == import_id
+            memberships = (
+                (
+                    await session.execute(
+                        sa.select(ImportImage)
+                        .where(ImportImage.import_id == import_id)
+                        .order_by(ImportImage.image_id.asc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            assert [int(row.image_id) for row in memberships] == [int(images[0].id), int(images[1].id)]
+            assert [bool(row.was_created) for row in memberships] == [True, True]
+            assert [row.previous_status for row in memberships] == [1, None]
 
             assert images[0].width == 1200
             assert images[0].height == 800
@@ -222,6 +237,52 @@ def test_job_handler_hydrate_metadata_happy_path_updates_images_and_tags(tmp_pat
             assert int(token_db.error_count or 0) == 0
             assert token_db.backoff_until is None
             assert token_db.last_ok_at is not None and token_db.last_ok_at
+
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
+def test_job_handler_hydrate_metadata_rejects_rolled_back_source_import(tmp_path: Path) -> None:
+    db_path = tmp_path / "handler_hydrate_metadata_rolled_back_import.db"
+    engine = create_engine(_sqlite_url(db_path))
+
+    async def _run() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            imp = Import(
+                created_by="admin",
+                source="manual",
+                rollback_mode="disable",
+                rolled_back_at="2026-07-13T00:00:00.000Z",
+            )
+            session.add(imp)
+            await session.flush()
+            session.add(
+                JobRow(
+                    type="hydrate_metadata",
+                    status="pending",
+                    payload_json=json.dumps({"illust_id": 999}, separators=(",", ":")),
+                    ref_type="import",
+                    ref_id=f"{int(imp.id)}:999",
+                )
+            )
+            await session.commit()
+
+        dispatcher = JobDispatcher()
+        dispatcher.register("hydrate_metadata", build_hydrate_metadata_handler(engine))
+        claimed = await claim_next_job(engine, worker_id="w1")
+        assert claimed is not None
+        transition = await execute_claimed_job(engine, dispatcher, job_row=claimed, worker_id="w1")
+        assert transition is not None
+        assert transition.status.value == "dlq"
+
+        async with Session() as session:
+            assert int(await session.scalar(sa.select(sa.func.count()).select_from(Image)) or 0) == 0
+            assert int(await session.scalar(sa.select(sa.func.count()).select_from(ImportImage)) or 0) == 0
 
         await engine.dispose()
 

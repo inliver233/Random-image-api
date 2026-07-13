@@ -34,6 +34,7 @@ from app.core.time import iso_utc_ms
 from app.db.catalog import CatalogStore, build_catalog_store
 from app.db.images_upsert import adapt_driver_sql_named_binds, dialect_name_from_engine
 from app.db.models.hydration_runs import HydrationRun
+from app.db.models.imports import Import
 from app.db.models.pixiv_tokens import PixivToken
 from app.db.models.proxy_endpoints import ProxyEndpoint
 from app.db.models.token_proxy_bindings import TokenProxyBinding
@@ -1043,6 +1044,19 @@ LIMIT 1;
     ) -> list[int]:
         async def _op() -> list[int]:
             async with Session() as session:
+                if source_import_id:
+                    import_row = (
+                        await session.execute(
+                            sa.select(Import)
+                            .where(Import.id == int(source_import_id))
+                            .with_for_update()
+                        )
+                    ).scalar_one_or_none()
+                    if import_row is None:
+                        raise JobPermanentError("Import not found")
+                    if str(import_row.rollback_mode or "").strip():
+                        raise JobPermanentError("Import was rolled back")
+
                 tag_ids = await tags_store.upsert_tags_with_translations(session, tags=list(tags))
 
                 image_ids: list[int] = []
@@ -1083,6 +1097,15 @@ LIMIT 1;
                 return list(image_ids)
 
         return await with_sqlite_busy_retry(_op)
+
+    async def _source_import_rollback_mode(source_import_id: int | None) -> str:
+        if not source_import_id:
+            return ""
+        async with Session() as session:
+            value = await session.scalar(
+                sa.select(Import.rollback_mode).where(Import.id == int(source_import_id))
+            )
+            return str(value or "").strip()
 
     async def _hydrate_single_illust(*, illust_id: int, source_import_id: int | None) -> None:
         now_dt = datetime.now(timezone.utc)
@@ -1302,19 +1325,34 @@ LIMIT 1;
             )
             # Best-effort catalog → random-engine delta (no-op without RANDOM_ENGINE_URL).
             if persisted_ids:
-                await maybe_publish_engine_upserts(
-                    engine,
-                    image_ids=list(persisted_ids),
-                    settings=settings,
-                    catalog=catalog_store,
-                    tag_store=tags_store,
+                mode_before_publish = await with_sqlite_busy_retry(
+                    lambda: _source_import_rollback_mode(source_import_id)
                 )
-                await maybe_enqueue_r2_prewarm(
-                    image_ids=list(persisted_ids),
-                    settings=settings,
-                    engine=engine,
-                    catalog=catalog_store,
+                if not mode_before_publish:
+                    await maybe_publish_engine_upserts(
+                        engine,
+                        image_ids=list(persisted_ids),
+                        settings=settings,
+                        catalog=catalog_store,
+                        tag_store=tags_store,
+                    )
+                    await maybe_enqueue_r2_prewarm(
+                        image_ids=list(persisted_ids),
+                        settings=settings,
+                        engine=engine,
+                        catalog=catalog_store,
+                    )
+                mode_after_publish = await with_sqlite_busy_retry(
+                    lambda: _source_import_rollback_mode(source_import_id)
                 )
+                if mode_after_publish:
+                    await maybe_publish_engine_upserts(
+                        engine,
+                        image_ids=list(persisted_ids),
+                        settings=settings,
+                        catalog=catalog_store,
+                        tag_store=tags_store,
+                    )
             await _mark_token_ok(token_id, now_dt=now_dt)
             return
 
@@ -1421,6 +1459,12 @@ LIMIT 1;
             raise JobPermanentError("payload.illust_id is required")
 
         source_import_id = _parse_source_import_id(job)
+        if source_import_id:
+            mode = await with_sqlite_busy_retry(
+                lambda: _source_import_rollback_mode(source_import_id)
+            )
+            if mode:
+                raise JobPermanentError("Import was rolled back")
         await _hydrate_single_illust(illust_id=int(illust_id), source_import_id=source_import_id)
 
     return _handler

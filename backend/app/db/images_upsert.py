@@ -6,6 +6,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.import_images import ImportImage
 from app.db.models.images import Image
 
 
@@ -125,7 +126,6 @@ async def upsert_image_by_illust_page(
             "ext": stmt.excluded.ext,
             "original_url": stmt.excluded.original_url,
             "proxy_path": stmt.excluded.proxy_path,
-            "created_import_id": stmt.excluded.created_import_id,
             "updated_at": now_expr,
         },
     ).returning(Image.id)
@@ -163,6 +163,14 @@ async def upsert_hydrated_image_page(
     Does not touch tags (ImageTag) — callers replace tags separately.
     On conflict, preserves existing random_key / status / fail counters.
     """
+    existing = (
+        await session.execute(
+            sa.select(Image.id, Image.status).where(
+                Image.illust_id == int(illust_id),
+                Image.page_index == int(page_index),
+            )
+        )
+    ).one_or_none()
     dialect = dialect_name_from_session(session)
     insert = insert_for_dialect(Image, dialect_name=dialect)
     now_expr = now_expr_for_dialect(dialect)
@@ -216,6 +224,21 @@ async def upsert_hydrated_image_page(
     image_id = int(result.scalar_one())
     proxy_path = f"/i/{image_id}.{ext}"
     await session.execute(sa.update(Image).where(Image.id == image_id).values(proxy_path=proxy_path))
+
+    if created_import_id:
+        owner_id = await session.scalar(
+            sa.select(Image.created_import_id).where(Image.id == int(image_id))
+        )
+        membership_insert = insert_for_dialect(ImportImage, dialect_name=dialect).values(
+            import_id=int(created_import_id),
+            image_id=int(image_id),
+            was_created=int(owner_id or 0) == int(created_import_id),
+            previous_status=int(existing.status) if existing is not None else None,
+        )
+        membership_insert = membership_insert.on_conflict_do_nothing(
+            index_elements=["import_id", "image_id"]
+        )
+        await session.execute(membership_insert)
     return image_id
 
 
@@ -234,6 +257,17 @@ async def bulk_upsert_import_rows(
     if not rows:
         return []
 
+    existing_rows = (
+        await session.execute(
+            sa.select(Image.id, Image.illust_id, Image.page_index, Image.status)
+            .where(sa.tuple_(Image.illust_id, Image.page_index).in_(keys))
+        )
+    ).all()
+    existing_by_key = {
+        (int(row.illust_id), int(row.page_index)): (int(row.id), int(row.status))
+        for row in existing_rows
+    }
+
     dialect = dialect_name_from_session(session)
     insert = insert_for_dialect(Image, dialect_name=dialect)
     now_expr = now_expr_for_dialect(dialect)
@@ -247,7 +281,6 @@ async def bulk_upsert_import_rows(
                 (sa.func.length(stmt.excluded.proxy_path) > 0, stmt.excluded.proxy_path),
                 else_=Image.proxy_path,
             ),
-            "created_import_id": stmt.excluded.created_import_id,
             "width": sa.case((stmt.excluded.width.is_not(None), stmt.excluded.width), else_=Image.width),
             "height": sa.case((stmt.excluded.height.is_not(None), stmt.excluded.height), else_=Image.height),
             "aspect_ratio": sa.case(
@@ -299,16 +332,40 @@ async def bulk_upsert_import_rows(
     if keys:
         await session.execute(
             sa.update(Image)
-            .where(Image.created_import_id == int(import_id))
             .where(Image.proxy_path == "")
             .where(sa.tuple_(Image.illust_id, Image.page_index).in_(keys))
             .values(proxy_path=sa.text("'/i/' || id || '.' || ext"))
         )
 
-        id_rows = (
+        image_rows = (
             await session.execute(
-                sa.select(Image.id).where(sa.tuple_(Image.illust_id, Image.page_index).in_(keys))
+                sa.select(
+                    Image.id,
+                    Image.illust_id,
+                    Image.page_index,
+                    Image.created_import_id,
+                ).where(sa.tuple_(Image.illust_id, Image.page_index).in_(keys))
             )
-        ).scalars().all()
-        return [int(x) for x in id_rows]
+        ).all()
+
+        membership_rows = []
+        for row in image_rows:
+            key = (int(row.illust_id), int(row.page_index))
+            previous = existing_by_key.get(key)
+            membership_rows.append(
+                {
+                    "import_id": int(import_id),
+                    "image_id": int(row.id),
+                    "was_created": int(row.created_import_id or 0) == int(import_id),
+                    "previous_status": int(previous[1]) if previous is not None else None,
+                }
+            )
+        if membership_rows:
+            membership_insert = insert_for_dialect(ImportImage, dialect_name=dialect).values(membership_rows)
+            membership_insert = membership_insert.on_conflict_do_nothing(
+                index_elements=["import_id", "image_id"]
+            )
+            await session.execute(membership_insert)
+
+        return [int(row.id) for row in image_rows]
     return []

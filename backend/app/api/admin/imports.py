@@ -19,6 +19,7 @@ from app.core.data_files import get_sqlite_db_dir, make_file_ref
 from app.core.env_parse import parse_int_env
 from app.core.errors import ApiError, ErrorCode
 from app.core.request_id import get_or_create_request_id
+from app.core.random_engine_sync import maybe_publish_engine_deletes, maybe_publish_engine_upserts
 from app.core.soft_json import soft_json_object
 from app.core.time import iso_utc_ms
 from app.core.pixiv_urls import parse_pixiv_original_url
@@ -415,8 +416,9 @@ async def create_import(
     "/imports/{import_id}/rollback",
     summary="Rollback import",
     description=(
-        "Bulk-set catalog image status for an import via CatalogStore "
-        "(`mode=disable`→status 2, `mode=delete`→status 4). Does not delete job history."
+        "Persist a rollback tombstone, then use CatalogStore to update only images created by this import "
+        "(`mode=disable`→status 2, `mode=delete`→status 4). Active/retried import jobs "
+        "observe the tombstone and cannot add more rows. Does not delete job history."
     ),
 )
 async def rollback_import(
@@ -436,26 +438,46 @@ async def rollback_import(
     Session = resolve_sessionmaker(request, engine)
     catalog = resolve_catalog_store(getattr(request.app.state, "catalog_store", None))
 
-    async def _op() -> int:
+    async def _op() -> list[int]:
         async with Session() as session:
-            imp = await session.get(Import, import_id)
+            imp = (
+                await session.execute(
+                    sa.select(Import)
+                    .where(Import.id == int(import_id))
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
             if imp is None:
                 raise ApiError(code=ErrorCode.NOT_FOUND, message="Import not found", status_code=404)
+            imp.rollback_mode = str(body.mode)
+            imp.rolled_back_at = iso_utc_ms()
 
             # now_expr=None → CatalogStore picks dual-dialect UTC text (sqlite/pg).
-            updated = await catalog.set_status_for_import(
+            image_ids = await catalog.set_status_for_import(
                 session,
                 import_id=import_id,
                 status=int(target_status),
                 now_expr=None,
             )
             await session.commit()
-            return int(updated)
+            return [int(value) for value in image_ids]
 
-    updated = await with_sqlite_busy_retry(_op)
+    image_ids = await with_sqlite_busy_retry(_op)
+    settings = getattr(request.app.state, "settings", None)
+    if image_ids:
+        if body.mode == "delete":
+            await maybe_publish_engine_deletes(image_ids=list(image_ids), settings=settings)
+        else:
+            await maybe_publish_engine_upserts(
+                engine,
+                image_ids=list(image_ids),
+                settings=settings,
+                catalog=catalog,
+                tag_store=getattr(request.app.state, "tag_store", None),
+            )
 
     return admin_ok(request, payload={"mode": body.mode,
-        "updated": updated}, request_id=rid)
+        "updated": len(image_ids)}, request_id=rid)
 
 
 @router.get(

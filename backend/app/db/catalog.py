@@ -201,7 +201,7 @@ class CatalogStore(Protocol):
         import_id: int,
         status: int,
         now_expr: object | None = None,
-    ) -> int: ...
+    ) -> list[int]: ...
 
     async def delete_images_by_ids(
         self,
@@ -456,7 +456,7 @@ class SqliteCatalogStore:
         import_id: int,
         status: int,
         now_expr: object | None = None,
-    ) -> int:
+    ) -> list[int]:
         return await set_status_for_import(
             session,
             import_id=import_id,

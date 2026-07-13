@@ -293,6 +293,7 @@ def test_sqlite_catalog_store_bulk_upsert_import(tmp_path: Path) -> None:
         import sqlalchemy as sa
 
         from app.db.models.images import Image
+        from app.db.models.import_images import ImportImage
         from app.db.models.imports import Import
 
         async with engine.begin() as conn:
@@ -390,6 +391,39 @@ def test_sqlite_catalog_store_bulk_upsert_import(tmp_path: Path) -> None:
             assert "100_p0b" in str(row.original_url)
             # empty proxy_path on conflict keeps existing (CASE length > 0)
             assert str(row.proxy_path) == f"/i/{got[0].id}.jpg"
+
+            imp2 = Import(created_by="admin", source="duplicate")
+            session.add(imp2)
+            await session.flush()
+            duplicate_import_id = int(imp2.id)
+            await store.bulk_upsert_import_rows(
+                session,
+                rows=[
+                    {
+                        "illust_id": 100,
+                        "page_index": 0,
+                        "ext": "jpg",
+                        "original_url": "https://example.test/100_p0c.jpg",
+                        "proxy_path": "",
+                        "random_key": 0.8,
+                        "created_import_id": duplicate_import_id,
+                    }
+                ],
+                keys=[(100, 0)],
+                import_id=duplicate_import_id,
+            )
+            await session.commit()
+            owner = await session.scalar(sa.select(Image.created_import_id).where(Image.id == int(got[0].id)))
+            assert int(owner or 0) == import_id
+            duplicate_membership = await session.scalar(
+                sa.select(ImportImage).where(
+                    ImportImage.import_id == duplicate_import_id,
+                    ImportImage.image_id == int(got[0].id),
+                )
+            )
+            assert duplicate_membership is not None
+            assert duplicate_membership.was_created is False
+            assert duplicate_membership.previous_status == 1
         await engine.dispose()
 
     asyncio.run(_run())
@@ -401,6 +435,7 @@ def test_sqlite_catalog_store_import_map_and_status(tmp_path: Path) -> None:
     async def _run() -> None:
         import sqlalchemy as sa
 
+        from app.db.models.import_images import ImportImage
         from app.db.models.images import Image
         from app.db.models.imports import Import
 
@@ -450,6 +485,13 @@ def test_sqlite_catalog_store_import_map_and_status(tmp_path: Path) -> None:
             await session.refresh(a)
             await session.refresh(b)
             await session.refresh(other)
+            session.add_all(
+                [
+                    ImportImage(import_id=import_id, image_id=int(a.id), was_created=True),
+                    ImportImage(import_id=import_id, image_id=int(b.id), was_created=True),
+                ]
+            )
+            await session.commit()
 
             mapping = await store.map_image_ids_by_illust_page(
                 session,
@@ -464,7 +506,7 @@ def test_sqlite_catalog_store_import_map_and_status(tmp_path: Path) -> None:
 
             updated = await store.set_status_for_import(session, import_id=import_id, status=2)
             await session.commit()
-            assert updated == 2
+            assert updated == [int(a.id), int(b.id)]
             statuses = dict(
                 (
                     await session.execute(

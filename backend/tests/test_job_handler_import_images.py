@@ -123,6 +123,86 @@ def test_job_handler_import_images_happy_path_and_enqueues_hydrate(tmp_path: Pat
     asyncio.run(_run())
 
 
+def test_job_handler_import_images_republishes_status_after_concurrent_rollback(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    db_path = tmp_path / "handler_import_images_rollback_race.db"
+    engine = create_engine(_sqlite_url(db_path))
+    publish_calls: list[list[int]] = []
+
+    async def fake_publish(_engine, *, image_ids, **_kwargs):  # type: ignore[no-untyped-def]
+        ids = [int(value) for value in image_ids]
+        publish_calls.append(ids)
+        if len(publish_calls) == 1:
+            Session = create_sessionmaker(engine)
+            async with Session() as session:
+                imp = await session.get(Import, 1)
+                assert imp is not None
+                imp.rollback_mode = "disable"
+                imp.rolled_back_at = "2026-07-13T00:00:00.000Z"
+                await session.execute(sa.update(Image).where(Image.id.in_(ids)).values(status=2))
+                await session.commit()
+        return {"ok": True}
+
+    monkeypatch.setattr(
+        "app.jobs.handlers.import_images.maybe_publish_engine_upserts",
+        fake_publish,
+        raising=True,
+    )
+
+    async def _run() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        Session = create_sessionmaker(engine)
+        async with Session() as session:
+            imp = Import(created_by="admin", source="manual")
+            session.add(imp)
+            await session.flush()
+            assert int(imp.id) == 1
+            session.add(
+                JobRow(
+                    type="import_images",
+                    status="pending",
+                    payload_json=json.dumps(
+                        {
+                            "import_id": int(imp.id),
+                            "hydrate_on_import": False,
+                            "text_lines": [
+                                "https://i.pximg.net/img-original/img/2020/01/01/00/00/00/333_p0.jpg"
+                            ],
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                    ref_type="import",
+                    ref_id=str(int(imp.id)),
+                )
+            )
+            await session.commit()
+
+        dispatcher = JobDispatcher()
+        dispatcher.register("import_images", build_import_images_handler(engine))
+        claimed = await claim_next_job(engine, worker_id="w1")
+        assert claimed is not None
+        transition = await execute_claimed_job(engine, dispatcher, job_row=claimed, worker_id="w1")
+        assert transition is not None
+        assert transition.status.value == "completed"
+
+        async with Session() as session:
+            image = (await session.execute(sa.select(Image))).scalar_one()
+            assert int(image.status) == 2
+            imp = await session.get(Import, 1)
+            assert imp is not None and imp.rollback_mode == "disable"
+
+        assert len(publish_calls) == 2
+        assert publish_calls[0] == publish_calls[1]
+        await engine.dispose()
+
+    asyncio.run(_run())
+
+
 def test_job_handler_import_images_retries_on_sqlite_busy(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("SQLITE_BUSY_TIMEOUT_MS", "100")
     monkeypatch.setenv("SQLITE_BUSY_RETRIES", "20")

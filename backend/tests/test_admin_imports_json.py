@@ -3,10 +3,14 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import sqlalchemy as sa
 from fastapi.testclient import TestClient
 
 from app.core.security import create_jwt
 from app.db.models.base import Base
+from app.db.models.images import Image
+from app.db.models.imports import Import
+from app.db.models.jobs import JobRow
 from app.main import create_app
 from app.worker import build_default_dispatcher, poll_and_execute_jobs
 
@@ -362,6 +366,171 @@ def test_admin_imports_rollback_disable_and_delete(tmp_path: Path, monkeypatch) 
         assert delete_resp.status_code == 200
         assert delete_resp.json()["updated"] == 2
         assert asyncio.run(_count_status(4)) == 2
+
+
+def test_admin_imports_duplicate_rollback_preserves_owner_and_syncs_engine(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "admin_imports_duplicate_rollback.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+
+    published_upserts: list[list[int]] = []
+    published_deletes: list[list[int]] = []
+
+    async def fake_upserts(_engine, *, image_ids, **_kwargs):  # type: ignore[no-untyped-def]
+        published_upserts.append([int(v) for v in image_ids])
+        return {"ok": True}
+
+    async def fake_deletes(*, image_ids, **_kwargs):  # type: ignore[no-untyped-def]
+        published_deletes.append([int(v) for v in image_ids])
+        return {"ok": True}
+
+    monkeypatch.setattr("app.api.admin.imports.maybe_publish_engine_upserts", fake_upserts, raising=False)
+    monkeypatch.setattr("app.api.admin.imports.maybe_publish_engine_deletes", fake_deletes, raising=False)
+
+    app = create_app()
+
+    async def _migrate() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_migrate())
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+    url = "https://i.pximg.net/img-original/img/2023/01/01/00/00/00/987654_p0.jpg"
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/admin/api/imports",
+            headers=headers,
+            json={"text": url, "dry_run": False, "hydrate_on_import": False, "source": "first"},
+        )
+        second = client.post(
+            "/admin/api/imports",
+            headers=headers,
+            json={"text": url, "dry_run": False, "hydrate_on_import": False, "source": "second"},
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+        first_id = int(first.json()["import_id"])
+        second_id = int(second.json()["import_id"])
+
+        async def _image_state() -> tuple[int, int, int]:
+            async with app.state.sessionmaker() as session:
+                image = (await session.execute(sa.select(Image).where(Image.illust_id == 987654))).scalar_one()
+                return int(image.id), int(image.created_import_id or 0), int(image.status)
+
+        image_id, owner_id, status = asyncio.run(_image_state())
+        assert owner_id == first_id
+        assert status == 1
+
+        duplicate_rollback = client.post(
+            f"/admin/api/imports/{second_id}/rollback",
+            headers=headers,
+            json={"mode": "disable"},
+        )
+        assert duplicate_rollback.status_code == 200
+        assert duplicate_rollback.json()["updated"] == 0
+        assert asyncio.run(_image_state()) == (image_id, first_id, 1)
+        assert published_upserts == []
+        assert published_deletes == []
+
+        owner_disable = client.post(
+            f"/admin/api/imports/{first_id}/rollback",
+            headers=headers,
+            json={"mode": "disable"},
+        )
+        assert owner_disable.status_code == 200
+        assert owner_disable.json()["updated"] == 1
+        assert asyncio.run(_image_state()) == (image_id, first_id, 2)
+        assert published_upserts == [[image_id]]
+
+        owner_delete = client.post(
+            f"/admin/api/imports/{first_id}/rollback",
+            headers=headers,
+            json={"mode": "delete"},
+        )
+        assert owner_delete.status_code == 200
+        assert owner_delete.json()["updated"] == 1
+        assert asyncio.run(_image_state()) == (image_id, first_id, 4)
+        assert published_deletes == [[image_id]]
+
+
+def test_admin_imports_rollback_tombstone_blocks_active_import_job(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "admin_imports_active_rollback.db"
+    db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
+
+    monkeypatch.setenv("APP_ENV", "dev")
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    monkeypatch.setenv("SECRET_KEY", "secret_test")
+    monkeypatch.setenv("ADMIN_USERNAME", "admin")
+    monkeypatch.setenv("IMPORT_INLINE_MAX_ACCEPTED", "0")
+
+    app = create_app()
+
+    async def _migrate() -> None:
+        async with app.state.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_migrate())
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/admin/api/imports",
+            headers=headers,
+            json={
+                "text": "https://i.pximg.net/img-original/img/2023/01/01/00/00/00/765432_p0.jpg",
+                "dry_run": False,
+                "hydrate_on_import": True,
+                "source": "pending",
+            },
+        )
+        assert created.status_code == 200
+        assert created.json()["executed_inline"] is False
+        import_id = int(created.json()["import_id"])
+
+        rollback = client.post(
+            f"/admin/api/imports/{import_id}/rollback",
+            headers=headers,
+            json={"mode": "disable"},
+        )
+        assert rollback.status_code == 200
+        assert rollback.json()["updated"] == 0
+
+        async def _run_worker_and_read() -> tuple[int, int, str, str | None]:
+            dispatcher = build_default_dispatcher(app.state.engine)
+            ran = await poll_and_execute_jobs(app.state.engine, dispatcher, worker_id="test-worker", max_jobs=10)
+            assert ran >= 1
+            async with app.state.sessionmaker() as session:
+                image_count = int(await session.scalar(sa.select(sa.func.count()).select_from(Image)) or 0)
+                hydrate_count = int(
+                    await session.scalar(
+                        sa.select(sa.func.count())
+                        .select_from(JobRow)
+                        .where(JobRow.type == "hydrate_metadata")
+                    )
+                    or 0
+                )
+                job_status = str(
+                    await session.scalar(
+                        sa.select(JobRow.status).where(
+                            JobRow.ref_type == "import",
+                            JobRow.ref_id == str(import_id),
+                        )
+                    )
+                    or ""
+                )
+                rollback_mode = await session.scalar(
+                    sa.select(Import.rollback_mode).where(Import.id == import_id)
+                )
+                return image_count, hydrate_count, job_status, str(rollback_mode) if rollback_mode is not None else None
+
+        assert asyncio.run(_run_worker_and_read()) == (0, 0, "dlq", "disable")
 
 
 def test_admin_imports_invalid_body_returns_400(tmp_path: Path, monkeypatch) -> None:

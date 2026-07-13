@@ -25,4 +25,5 @@ class Import(Base):
     failed: Mapped[int] = mapped_column(sa.Integer(), nullable=False, server_default=sa.text("0"))
 
     detail_json: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
-
+    rollback_mode: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    rolled_back_at: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
