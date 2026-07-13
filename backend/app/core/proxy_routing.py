@@ -25,12 +25,13 @@ _enabled_pools_cache: tuple[float, int, tuple[int, ...]] | None = None  # (mono,
 _pool_endpoints_cache: dict[tuple[int, int], tuple[float, list[Any]]] = {}  # (engine_id, pool_id) -> (mono, rows)
 
 # Fernet decrypt is CPU-heavy on hot residential pick paths; cache built URI strings briefly.
-# Key includes password_enc so admin password rotation invalidates without explicit purge.
-# pool_id is NOT part of the cache key — URI is endpoint-local; callers reattach pool_id.
+# The full connection fingerprint prevents endpoint edits or another database reusing the
+# same endpoint id from receiving a stale URI. pool_id is intentionally excluded because
+# the URI is endpoint-local; callers reattach pool_id to the cached value.
 _PROXY_URI_CACHE_TTL_S = 60.0
 _PROXY_URI_CACHE_MAX = 256
-# (endpoint_id, password_enc) -> (mono, uri_str)
-_proxy_uri_cache: dict[tuple[int, str], tuple[float, str]] = {}
+_ProxyUriCacheKey = tuple[str, int, str, str, int, str, str]
+_proxy_uri_cache: dict[_ProxyUriCacheKey, tuple[float, str]] = {}
 
 
 _PIXIV_HOST_SUFFIXES = (
@@ -302,10 +303,11 @@ async def _pick_endpoint_in_pool(engine: AsyncEngine, *, pool_id: int, now_iso: 
 
 
 def invalidate_proxy_pool_caches() -> None:
-    """Drop pool/endpoint list caches (call after admin pool/endpoint mutations if needed)."""
+    """Drop all routing caches after proxy pool or endpoint mutations."""
     global _enabled_pools_cache
     _enabled_pools_cache = None
     _pool_endpoints_cache.clear()
+    _proxy_uri_cache.clear()
 
 
 async def _load_token_binding(
@@ -383,8 +385,7 @@ LIMIT 1;
     return await with_sqlite_busy_retry(_op)
 
 
-def _proxy_uri_cache_get(endpoint_id: int, password_enc: str) -> str | None:
-    key = (int(endpoint_id), str(password_enc or ""))
+def _proxy_uri_cache_get(key: _ProxyUriCacheKey) -> str | None:
     hit = _proxy_uri_cache.get(key)
     if hit is None:
         return None
@@ -395,8 +396,7 @@ def _proxy_uri_cache_get(endpoint_id: int, password_enc: str) -> str | None:
     return str(uri)
 
 
-def _proxy_uri_cache_put(endpoint_id: int, password_enc: str, uri: str) -> None:
-    key = (int(endpoint_id), str(password_enc or ""))
+def _proxy_uri_cache_put(key: _ProxyUriCacheKey, uri: str) -> None:
     if len(_proxy_uri_cache) >= _PROXY_URI_CACHE_MAX and key not in _proxy_uri_cache:
         # Drop oldest by insert order (CPython dict preserves order).
         try:
@@ -423,7 +423,16 @@ def _proxy_uri_from_endpoint_row(
     username: str,
     password_enc: str,
 ) -> ProxyUri:
-    cached_uri = _proxy_uri_cache_get(int(endpoint_id), str(password_enc or ""))
+    cache_key: _ProxyUriCacheKey = (
+        str(getattr(settings, "database_url", "") or ""),
+        int(endpoint_id),
+        str(scheme or ""),
+        str(host or ""),
+        int(port),
+        str(username or ""),
+        str(password_enc or ""),
+    )
+    cached_uri = _proxy_uri_cache_get(cache_key)
     if cached_uri is not None:
         return ProxyUri(uri=cached_uri, endpoint_id=int(endpoint_id), pool_id=int(pool_id))
 
@@ -448,7 +457,7 @@ def _proxy_uri_from_endpoint_row(
     except Exception as exc:
         raise ApiError(code=ErrorCode.INTERNAL_ERROR, message="Invalid proxy endpoint", status_code=500) from exc
 
-    _proxy_uri_cache_put(int(endpoint_id), str(password_enc or ""), uri)
+    _proxy_uri_cache_put(cache_key, uri)
     return ProxyUri(uri=uri, endpoint_id=int(endpoint_id), pool_id=int(pool_id))
 
 

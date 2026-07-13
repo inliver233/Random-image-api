@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from app.core import proxy_routing
 from app.core.errors import ApiError, ErrorCode
 from app.core.proxy_routing import (
     invalidate_proxy_pool_caches,
@@ -21,6 +23,77 @@ from app.db.models.proxy_pools import ProxyPool
 from app.db.models.runtime_settings import RuntimeSetting
 from app.db.session import create_sessionmaker
 from app.main import create_app
+
+
+def test_proxy_uri_cache_key_includes_database_and_connection_fields() -> None:
+    proxy_routing.reset_proxy_uri_cache_for_tests()
+    settings = SimpleNamespace(field_encryption_key="", database_url="sqlite+aiosqlite:///first.db")
+
+    first = proxy_routing._proxy_uri_from_endpoint_row(
+        settings,
+        endpoint_id=1,
+        pool_id=1,
+        scheme="http",
+        host="1.1.1.1",
+        port=8000,
+        username="user-a",
+        password_enc="",
+    )
+    changed_endpoint = proxy_routing._proxy_uri_from_endpoint_row(
+        settings,
+        endpoint_id=1,
+        pool_id=1,
+        scheme="https",
+        host="2.2.2.2",
+        port=9000,
+        username="user-b",
+        password_enc="",
+    )
+    other_database = proxy_routing._proxy_uri_from_endpoint_row(
+        SimpleNamespace(field_encryption_key="", database_url="sqlite+aiosqlite:///second.db"),
+        endpoint_id=1,
+        pool_id=1,
+        scheme="socks5",
+        host="3.3.3.3",
+        port=1080,
+        username="",
+        password_enc="",
+    )
+
+    assert first.uri == "http://user-a:@1.1.1.1:8000"
+    assert changed_endpoint.uri == "https://user-b:@2.2.2.2:9000"
+    assert other_database.uri == "socks5://3.3.3.3:1080"
+
+
+def test_invalidate_proxy_pool_caches_clears_proxy_uri_cache(monkeypatch) -> None:
+    proxy_routing.reset_proxy_uri_cache_for_tests()
+    calls = 0
+
+    def _build_proxy_uri(*args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        return f"http://proxy-{calls}.test:8080"
+
+    monkeypatch.setattr(proxy_routing, "build_proxy_uri", _build_proxy_uri)
+    settings = SimpleNamespace(field_encryption_key="", database_url="sqlite+aiosqlite:///cache.db")
+    endpoint = {
+        "endpoint_id": 1,
+        "pool_id": 1,
+        "scheme": "http",
+        "host": "proxy.test",
+        "port": 8080,
+        "username": "",
+        "password_enc": "",
+    }
+
+    first = proxy_routing._proxy_uri_from_endpoint_row(settings, **endpoint)
+    cached = proxy_routing._proxy_uri_from_endpoint_row(settings, **endpoint)
+    proxy_routing.invalidate_proxy_pool_caches()
+    refreshed = proxy_routing._proxy_uri_from_endpoint_row(settings, **endpoint)
+
+    assert first.uri == cached.uri
+    assert refreshed.uri != cached.uri
+    assert calls == 2
 
 
 def test_proxy_route_pools_suffix_matching_prefers_longest() -> None:
