@@ -1,8 +1,8 @@
 # Codex Review Remediation Plan
 
-> Branch: `dev`  
-> Baseline: `4c07a5482dda2ff7810a61ae0054ad195c8ec852`  
-> Audit source: root `codexreview.md` (ignored by `/*.md`, read directly)  
+> Branch: `dev`
+> Baseline: `4c07a5482dda2ff7810a61ae0054ad195c8ec852`
+> Audit source: root `codexreview.md` (ignored by `/*.md`, read directly)
 > Rule: an item is marked `completed` only after code/history revalidation, a regression test, relevant integration checks, independent review, and a recorded commit.
 
 ## Working rules
@@ -34,7 +34,7 @@ The root-cause text below is the audit hypothesis to revalidate, not completion 
 
 | ID | Status | Root cause to revalidate | Planned implementation | Primary files | Required tests/evidence | Depends on | Commit |
 |---|---|---|---|---|---|---|---|
-| B1 | in-progress | Production alias handling diverges between defaults and `is_prod`; known example credentials are accepted. | Centralize production detection; reject known insecure secrets/passwords; cover `prod` and `production`. | `backend/app/core/config.py`, `deploy/.env.example`, config tests | Focused pytest; production startup matrix; full backend gate | none | pending |
+| B1 | completed | Production alias handling diverged between defaults and `is_prod`; known example credentials were accepted. | Centralized production detection and rejected the built-in and `.env.example` credential placeholders. | `backend/app/core/config.py`, config tests | Reproduced 6 failing cases before fix; Python 3.11 compileall; `17 passed`; independent agent review found no blocker. Full backend gate remains tracked by H20. | none | `9c95eef` |
 | B2 | pending | Alembic rewrites async PG URL to a sync driver not installed in the image. | Use Alembic async online mode or an explicitly installed supported sync driver. | `backend/alembic/env.py`, requirements, Dockerfile, migrations | Clean PostgreSQL 16 `alembic upgrade head`; image startup | B1 | pending |
 | B3 | pending | PG job candidate select lacks row locking and revalidation. | Dialect-specific `FOR UPDATE SKIP LOCKED` claim in one transaction. | `backend/app/jobs/claim.py`, queue tests | Two real PG connections with barrier; no duplicate claim | B2 | pending |
 | B4 | pending | Hydrate token-exhaustion path overwrites a recoverable error with permanent no-token state. | Separate globally unavailable tokens from per-attempt exclusions and propagate the last defer. | `backend/app/jobs/handlers/hydrate_metadata.py`, executor tests | Failing rate-limit/network/proxy-required tests become deferred, plus permanent no-token case | none | pending |
@@ -69,7 +69,7 @@ The root-cause text below is the audit hypothesis to revalidate, not completion 
 | M5 | pending | Migration 0019 creates a unique partial index without deterministic cleanup. | Dedupe/cancel older active jobs before index creation; add preflight. | migration 0019 or follow-up | Upgrade fixture with duplicates on SQLite and PG | B2, M4 | pending |
 | M6 | pending | PG tag/author search falls back to unindexed `%LIKE%`. | Preserve case-insensitive semantics and add pg_trgm GIN or supported FTS. | tag/author queries and migrations | PG semantic parity and query plans at scale | B2 | pending |
 | M7 | pending | Admin image list aggregates the complete image-tag table before paging. | Page image ids first, then aggregate tags only for that page. | admin list query | SQL/result parity and plan/perf test | B2 optional | pending |
-| M8 | in-progress | Production permits default SQLite and known example secrets. | Reject SQLite in production unless explicit safe override; reject known placeholders. | config/deploy/docs/tests | prod matrix including override; startup evidence | B1 | pending |
+| M8 | pending | Production permits default SQLite and known example secrets. | Reject SQLite in production unless explicit safe override; reject known placeholders. | config/deploy/docs/tests | prod matrix including override; startup evidence | B1 | pending |
 | M9 | pending | SQLite defaults allow excessive concurrent writers. | Conservative SQLite write budget and explicit PG requirement for high concurrency. | config/worker/deploy | concurrency/busy-rate test and docs | M8 | pending |
 | M10 | pending | Each API replica overwrites a shared random-total value. | Use metrics as source or atomic deltas/per-instance shards. | totals persistence/status | Two-instance monotonicity test | B2/Redis decision | pending |
 | M11 | pending | Key cooldown/circuit/emergency states are isolated per process. | Share critical revisions/state or explicitly surface per-instance degraded semantics. | Engine/CF/Redis runtime state | Multi-replica consistency/failover tests | H16 | pending |
@@ -99,9 +99,12 @@ The root-cause text below is the audit hypothesis to revalidate, not completion 
 | Date | Scope | Command/evidence | Result |
 |---|---|---|---|
 | 2026-07-13 | Initial repository guard | `git branch --show-current`; `git rev-parse HEAD`; `git status --short --branch` | On `dev` at baseline; only the listed pre-existing untracked files were present. |
+| 2026-07-13 | B1 failing regression | `py -3.11 -m pytest -q backend/tests/test_config.py` before implementation | `production` accepted default credentials and all four known placeholders; 6 failures reproduced. |
+| 2026-07-13 | B1 fix | `py -3.11 -m compileall -q backend/app/core/config.py backend/tests/test_config.py`; `py -3.11 -m pytest -q backend/tests/test_config.py` | PASS; 17 tests. Independent read-only review: no blocking issue. |
 
 ## Commit log
 
 | Commit | Audit IDs | Verification |
 |---|---|---|
-| pending | — | — |
+| `6a6221f` | Tracking foundation | Added the audit matrix, dependencies, validation log, and tracked benchmark path exceptions. |
+| `9c95eef` | B1 | Unified production aliases and rejected insecure built-in/example credentials; focused Python 3.11 tests pass. |
