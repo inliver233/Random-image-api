@@ -49,19 +49,22 @@ def test_default_random_pick_plan_uses_ordered_index(tmp_path: Path) -> None:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
 
-        sql = (
-            "EXPLAIN QUERY PLAN "
-            "SELECT id FROM images "
-            "WHERE status = 1 AND x_restrict = 0 "
-            "AND (last_fail_at IS NULL OR last_fail_at <= '2026-07-13T00:00:00Z') "
-            "AND random_key >= 0.5 "
-            "ORDER BY random_key ASC LIMIT 1"
+        where_sql = (
+            "status = 1 AND x_restrict = 0 "
+            "AND (last_fail_at IS NULL OR last_fail_at <= '2026-07-13T00:00:00Z')"
         )
+        sqls = [
+            "EXPLAIN QUERY PLAN SELECT id FROM images "
+            f"WHERE {where_sql} AND random_key >= 0.5 ORDER BY random_key ASC LIMIT 1",
+            "EXPLAIN QUERY PLAN SELECT id FROM images "
+            f"WHERE {where_sql} ORDER BY random_key ASC LIMIT 1",
+        ]
         async with engine.connect() as conn:
-            rows = (await conn.exec_driver_sql(sql)).all()
-        details = [str(row[3]) for row in rows]
-        assert any("idx_images_status_x_random" in detail for detail in details), details
-        assert not any("TEMP B-TREE FOR ORDER BY" in detail for detail in details), details
+            plans = [(await conn.exec_driver_sql(sql)).all() for sql in sqls]
+        for rows in plans:
+            details = [str(row[3]) for row in rows]
+            assert any("idx_images_status_x_random" in detail for detail in details), details
+            assert not any("TEMP B-TREE FOR ORDER BY" in detail for detail in details), details
         await engine.dispose()
 
     asyncio.run(_run())
