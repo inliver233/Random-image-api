@@ -1,10 +1,31 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Any
 
 from app.core.recommendation import multiplier_for_image, score_image_with_time_boosts
 from app.db.random_pick_port import RandomPickPort, resolve_random_pick
+
+
+def _quality_allowed_values(multipliers: dict[str, float]) -> tuple[set[int | None], set[int | None]]:
+    ai_allowed: set[int | None] = set()
+    if float(multipliers.get("ai", 1.0)) > 0.0:
+        ai_allowed.add(1)
+    if float(multipliers.get("non_ai", 1.0)) > 0.0:
+        ai_allowed.add(0)
+    if float(multipliers.get("unknown_ai", 1.0)) > 0.0:
+        ai_allowed.add(None)
+    illust_allowed: set[int | None] = set()
+    if float(multipliers.get("illust", 1.0)) > 0.0:
+        illust_allowed.add(0)
+    if float(multipliers.get("manga", 1.0)) > 0.0:
+        illust_allowed.add(1)
+    if float(multipliers.get("ugoira", 1.0)) > 0.0:
+        illust_allowed.add(2)
+    if float(multipliers.get("unknown_illust_type", 1.0)) > 0.0:
+        illust_allowed.add(None)
+    return ai_allowed, illust_allowed
 
 
 async def pick_by_random_key(
@@ -66,23 +87,7 @@ async def pick_by_quality(
 
     # 批量抽样：一次性取 N 个候选（必要时 wrap-around 再取一次），避免 N 次 DB 循环查询。
     # 若用户把某些类别倍率设为 0（例如 manga=0），直接在 SQL 抽样阶段剔除，减少无效候选。
-    ai_allowed: set[int | None] = set()
-    if float(multipliers.get("ai", 1.0)) > 0.0:
-        ai_allowed.add(1)
-    if float(multipliers.get("non_ai", 1.0)) > 0.0:
-        ai_allowed.add(0)
-    if float(multipliers.get("unknown_ai", 1.0)) > 0.0:
-        ai_allowed.add(None)
-
-    illust_allowed: set[int | None] = set()
-    if float(multipliers.get("illust", 1.0)) > 0.0:
-        illust_allowed.add(0)
-    if float(multipliers.get("manga", 1.0)) > 0.0:
-        illust_allowed.add(1)
-    if float(multipliers.get("ugoira", 1.0)) > 0.0:
-        illust_allowed.add(2)
-    if float(multipliers.get("unknown_illust_type", 1.0)) > 0.0:
-        illust_allowed.add(None)
+    ai_allowed, illust_allowed = _quality_allowed_values(multipliers)
 
     if not ai_allowed or not illust_allowed:
         return None, {
@@ -207,6 +212,185 @@ async def pick_by_quality(
             "quality_multiplier": float(best_multiplier),
         },
     )
+
+
+class _CandidatePickPort:
+    """In-memory candidate port used to select a feed batch without more DB queries."""
+
+    backend = "memory-candidates"
+
+    def __init__(self, images: Sequence[Any]) -> None:
+        self._images = list(images)
+
+    async def pick_many(
+        self,
+        _session: Any,
+        *,
+        limit: int,
+        exclude_image_ids: Sequence[int] | None = None,
+        **_kwargs: Any,
+    ) -> list[Any]:
+        excluded = {int(value) for value in exclude_image_ids or []}
+        return [image for image in self._images if int(image.id) not in excluded][: max(0, int(limit))]
+
+    async def pick_one(
+        self,
+        session: Any,
+        *,
+        exclude_image_ids: Sequence[int] | None = None,
+        **kwargs: Any,
+    ) -> Any | None:
+        images = await self.pick_many(
+            session,
+            limit=1,
+            exclude_image_ids=exclude_image_ids,
+            **kwargs,
+        )
+        return images[0] if images else None
+
+    async def count_candidates(self, _session: Any, **_kwargs: Any) -> int:
+        return len(self._images)
+
+
+async def _pick_batch_candidates(
+    *,
+    session: Any,
+    port: RandomPickPort,
+    rng: Any,
+    target: int,
+    base_exclude: list[int],
+    recent_exclude: list[int],
+    anti_repeat_enabled: bool,
+    dedup_strict: bool,
+    pick_kwargs: dict[str, Any],
+) -> list[Any]:
+    """Prefer non-recent rows, then fill from recent rows when dedup is soft."""
+    target_i = max(0, int(target))
+    if target_i <= 0:
+        return []
+
+    strict_exclude = list(base_exclude)
+    if anti_repeat_enabled and recent_exclude:
+        strict_exclude.extend(int(value) for value in recent_exclude)
+    strict_exclude = list(dict.fromkeys(strict_exclude))
+    images = list(
+        await port.pick_many(
+            session,
+            r=rng.random(),
+            limit=target_i,
+            exclude_image_ids=strict_exclude,
+            **pick_kwargs,
+        )
+    )
+
+    remaining = target_i - len(images)
+    if (
+        remaining > 0
+        and anti_repeat_enabled
+        and recent_exclude
+        and not dedup_strict
+    ):
+        fallback_exclude = list(base_exclude)
+        fallback_exclude.extend(int(image.id) for image in images)
+        fallback = await port.pick_many(
+            session,
+            r=rng.random(),
+            limit=remaining,
+            exclude_image_ids=list(dict.fromkeys(fallback_exclude)),
+            **pick_kwargs,
+        )
+        images.extend(fallback)
+    return images[:target_i]
+
+
+async def pick_many_with_strategy(
+    *,
+    session: Any,
+    pick_ctx: Any,
+    limit: int,
+    exclude_image_ids: list[int] | None = None,
+    pick: RandomPickPort | None = None,
+) -> list[Any]:
+    """Pick one feed batch with bounded DB round trips.
+
+    Feed batching intentionally has a batch-level sampling contract rather than
+    pretending to be repeated seeded ``/random`` calls: random uses one SQL ring
+    batch, while quality shares one bounded candidate window and selects without
+    replacement using the normal scoring function. Filters, soft/strict recent
+    dedup and uniqueness are preserved; Engine traffic is not re-rolled per item.
+    """
+    requested = max(0, int(limit))
+    if requested <= 0:
+        return []
+    port = resolve_random_pick(pick)
+    base_exclude = [int(value) for value in exclude_image_ids or []]
+    if pick_ctx.strategy_norm == "random":
+        return await _pick_batch_candidates(
+            session=session,
+            port=port,
+            rng=pick_ctx.rng,
+            target=requested,
+            base_exclude=base_exclude,
+            recent_exclude=pick_ctx.recent_exclude_image_ids,
+            anti_repeat_enabled=bool(pick_ctx.anti_repeat_enabled),
+            dedup_strict=bool(pick_ctx.dedup_strict),
+            pick_kwargs=pick_ctx.pick_kwargs,
+        )
+
+    ai_allowed, illust_allowed = _quality_allowed_values(pick_ctx.multipliers)
+    if not ai_allowed or not illust_allowed:
+        return []
+    candidate_limit = min(64, max(requested, int(pick_ctx.quality_samples_i)))
+    candidates = await _pick_batch_candidates(
+        session=session,
+        port=port,
+        rng=pick_ctx.rng,
+        target=candidate_limit,
+        base_exclude=base_exclude,
+        recent_exclude=pick_ctx.recent_exclude_image_ids,
+        anti_repeat_enabled=bool(pick_ctx.anti_repeat_enabled),
+        dedup_strict=bool(pick_ctx.dedup_strict),
+        pick_kwargs={
+            **pick_ctx.pick_kwargs,
+            "ai_type_allowed": ai_allowed,
+            "illust_type_allowed": illust_allowed,
+        },
+    )
+    if not candidates:
+        return []
+
+    candidate_port = _CandidatePickPort(candidates)
+    selected: list[Any] = []
+    selected_ids = list(base_exclude)
+    for _ in range(requested):
+        image, _debug = await pick_by_quality(
+            session=session,
+            rng=pick_ctx.rng,
+            pick_kwargs=pick_ctx.pick_kwargs,
+            exclude_image_ids=selected_ids,
+            anti_repeat_enabled=bool(pick_ctx.anti_repeat_enabled),
+            recent_exclude_image_ids=pick_ctx.recent_exclude_image_ids,
+            recent_image_ids=pick_ctx.recent_image_ids,
+            recent_author_ids=pick_ctx.recent_author_ids,
+            dedup_strict=bool(pick_ctx.dedup_strict),
+            dedup_image_penalty=float(pick_ctx.dedup_image_penalty),
+            dedup_author_penalty=float(pick_ctx.dedup_author_penalty),
+            quality_samples_i=len(candidates),
+            pick_mode_raw=pick_ctx.pick_mode_raw,
+            temperature=float(pick_ctx.temperature),
+            score_weights=pick_ctx.score_weights,
+            multipliers=pick_ctx.multipliers,
+            freshness_half_life_days=float(pick_ctx.freshness_half_life_days),
+            velocity_smooth_days=float(pick_ctx.velocity_smooth_days),
+            time_boost_enabled=bool(pick_ctx.time_boost_enabled),
+            debug_base=pick_ctx.debug_base,
+            pick=candidate_port,
+        )
+        if image is None:
+            break
+        selected.append(image)
+        selected_ids.append(int(image.id))
+    return selected
 
 
 def needs_opportunistic_hydrate(image: Any) -> bool:

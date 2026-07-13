@@ -1581,11 +1581,13 @@ def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> 
     // Client-side queue filled by /feed batches (kills N× /random amplification).
     const feedQueue = [];
     let feedFetchPromise = null;
+    let feedAbortController = null;
+    let feedFetchOwner = 0;
     let feedExhausted = false;
 
-    async function fetchFeedBatch(limit) {{
+    async function fetchFeedBatch(limit, signal) {{
       const url = buildFeedUrl(limit);
-      const resp = await fetch(url, {{ cache: "no-store" }});
+      const resp = await fetch(url, {{ cache: "no-store", signal: signal }});
       if (resp.status === 404) {{
         const e = new Error("NO_MATCH");
         e.name = "NO_MATCH";
@@ -1601,8 +1603,9 @@ def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> 
       return body.data.items;
     }}
 
-    async function ensureFeedQueue(minCount) {{
+    async function ensureFeedQueue(minCount, expectedGeneration) {{
       const need = Math.max(1, Number(minCount) || 1);
+      if (expectedGeneration !== generation) return;
       if (feedQueue.length >= need) return;
       if (feedExhausted) return;
       if (feedFetchPromise) {{
@@ -1610,9 +1613,14 @@ def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> 
         return;
       }}
       const batch = Math.max(need, cfg().feedBatch);
-      feedFetchPromise = (async () => {{
+      const myGeneration = generation;
+      const owner = ++feedFetchOwner;
+      const controller = new AbortController();
+      feedAbortController = controller;
+      const promise = (async () => {{
         try {{
-          const items = await fetchFeedBatch(batch);
+          const items = await fetchFeedBatch(batch, controller.signal);
+          if (controller.signal.aborted || myGeneration !== generation || owner !== feedFetchOwner) return;
           if (!items || !items.length) {{
             feedExhausted = true;
             return;
@@ -1622,14 +1630,17 @@ def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> 
           }}
           if (!feedQueue.length) feedExhausted = true;
         }} finally {{
-          feedFetchPromise = null;
+          if (feedFetchPromise === promise) feedFetchPromise = null;
+          if (feedAbortController === controller) feedAbortController = null;
         }}
       }})();
-      await feedFetchPromise;
+      feedFetchPromise = promise;
+      await promise;
     }}
 
-    async function fetchRandomData() {{
+    async function fetchRandomData(expectedGeneration) {{
       // Prefer queued /feed items; refill when empty. Shape matches simple_json data.
+      if (expectedGeneration !== generation) throw new DOMException("stale feed generation", "AbortError");
       if (!feedQueue.length) {{
         if (feedExhausted) {{
           const e = new Error("NO_MATCH");
@@ -1637,7 +1648,7 @@ def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> 
           throw e;
         }}
         try {{
-          await ensureFeedQueue(1);
+          await ensureFeedQueue(1, expectedGeneration);
         }} catch (err) {{
           const name = err && err.name ? String(err.name) : "";
           const msg = err && err.message ? String(err.message) : "";
@@ -1652,10 +1663,11 @@ def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> 
         e.name = "NO_MATCH";
         throw e;
       }}
+      if (expectedGeneration !== generation) throw new DOMException("stale feed generation", "AbortError");
       const data = feedQueue.shift();
       // Speculatively top-up when low so scroll stays smooth without N hot picks.
       if (feedQueue.length < Math.max(3, Math.floor(cfg().feedBatch / 3)) && !feedExhausted && !feedFetchPromise) {{
-        ensureFeedQueue(cfg().feedBatch).catch(() => {{}});
+        ensureFeedQueue(cfg().feedBatch, expectedGeneration).catch(() => {{}});
       }}
       return data;
     }}
@@ -1679,7 +1691,10 @@ def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> 
       failStreak = 0;
 
       try {{ feedQueue.length = 0; }} catch (e) {{}}
+      try {{ if (feedAbortController) feedAbortController.abort(); }} catch (e) {{}}
+      feedFetchOwner += 1;
       feedFetchPromise = null;
+      feedAbortController = null;
       feedExhausted = false;
 
       try {{ allItems.length = 0; }} catch (e) {{}}
@@ -1822,6 +1837,7 @@ def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> 
 
       const attempt = async () => {{
         tries += 1;
+        let consumedFeedItem = false;
         if (done) return;
         if (myGen !== generation) {{
           done = true;
@@ -1829,7 +1845,8 @@ def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> 
           return;
         }}
         try {{
-          const data = await fetchRandomData();
+          const data = await fetchRandomData(myGen);
+          consumedFeedItem = true;
           if (done) return;
           if (myGen !== generation) {{
             done = true;
@@ -1866,7 +1883,7 @@ def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> 
             finishFail("NO_MATCH");
             return;
           }}
-          if (tries < 3) {{
+          if (!consumedFeedItem && tries < 3) {{
             setTimeout(() => attempt(), 250 * tries);
             return;
           }}
@@ -1905,10 +1922,7 @@ def _build_wtf_html(*, base_url: str, public_api_key_required: bool = False) -> 
           try {{ img.src = cascadeFallback; }} catch (e) {{}}
           return;
         }}
-        if (tries < 3) {{
-          setTimeout(() => attempt(), 250 * tries);
-          return;
-        }}
+        // Do not consume replacement picks after primary + local fallback both fail.
         finishFail("IMAGE_ERROR");
       }};
 

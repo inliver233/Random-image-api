@@ -59,6 +59,15 @@ class RandomService(Protocol):
         catalog: CatalogStore | None = None,
     ) -> tuple[list[Any], dict[str, Any] | None]: ...
 
+    async def pick_python_batch(
+        self,
+        *,
+        session: Any,
+        limit: int,
+        exclude_image_ids: list[int] | None = None,
+        pick: RandomPickPort | None = None,
+    ) -> list[Any]: ...
+
 
 @runtime_checkable
 class RandomServiceFactory(Protocol):
@@ -297,6 +306,24 @@ class RandomPickContext:
             catalog=catalog,
             pick=pick,
             skip_engine=bool(skip_engine),
+        )
+
+    async def pick_python_batch(
+        self,
+        *,
+        session: Any,
+        limit: int,
+        exclude_image_ids: list[int] | None = None,
+        pick: RandomPickPort | None = None,
+    ) -> list[Any]:
+        from app.core.random_strategy import pick_many_with_strategy
+
+        return await pick_many_with_strategy(
+            session=session,
+            pick_ctx=self,
+            limit=int(limit),
+            exclude_image_ids=exclude_image_ids,
+            pick=pick,
         )
 
 

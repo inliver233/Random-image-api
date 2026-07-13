@@ -37,6 +37,8 @@ _FEED_LIMIT_DEFAULT = 12
     summary="Batch pick for public browsers",
     description=(
         "Batch pick for /wtf. Items stay lean (no per-item debug). "
+        "Sampling is batch-level rather than repeated seeded /random calls: random uses one ring batch, "
+        "and quality selects without replacement from one bounded shared candidate window. "
         "With `debug=1`, envelope-only `data.debug` exposes dual-run batch honesty "
         "(`engine_status`, `batch_count`, `topup_count`, `topup_skip_engine`)."
     ),
@@ -180,27 +182,18 @@ async def feed_images(
             exclude_ids.append(int(image.id))
             _append_item(image, items)
 
-        # Python loop: full path when engine off/failed, or top-up when engine returned partial.
-        # Sticky-skip dual-run only after a *real* batch attempt (ok/unavailable/circuit/…).
-        # Traffic miss still returns eng_meta with skipped_traffic (one metric); top-up stays
-        # sticky-skip so we do not re-roll TRAFFIC_PERCENT N times per /feed. Dual-run off
-        # leaves eng_meta None → skip_engine_topup False but engine not configured (no spam).
+        # Python batch: one bounded DB candidate call (two only for non-strict recent-dedup
+        # fallback), followed by in-memory quality selection without replacement. Engine was
+        # already attempted once above, so Python top-up never re-rolls engine traffic N times.
         remaining = limit_i - len(items)
         if remaining > 0:
-            skip_engine_topup = isinstance(eng_meta, dict)
-            for _ in range(remaining):
-                image, _debug = await pick_ctx.pick(
-                    session=session,
-                    settings=settings,
-                    httpx_client=httpx_client,
-                    filters=filters,
-                    exclude_image_ids=list(exclude_ids) if exclude_ids else None,
-                    catalog=catalog,
-                    pick=random_pick,
-                    skip_engine=skip_engine_topup,
-                )
-                if image is None:
-                    break
+            topup_images = await pick_ctx.pick_python_batch(
+                session=session,
+                limit=remaining,
+                exclude_image_ids=list(exclude_ids) if exclude_ids else None,
+                pick=random_pick,
+            )
+            for image in topup_images:
                 exclude_ids.append(int(image.id))
                 _append_item(image, items)
                 topup_count += 1
