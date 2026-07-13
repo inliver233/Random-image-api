@@ -352,6 +352,10 @@ def test_job_handler_hydrate_metadata_rate_limit_defers_job_and_updates_token(tm
     monkeypatch.setenv("FIELD_ENCRYPTION_KEY", field_key)
     monkeypatch.setenv("PIXIV_OAUTH_CLIENT_ID", "cid_test")
     monkeypatch.setenv("PIXIV_OAUTH_CLIENT_SECRET", "csec_test")
+    monkeypatch.setattr(
+        "app.jobs.handlers.hydrate_metadata.pixiv_rate_limit_backoff_seconds",
+        lambda *, attempt: 300,
+    )
 
     refresh_token = "rt_old"
 
@@ -429,7 +433,7 @@ def test_job_handler_hydrate_metadata_rate_limit_defers_job_and_updates_token(tm
             now = datetime.now(timezone.utc)
             run_after_dt = _parse_iso_utc_ms(str(job_row.run_after))
             delta_s = (run_after_dt - now).total_seconds()
-            assert 10.0 < delta_s < 180.0
+            assert 240.0 < delta_s < 360.0
 
         await engine.dispose()
 

@@ -651,7 +651,7 @@ LIMIT 1;
         tokens2 = [t for t in tokens if int(t.id) not in exclude_ids]
         # TOKEN-1: no enabled tokens at all → permanent fail (do not 60s-retry churn).
         # Enabled-but-all-in-backoff still defers until next_retry_at.
-        if not any(bool(t.enabled) for t in tokens2):
+        if not any(bool(t.enabled) for t in tokens):
             raise JobPermanentError(
                 f"{ErrorCode.NO_TOKEN_AVAILABLE.value}: no enabled Pixiv token; add/enable refresh_token"
             )
@@ -1098,6 +1098,8 @@ LIMIT 1;
             try:
                 token_id = await _choose_token_id(now_epoch=now_epoch, exclude_ids=tried)
             except JobDeferError as exc:
+                if isinstance(last_exc, JobDeferError):
+                    raise last_exc
                 if last_exc is not None and _is_recoverable_exc(last_exc):
                     code = ErrorCode.PROXY_CONNECT_FAILED
                     if isinstance(last_exc, ApiError):
