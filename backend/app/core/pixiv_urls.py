@@ -41,8 +41,14 @@ def parse_pixiv_original_url(url: str) -> PixivOriginalUrl:
         raise ValueError("url is required")
 
     parsed = urlparse(url)
-    if parsed.scheme.lower() not in {"http", "https"}:
-        raise ValueError("unsupported scheme")
+    if parsed.scheme.lower() != "https" or parsed.username is not None or parsed.password is not None:
+        raise ValueError("unsupported authority")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("unsupported authority") from exc
+    if port not in {None, 443}:
+        raise ValueError("unsupported authority")
 
     host = (parsed.hostname or "").lower()
     if not (is_pximg_host(host) or host in ALLOWED_PXIMG_MIRROR_HOSTS):

@@ -66,6 +66,19 @@ def test_parse_pixiv_original_url_rejects_non_pximg() -> None:
         parse_pixiv_original_url("https://www.pixiv.net/artworks/12345678")
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://i.pximg.net/img-original/img/2023/01/01/00/00/00/12345678_p0.jpg",
+        "https://user:pass@i.pximg.net/img-original/img/2023/01/01/00/00/00/12345678_p0.jpg",
+        "https://i.pximg.net:444/img-original/img/2023/01/01/00/00/00/12345678_p0.jpg",
+    ],
+)
+def test_parse_pixiv_original_url_rejects_insecure_authority(url: str) -> None:
+    with pytest.raises(ValueError, match="unsupported authority"):
+        parse_pixiv_original_url(url)
+
+
 @pytest.mark.parametrize("host", ["evilpximg.net", "notpximg.net", "pximg.net.evil.example"])
 def test_parse_pixiv_original_url_rejects_deceptive_pximg_suffix(host: str) -> None:
     with pytest.raises(ValueError, match="unsupported host"):
