@@ -77,6 +77,7 @@ def test_stream_url_follows_only_validated_pximg_redirects() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requested.append(str(request.url))
+        assert request.extensions["timeout"]["read"] == 4.5
         if request.url.host == "i.pximg.net":
             return httpx.Response(302, headers={"Location": "https://i-cf.pximg.net/final.jpg"}, request=request)
         assert request.headers["Referer"] == PIXIV_REFERER
@@ -89,6 +90,7 @@ def test_stream_url_follows_only_validated_pximg_redirects() -> None:
             transport=httpx.MockTransport(handler),
             cache_control="no-store",
             range_header="bytes=1-2",
+            timeout_s=4.5,
         )
         chunks = [chunk async for chunk in resp.body_iterator]
         return b"".join(chunks)

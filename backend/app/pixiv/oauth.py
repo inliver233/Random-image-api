@@ -139,17 +139,15 @@ async def refresh_access_token(
 
     from app.core.http_client import acquire_proxy_client
 
-    client, owns_client = await acquire_proxy_client(
+    lease = await acquire_proxy_client(
         proxy,
-        timeout_s=timeout_s,
         transport=transport,  # type: ignore[arg-type]
     )
     try:
         # Apply OAuth headers per-request (pooled clients are shared across tokens).
-        resp = await client.post(url, data=payload, headers=headers)
+        resp = await lease.client.post(url, data=payload, headers=headers, timeout=float(timeout_s))
     finally:
-        if owns_client:
-            await client.aclose()
+        await lease.release()
 
     if resp.status_code != 200:
         raise PixivOauthError("OAuth refresh failed", status_code=resp.status_code)

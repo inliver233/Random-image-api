@@ -66,15 +66,11 @@ async def _default_probe(target: ProbeTarget, cfg: ProbeConfig) -> ProbeResult:
 
     try:
         # Reuse process-local proxy client pool (same as residential stream/oauth).
-        client, owns_client = await acquire_proxy_client(
-            target.proxy_uri,
-            timeout_s=float(cfg.timeout_s),
-        )
+        lease = await acquire_proxy_client(target.proxy_uri)
         try:
-            resp = await client.get(cfg.url)
+            resp = await lease.client.get(cfg.url, timeout=float(cfg.timeout_s))
         finally:
-            if owns_client:
-                await client.aclose()
+            await lease.release()
         ok = int(resp.status_code) < 400
         if not ok:
             err = f"status={resp.status_code}"

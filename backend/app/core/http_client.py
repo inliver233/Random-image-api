@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -69,74 +72,170 @@ def reset_control_plane_http_client_for_tests() -> None:
     _control_plane_client = None
 
 
+class HttpClientLease:
+    """One acquired HTTP client reference that must be released exactly once."""
+
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        release: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        self.client = client
+        self._release = release
+        self._release_task: asyncio.Task[None] | None = None
+
+    async def release(self) -> None:
+        if self._release is None:
+            return
+        if self._release_task is None:
+            self._release_task = asyncio.create_task(self._release())
+        await asyncio.shield(self._release_task)
+
+    async def __aenter__(self) -> httpx.AsyncClient:
+        return self.client
+
+    async def __aexit__(self, _exc_type: Any, _exc: Any, _tb: Any) -> None:
+        await self.release()
+
+
+@dataclass(slots=True)
+class _ProxyClientEntry:
+    client: httpx.AsyncClient
+    leases: int
+    last_used: float
+
+
 class ProxyClientPool:
     """Process-local pool of httpx clients keyed by proxy URI (keepalive reuse).
 
     httpx binds ``proxy=`` at client construction, so residential paths cannot share
     the non-proxy app.state.httpx_client. This pool reuses one client per proxy URI
-    and evicts LRU when full.
+    and evicts only released idle/LRU entries. Concurrent active leases may
+    temporarily exceed ``max_clients`` rather than closing in-flight requests.
     """
 
-    def __init__(self, *, max_clients: int = 32) -> None:
+    def __init__(self, *, max_clients: int = 32, idle_ttl_s: float = 60.0) -> None:
         self._max = max(1, int(max_clients))
+        self._idle_ttl_s = max(0.0, float(idle_ttl_s))
         self._lock = asyncio.Lock()
-        self._clients: dict[str, httpx.AsyncClient] = {}
-        self._lru: list[str] = []
+        self._clients: dict[tuple[str, int], _ProxyClientEntry] = {}
+        self._lru: list[tuple[str, int]] = []
 
     @property
     def size(self) -> int:
         return len(self._clients)
 
-    async def get(
+    def _touch_locked(self, key: tuple[str, int]) -> None:
+        try:
+            self._lru.remove(key)
+        except ValueError:
+            pass
+        self._lru.append(key)
+
+    def _collect_evictable_locked(
         self,
-        proxy_uri: str,
         *,
-        timeout_s: float = 30.0,
-        transport: httpx.AsyncBaseTransport | None = None,
-    ) -> httpx.AsyncClient:
-        key = (proxy_uri or "").strip()
-        if not key:
-            raise ValueError("proxy_uri is required")
-        async with self._lock:
-            existing = self._clients.get(key)
-            if existing is not None:
-                try:
-                    self._lru.remove(key)
-                except ValueError:
-                    pass
-                self._lru.append(key)
-                return existing
-
-            while len(self._clients) >= self._max and self._lru:
-                old_key = self._lru.pop(0)
-                old = self._clients.pop(old_key, None)
-                if old is not None:
-                    try:
-                        await old.aclose()
-                    except Exception:
-                        pass
-
-            client = httpx.AsyncClient(
-                transport=transport,
-                proxy=key,
-                follow_redirects=True,
-                timeout=httpx.Timeout(float(timeout_s), connect=min(10.0, float(timeout_s))),
-                limits=_PROXY_LIMITS,
+        now: float,
+        reserve_slot: bool,
+    ) -> list[httpx.AsyncClient]:
+        close: list[httpx.AsyncClient] = []
+        for old_key in list(self._lru):
+            entry = self._clients.get(old_key)
+            if entry is None:
+                self._lru.remove(old_key)
+                continue
+            if entry.leases > 0:
+                continue
+            idle = self._idle_ttl_s <= 0.0 or now - entry.last_used >= self._idle_ttl_s
+            over_capacity = len(self._clients) > self._max or (
+                reserve_slot and len(self._clients) >= self._max
             )
-            self._clients[key] = client
-            self._lru.append(key)
-            return client
+            if not idle and not over_capacity:
+                continue
+            self._clients.pop(old_key, None)
+            self._lru.remove(old_key)
+            close.append(entry.client)
+            if reserve_slot and len(self._clients) < self._max:
+                reserve_slot = False
+        return close
 
-    async def aclose(self) -> None:
-        async with self._lock:
-            clients = list(self._clients.values())
-            self._clients.clear()
-            self._lru.clear()
+    @staticmethod
+    async def _close_clients(clients: list[httpx.AsyncClient]) -> None:
         for client in clients:
             try:
                 await client.aclose()
             except Exception:
                 pass
+
+    async def _release(self, key: tuple[str, int], entry: _ProxyClientEntry) -> None:
+        async with self._lock:
+            current = self._clients.get(key)
+            if current is not entry:
+                return
+            if entry.leases > 0:
+                entry.leases -= 1
+            entry.last_used = time.monotonic()
+            self._touch_locked(key)
+            close = self._collect_evictable_locked(now=entry.last_used, reserve_slot=False)
+        await self._close_clients(close)
+
+    async def acquire(
+        self,
+        proxy_uri: str,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> HttpClientLease:
+        uri = (proxy_uri or "").strip()
+        if not uri:
+            raise ValueError("proxy_uri is required")
+        key = (uri, id(transport) if transport is not None else 0)
+        now = time.monotonic()
+        await self._lock.acquire()
+        try:
+            close = self._collect_evictable_locked(
+                now=now,
+                reserve_slot=self._clients.get(key) is None,
+            )
+        finally:
+            self._lock.release()
+        if close:
+            close_task = asyncio.create_task(self._close_clients(close))
+            await asyncio.shield(close_task)
+
+        await self._lock.acquire()
+        try:
+            acquired_at = time.monotonic()
+            existing = self._clients.get(key)
+            if existing is not None:
+                existing.leases += 1
+                existing.last_used = acquired_at
+                self._touch_locked(key)
+                entry = existing
+            else:
+                client = httpx.AsyncClient(
+                    transport=transport,
+                    proxy=uri,
+                    follow_redirects=True,
+                    timeout=httpx.Timeout(30.0, connect=10.0),
+                    limits=_PROXY_LIMITS,
+                )
+                entry = _ProxyClientEntry(client=client, leases=1, last_used=acquired_at)
+                self._clients[key] = entry
+                self._touch_locked(key)
+        finally:
+            self._lock.release()
+        return HttpClientLease(
+            entry.client,
+            release=lambda: self._release(key, entry),
+        )
+
+    async def aclose(self) -> None:
+        async with self._lock:
+            clients = [entry.client for entry in self._clients.values()]
+            self._clients.clear()
+            self._lru.clear()
+        await self._close_clients(clients)
 
 
 _proxy_pool: ProxyClientPool | None = None
@@ -168,11 +267,10 @@ def reset_proxy_client_pool_for_tests() -> None:
 async def acquire_proxy_client(
     proxy_uri: str | None,
     *,
-    timeout_s: float = 30.0,
     transport: httpx.AsyncBaseTransport | None = None,
     pool: ProxyClientPool | None = None,
-) -> tuple[httpx.AsyncClient, bool]:
-    """Return (client, owns_client). Pooled / control-plane clients must not be closed by the caller.
+) -> HttpClientLease:
+    """Acquire a client lease. Callers must release it after buffered requests or stream completion.
 
     Non-proxy (``proxy_uri`` empty):
     - With ``transport``: short-lived owned client on that transport (tests / custom).
@@ -181,17 +279,14 @@ async def acquire_proxy_client(
     uri = (proxy_uri or "").strip()
     if not uri:
         if transport is not None:
-            return (
-                httpx.AsyncClient(
-                    transport=transport,
-                    follow_redirects=True,
-                    timeout=httpx.Timeout(float(timeout_s), connect=min(10.0, float(timeout_s))),
-                    limits=_DEFAULT_LIMITS,
-                ),
-                True,
+            client = httpx.AsyncClient(
+                transport=transport,
+                follow_redirects=True,
+                timeout=httpx.Timeout(30.0, connect=10.0),
+                limits=_DEFAULT_LIMITS,
             )
+            return HttpClientLease(client, release=client.aclose)
         # CF-first / direct origin: reuse process control-plane client (do not aclose).
-        return get_control_plane_http_client(), False
+        return HttpClientLease(get_control_plane_http_client())
     active_pool = pool if pool is not None else get_proxy_client_pool()
-    client = await active_pool.get(uri, timeout_s=timeout_s, transport=transport)
-    return client, False
+    return await active_pool.acquire(uri, transport=transport)

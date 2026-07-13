@@ -24,6 +24,7 @@ def test_refresh_access_token_success_builds_expected_request() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         assert req.method == "POST"
         assert str(req.url) == "https://oauth.secure.pixiv.net/auth/token"
+        assert req.extensions["timeout"]["read"] == 7.5
 
         assert req.headers.get("User-Agent") == config.user_agent
         assert req.headers.get("X-Client-Time") == client_time
@@ -60,6 +61,7 @@ def test_refresh_access_token_success_builds_expected_request() -> None:
             config=config,
             transport=httpx.MockTransport(handler),
             client_time=client_time,
+            timeout_s=7.5,
         )
     )
 

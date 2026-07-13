@@ -73,8 +73,8 @@ async def stream_url(
     Connection reuse rules:
     - If ``proxy`` is set: process proxy client pool (httpx binds proxy at client level).
     - Else if shared ``client`` is provided: reuse it (do NOT close on completion).
-    - Else: ``acquire_proxy_client(None)`` — control-plane singleton, or owned
-      client when ``transport`` is injected (tests).
+    - Else: acquire a lease for the control-plane singleton, proxy pool, or an
+      owned transport-injected client; release after the stream finishes.
     """
     try:
         initial_url = _parse_safe_stream_url(url)
@@ -82,18 +82,18 @@ async def stream_url(
         UPSTREAM_STREAM_ERRORS_TOTAL.inc()
         raise ApiError(code=ErrorCode.UPSTREAM_STREAM_ERROR, message="上游请求失败", status_code=502) from exc
 
-    owns_client = False
+    lease = None
     shared_client = client is not None and not proxy
 
     if shared_client:
         assert client is not None
         active_client = client
     else:
-        active_client, owns_client = await acquire_proxy_client(
+        lease = await acquire_proxy_client(
             proxy,
-            timeout_s=timeout_s,
             transport=transport,
         )
+        active_client = lease.client
 
     request_headers: dict[str, str] = {}
     if referer:
@@ -105,7 +105,12 @@ async def stream_url(
         current_url = str(url or "").strip()
         redirects_followed = 0
         while True:
-            request = active_client.build_request("GET", current_url, headers=request_headers)
+            request = active_client.build_request(
+                "GET",
+                current_url,
+                headers=request_headers,
+                timeout=httpx.Timeout(float(timeout_s), connect=min(10.0, float(timeout_s))),
+            )
             upstream = await active_client.send(request, stream=True, follow_redirects=False)
             if upstream.status_code not in _REDIRECT_STATUSES:
                 break
@@ -121,8 +126,8 @@ async def stream_url(
             redirects_followed += 1
     except httpx.ProxyError as exc:
         UPSTREAM_STREAM_ERRORS_TOTAL.inc()
-        if owns_client:
-            await active_client.aclose()
+        if lease is not None:
+            await lease.release()
         msg = str(exc).lower()
         if "407" in msg or "proxy authentication" in msg:
             raise ApiError(
@@ -137,16 +142,16 @@ async def stream_url(
         ) from exc
     except Exception as exc:
         UPSTREAM_STREAM_ERRORS_TOTAL.inc()
-        if owns_client:
-            await active_client.aclose()
+        if lease is not None:
+            await lease.release()
         raise ApiError(code=ErrorCode.UPSTREAM_STREAM_ERROR, message="上游请求失败", status_code=502) from exc
 
     if upstream.status_code not in {200, 206}:
         status = upstream.status_code
         UPSTREAM_STREAM_ERRORS_TOTAL.inc()
         await upstream.aclose()
-        if owns_client:
-            await active_client.aclose()
+        if lease is not None:
+            await lease.release()
         if status == 403:
             raise ApiError(code=ErrorCode.UPSTREAM_403, message="上游拒绝访问（403）", status_code=502)
         if status == 404:
@@ -167,8 +172,8 @@ async def stream_url(
             raise
         finally:
             await upstream.aclose()
-            if owns_client:
-                await active_client.aclose()
+            if lease is not None:
+                await lease.release()
 
     accept_ranges = upstream.headers.get("accept-ranges")
     content_range = upstream.headers.get("content-range")

@@ -933,20 +933,19 @@ LIMIT 1;
                 await _pixiv_throttle(runtime, token_id=int(token_id))
                 from app.core.http_client import acquire_proxy_client
 
-                client, owns_client = await acquire_proxy_client(
+                lease = await acquire_proxy_client(
                     use_proxy,
-                    timeout_s=30.0,
                     transport=transport,  # type: ignore[arg-type]
                 )
                 try:
-                    resp = await client.get(
+                    resp = await lease.client.get(
                         request_url,
                         params={"illust_id": int(illust_id), "filter": "for_android"},
                         headers=req_headers,
+                        timeout=30.0,
                     )
                 finally:
-                    if owns_client:
-                        await client.aclose()
+                    await lease.release()
             except httpx.RequestError as exc:
                 latency_ms = (float(time.monotonic()) - start_m) * 1000.0
                 observe_pixiv_api_egress(via="cf" if via_cf else "residential", result="error")
