@@ -12,6 +12,18 @@ FALLBACK_MIRROR_HOST = ""
 FALLBACK_MIRROR_HOSTS = ""
 CACHE_TTL_SECONDS = "604800"
 ERROR_CACHE_TTL_SECONDS = "30"
+# Public image safety/backpressure bounds. Large or unknown-length objects stream only.
+MAX_IMAGE_BYTES = "33554432"
+CACHE_WRITE_MAX_BYTES = "8388608"
+MAX_IMAGE_WIDTH = "16384"
+MAX_IMAGE_HEIGHT = "16384"
+MAX_IMAGE_PIXELS = "100000000"
+# Per-isolate cold-fill coordination; stalled streams are canceled and release their slot.
+MAX_CONCURRENT_COLD_FILLS = "4"
+COLD_FLIGHT_WAIT_MS = "1500"
+COLD_STREAM_IDLE_TIMEOUT_MS = "15000"
+COLD_STREAM_TOTAL_TIMEOUT_MS = "120000"
+STORAGE_WRITE_TIMEOUT_MS = "5000"
 # Soft-open origin circuit after this many 403s in the window (isolate-local).
 ORIGIN_403_CIRCUIT_THRESHOLD = "8"
 ORIGIN_403_CIRCUIT_WINDOW_MS = "60000"

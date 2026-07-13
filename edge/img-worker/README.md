@@ -37,7 +37,7 @@ IMAGE_EDGE_SIGN_TTL_SECONDS=604800
 
 启用后（公开主路径）：
 - `/random?format=json|simple_json` 的 `urls.proxy` → 签名边缘 URL
-- `/random?format=image` / `redirect=1` → 302 到签名边缘 URL
+- `/random?format=image` 默认由同源 BFF `edge_stream` 返回 200；仅显式 `redirect=1` 才 302 到签名边缘 URL
 - `/i/{id}.{ext}` → 302 到签名边缘 URL（`?local=1` 强制本地流）
 
 本地 `/i` 流式反代、垃圾代理池、第三方镜像仅作 **fallback / 应急**（Worker 镜像链默认空）。
@@ -50,6 +50,13 @@ IMAGE_EDGE_SIGN_TTL_SECONDS=604800
 - 出站固定 `Referer: https://www.pixiv.net/`
 - 双密钥轮换：`IMAGE_EDGE_SECRET` + `IMAGE_EDGE_SECRET_PREVIOUS`（仅校验旧签）
 - 隔离级 token-bucket：`RATE_LIMIT_RPM`（默认 3000；`0` 关闭）仅约束 **Cache MISS** 的 R2/origin 路径；Cache HIT 不计数
+- 冷 GET 只读取有界图片头后即开始向客户端流式返回，不再等待完整对象下载
+- HEAD 只走 Cache/R2/origin metadata，不读取或预热完整图片
+- MIME、JPEG/PNG/GIF/WebP 魔数、尺寸、像素和总字节均 fail-closed 校验
+- 仅声明长度不超过 `CACHE_WRITE_MAX_BYTES` 的小对象在客户端完整消费后写 Cache/R2；未知长度和大对象只流式传输
+- 同 key 冷 miss 在单个 isolate 内 singleflight；慢客户端受 idle/total deadline 和并发槽限制（不宣称跨 POP 去重）
+
+默认资源边界见 `wrangler.toml`：32 MiB 单对象、8 MiB 持久化、4 个并发冷流、15 秒 idle、120 秒 total。部署后旧 Cache/R2 对象若没有当前 validation marker 会被视为未验证并回源重建；`r2_only` 上线前应重新 prewarm。
 
 ## 密钥轮换
 

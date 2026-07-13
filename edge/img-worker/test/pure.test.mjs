@@ -12,23 +12,35 @@ import { describe, it } from "node:test";
 import {
   authorizePrewarmSecrets,
   buildHealthzBody,
+  cacheWriteMaxBytes,
   cachePathKey,
   canFollowUpstreamRedirect,
+  coldFlightWaitMs,
+  coldStreamTimeouts,
+  contentLengthWithinLimit,
+  dimensionsWithinLimit,
   filterPrewarmPaths,
   isAllowedMirrorHost,
   isOriginCircuitOpen,
   isSignedUrlExpired,
+  hasExpectedImageMagic,
+  imageDimensionLimits,
+  maxConcurrentColdFills,
+  maxImageBytes,
   noteOriginSample,
   originCircuitConfig,
   parseRateLimitConfig,
+  parseImageDimensions,
   parseSignedPath,
   resolveSafeRedirectUrl,
   resolveFallbackHosts,
   resolveR2Mode,
   resolveVerifySecrets,
   r2ObjectKey,
+  storageWriteTimeoutMs,
   takeRateLimitToken,
   validPath,
+  validatedImageContentType,
 } from "../src/pure.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -59,6 +71,93 @@ describe("validPath", () => {
       assert.equal(validPath(row.path), false);
     });
   }
+});
+
+describe("streaming response guards", () => {
+  it("normalizes expected image MIME without accepting mismatches", () => {
+    assert.equal(validatedImageContentType("/img-original/a.jpg", "image/jpeg; charset=binary"), "image/jpeg");
+    assert.equal(validatedImageContentType("/img-original/a.jpg", "application/octet-stream"), "image/jpeg");
+    assert.equal(validatedImageContentType("/img-original/a.png", "image/jpeg"), null);
+    assert.equal(validatedImageContentType("/img-original/a.exe", "image/png"), null);
+  });
+
+  it("enforces bounded content length and max env clamp", () => {
+    assert.equal(contentLengthWithinLimit("1024", 2048), true);
+    assert.equal(contentLengthWithinLimit("2049", 2048), false);
+    assert.equal(contentLengthWithinLimit("invalid", 2048), false);
+    assert.equal(contentLengthWithinLimit(null, 2048), true);
+    assert.equal(maxImageBytes({ MAX_IMAGE_BYTES: "2097152" }), 2097152);
+    assert.equal(maxImageBytes({ MAX_IMAGE_BYTES: "1" }), 1024 * 1024);
+    assert.equal(cacheWriteMaxBytes({ MAX_IMAGE_BYTES: "2097152", CACHE_WRITE_MAX_BYTES: "99999999" }), 2097152);
+    assert.equal(maxConcurrentColdFills({ MAX_CONCURRENT_COLD_FILLS: "999" }), 64);
+    assert.equal(coldFlightWaitMs({ COLD_FLIGHT_WAIT_MS: "99999" }), 5000);
+    assert.deepEqual(coldStreamTimeouts({ COLD_STREAM_IDLE_TIMEOUT_MS: "2000", COLD_STREAM_TOTAL_TIMEOUT_MS: "5000" }), {
+      idleMs: 2000,
+      totalMs: 5000,
+    });
+    assert.equal(storageWriteTimeoutMs({ STORAGE_WRITE_TIMEOUT_MS: "99999" }), 30000);
+  });
+
+  it("requires path-specific image signatures", () => {
+    assert.equal(hasExpectedImageMagic("/img-original/a.jpg", Uint8Array.from([0xff, 0xd8, 0xff])), true);
+    assert.equal(
+      hasExpectedImageMagic(
+        "/img-original/a.png",
+        Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      ),
+      true,
+    );
+    assert.equal(hasExpectedImageMagic("/img-original/a.gif", new TextEncoder().encode("GIF89a")), true);
+    assert.equal(
+      hasExpectedImageMagic(
+        "/img-original/a.webp",
+        Uint8Array.from([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]),
+      ),
+      true,
+    );
+    assert.equal(hasExpectedImageMagic("/img-original/a.jpg", new TextEncoder().encode("<html>")), false);
+  });
+
+  it("parses image dimensions and applies pixel limits", () => {
+    const jpeg = Uint8Array.from([
+      0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x04, 0x00, 0x08, 0x00,
+    ]);
+    assert.deepEqual(parseImageDimensions("/img-original/a.jpg", jpeg), {
+      status: "ok",
+      width: 2048,
+      height: 1024,
+    });
+    const png = new Uint8Array(24);
+    png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    png.set(new TextEncoder().encode("IHDR"), 12);
+    new DataView(png.buffer).setUint32(16, 640);
+    new DataView(png.buffer).setUint32(20, 480);
+    assert.deepEqual(parseImageDimensions("/img-original/a.png", png), {
+      status: "ok",
+      width: 640,
+      height: 480,
+    });
+    const gif = new Uint8Array(10);
+    gif.set(new TextEncoder().encode("GIF89a"));
+    gif.set([0x40, 0x01, 0xf0, 0x00], 6);
+    assert.deepEqual(parseImageDimensions("/img-original/a.gif", gif), {
+      status: "ok",
+      width: 320,
+      height: 240,
+    });
+    const webp = new Uint8Array(30);
+    webp.set(new TextEncoder().encode("RIFF"), 0);
+    webp.set(new TextEncoder().encode("WEBPVP8X"), 8);
+    webp.set([0x7f, 0x02, 0x00, 0xdf, 0x01, 0x00], 24);
+    assert.deepEqual(parseImageDimensions("/img-original/a.webp", webp), {
+      status: "ok",
+      width: 640,
+      height: 480,
+    });
+    const limits = imageDimensionLimits({ MAX_IMAGE_WIDTH: "1000", MAX_IMAGE_PIXELS: "1000000" });
+    assert.equal(dimensionsWithinLimit({ status: "ok", width: 640, height: 480 }, limits), true);
+    assert.equal(dimensionsWithinLimit({ status: "ok", width: 1200, height: 480 }, limits), false);
+  });
 });
 
 describe("sign_vectors HMAC", () => {

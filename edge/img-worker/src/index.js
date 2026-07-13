@@ -25,10 +25,17 @@
 import {
   authorizePrewarmSecrets,
   buildHealthzBody,
+  cacheWriteMaxBytes,
   canFollowUpstreamRedirect,
+  coldFlightWaitMs,
+  coldStreamTimeouts,
+  contentLengthWithinLimit,
   filterPrewarmPaths,
+  imageDimensionLimits,
   isOriginCircuitOpen as pureIsOriginCircuitOpen,
   isSignedUrlExpired,
+  maxConcurrentColdFills,
+  maxImageBytes,
   noteOriginSample as pureNoteOriginSample,
   originCircuitConfig,
   parseRateLimitConfig,
@@ -38,19 +45,27 @@ import {
   resolveSafeRedirectUrl,
   resolveVerifySecrets,
   r2ObjectKey,
+  storageWriteTimeoutMs,
   takeRateLimitToken,
   timingSafeEqual,
   validPath,
+  validatedImageContentType,
 } from "./pure.js";
+import { createValidatedImageStream, ImageBodyError, readValidatedImageBuffer } from "./image_stream.js";
 
 /** Per-isolate token bucket for origin/R2 miss path (resets on cold start). */
 let _rateBucket = null;
+/** Per-isolate cold-fill coordination. It deliberately does not claim cross-POP deduplication. */
+const _coldFlights = new Map();
+let _activeColdFills = 0;
 
 const DEFAULT_ORIGIN = "i.pximg.net";
 const REFERER = "https://www.pixiv.net/";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const IMAGE_VALIDATION_VERSION = "v1";
+const IMAGE_VALIDATION_HEADER = "X-Edge-Validation";
 
 // Soft circuit breaker for origin 403 storms (isolate per isolate; best-effort).
 // When open, skip origin and go straight to emergency mirrors if configured.
@@ -141,9 +156,29 @@ function jsonError(status, message, extraHeaders = {}) {
   });
 }
 
-function originFetchInit(env) {
+function waitUntilBestEffort(ctx, promise) {
+  ctx.waitUntil(Promise.resolve(promise).catch(() => undefined));
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function originFetchInit(env, method = "GET") {
   return {
-    method: "GET",
+    method,
     headers: {
       Referer: REFERER,
       "User-Agent": UA,
@@ -183,10 +218,10 @@ async function fetchWithSafeRedirects(initialUrl, init, policy) {
   }
 }
 
-async function fetchOrigin(path, env) {
+async function fetchOrigin(path, env, method = "GET") {
   const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
   const url = `https://${originHost}${path}`;
-  const init = originFetchInit(env);
+  const init = originFetchInit(env, method);
   try {
     return await fetchWithSafeRedirects(url, init, { mode: "pximg" });
   } catch {
@@ -195,12 +230,12 @@ async function fetchOrigin(path, env) {
   }
 }
 
-async function fetchMirrorHost(path, host) {
+async function fetchMirrorHost(path, host, method = "GET") {
   const url = `https://${host}${path}`;
   return fetchWithSafeRedirects(
     url,
     {
-      method: "GET",
+      method,
       headers: {
         Referer: REFERER,
         "User-Agent": UA,
@@ -217,7 +252,7 @@ async function fetchMirrorHost(path, host) {
  * via is origin host or mirror host that produced HTTP 200.
  * Soft circuit: after repeated origin 403s, skip origin for ORIGIN_403_CIRCUIT_OPEN_MS.
  */
-async function fetchUpstreamWithFallback(path, env) {
+async function fetchUpstreamWithFallback(path, env, method = "GET") {
   const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
   const nowMs = Date.now();
   const skipOrigin = isOriginCircuitOpen(nowMs);
@@ -226,7 +261,7 @@ async function fetchUpstreamWithFallback(path, env) {
 
   if (!skipOrigin) {
     try {
-      upstream = await fetchOrigin(path, env);
+      upstream = await fetchOrigin(path, env, method);
     } catch {
       upstream = null;
     }
@@ -237,13 +272,14 @@ async function fetchUpstreamWithFallback(path, env) {
     if (upstream && upstream.status === 200) {
       return { response: upstream, via: originHost, circuitOpen: false };
     }
+    if (upstream?.body) await upstream.body.cancel();
   } else {
     primaryStatus = 403;
   }
 
   for (const host of resolveFallbackHosts(env)) {
     try {
-      const fb = await fetchMirrorHost(path, host);
+      const fb = await fetchMirrorHost(path, host, method);
       if (fb && fb.status === 200) {
         return {
           response: fb,
@@ -252,6 +288,7 @@ async function fetchUpstreamWithFallback(path, env) {
           circuitOpen: skipOrigin,
         };
       }
+      if (fb?.body) await fb.body.cancel();
     } catch {
       // try next host
     }
@@ -278,29 +315,104 @@ function successHeaders({ contentType, contentLength, etag, lastModified, ttl, v
   return headers;
 }
 
-async function tryR2Get(env, path) {
-  if (resolveR2Mode(env) === "off" || !env.R2) return null;
+async function readR2(env, path, method = "GET") {
+  if (resolveR2Mode(env) === "off" || !env.R2) return { status: "miss", object: null };
   try {
-    return await env.R2.get(r2ObjectKey(path));
-  } catch {
-    return null;
+    if (method === "HEAD" && typeof env.R2.head !== "function") {
+      return { status: "error", object: null, error: new Error("R2 HEAD is unavailable") };
+    }
+    const operation = method === "HEAD" ? "head" : "get";
+    const object = await env.R2[operation](r2ObjectKey(path));
+    return object ? { status: "hit", object } : { status: "miss", object: null };
+  } catch (error) {
+    return { status: "error", object: null, error };
   }
 }
 
-function scheduleR2Put(env, ctx, path, body, contentType) {
-  if (resolveR2Mode(env) === "off" || !env.R2 || !body) return;
-  const key = r2ObjectKey(path);
-  ctx.waitUntil(
-    (async () => {
-      try {
-        await env.R2.put(key, body, {
-          httpMetadata: { contentType: contentType || "application/octet-stream" },
-        });
-      } catch {
-        // best-effort only
-      }
-    })(),
-  );
+function isValidatedR2Object(object) {
+  return object?.customMetadata?.edgeValidation === IMAGE_VALIDATION_VERSION;
+}
+
+function isValidatedCacheResponse(response) {
+  return response?.headers?.get(IMAGE_VALIDATION_HEADER) === IMAGE_VALIDATION_VERSION;
+}
+
+async function persistValidatedBuffer({ env, cache, cacheKey, path, bytes, headers, contentType, writeR2 }) {
+  const storedHeaders = new Headers(headers);
+  storedHeaders.set("Content-Length", String(bytes.byteLength));
+  storedHeaders.set(IMAGE_VALIDATION_HEADER, IMAGE_VALIDATION_VERSION);
+  await cache.put(cacheKey, new Response(bytes, { status: 200, headers: storedHeaders }));
+  if (writeR2 && env.R2) {
+    try {
+      await env.R2.put(r2ObjectKey(path), bytes, {
+        httpMetadata: { contentType },
+        customMetadata: { edgeValidation: IMAGE_VALIDATION_VERSION },
+      });
+    } catch {
+      // R2 is optional on the public read-through path; Cache API success remains useful.
+    }
+  }
+}
+
+function waitForFlight(promise, timeoutMs) {
+  if (timeoutMs <= 0) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(false), timeoutMs);
+    promise.then(() => {
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
+}
+
+function beginColdFlight(key, maxConcurrent) {
+  const existing = _coldFlights.get(key);
+  if (existing) return { role: "follower", promise: existing };
+  if (_activeColdFills >= maxConcurrent) return { role: "saturated", promise: null };
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  _coldFlights.set(key, promise);
+  _activeColdFills += 1;
+  let finished = false;
+  return {
+    role: "leader",
+    promise,
+    finish() {
+      if (finished) return;
+      finished = true;
+      if (_coldFlights.get(key) === promise) _coldFlights.delete(key);
+      _activeColdFills = Math.max(0, _activeColdFills - 1);
+      resolve();
+    },
+  };
+}
+
+async function matchValidatedCache({ cache, cacheKey, path, maxBytes, method, ctx }) {
+  const cached = await cache.match(cacheKey);
+  if (!cached) return null;
+  const headers = new Headers(cached.headers);
+  const rawLength = headers.get("content-length");
+  const cachedType = validatedImageContentType(path, headers.get("content-type"));
+  const valid =
+    isValidatedCacheResponse(cached) &&
+    Boolean(rawLength) &&
+    Boolean(cachedType) &&
+    contentLengthWithinLimit(rawLength, maxBytes);
+  if (!valid) {
+    if (cached.body) await cached.body.cancel();
+    waitUntilBestEffort(ctx, cache.delete(cacheKey));
+    return null;
+  }
+  headers.set("Content-Type", cachedType);
+  headers.set("X-Edge-Cache", "HIT");
+  headers.set("Access-Control-Allow-Origin", "*");
+  if (method === "HEAD") {
+    if (cached.body) await cached.body.cancel();
+    return new Response(null, { status: cached.status, headers });
+  }
+  return new Response(cached.body, { status: cached.status, headers });
 }
 
 function authorizePrewarm(request, env) {
@@ -344,6 +456,10 @@ async function handlePrewarm(request, env, ctx) {
   const cache = caches.default;
   const ttl = Number(env.CACHE_TTL_SECONDS || 604800);
   const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
+  const persistMaxBytes = cacheWriteMaxBytes(env);
+  const dimensionLimits = imageDimensionLimits(env);
+  const streamTimeouts = coldStreamTimeouts(env);
+  const writeTimeoutMs = storageWriteTimeoutMs(env);
   let ok = 0;
   let failed = 0;
   let cacheWarmed = 0;
@@ -354,9 +470,22 @@ async function handlePrewarm(request, env, ctx) {
         method: "GET",
       });
       // R2 hit: still warm this POP's Cache API (contract: prewarm warms Cache).
-      const existing = await tryR2Get(env, path);
-      if (existing) {
-        const contentType = existing.httpMetadata?.contentType || "application/octet-stream";
+      const r2Read = await readR2(env, path);
+      if (r2Read.status === "error") {
+        failed += 1;
+        continue;
+      }
+      const existing = r2Read.object;
+      if (existing && isValidatedR2Object(existing)) {
+        const contentType = validatedImageContentType(path, existing.httpMetadata?.contentType);
+        if (!contentType || !contentLengthWithinLimit(existing.size, persistMaxBytes)) {
+          if (existing.body) await existing.body.cancel();
+          if (typeof env.R2?.delete === "function") {
+            await env.R2.delete(r2ObjectKey(path)).catch(() => undefined);
+          }
+          failed += 1;
+          continue;
+        }
         const headers = successHeaders({
           contentType,
           contentLength: existing.size,
@@ -369,24 +498,70 @@ async function handlePrewarm(request, env, ctx) {
           edgeVia: "r2-prewarm",
         });
         headers.set("X-Edge-Cache", "MISS");
-        const buf = await existing.arrayBuffer();
-        ctx.waitUntil(cache.put(cacheKey, new Response(buf, { status: 200, headers })));
+        headers.set(IMAGE_VALIDATION_HEADER, IMAGE_VALIDATION_VERSION);
+        let buf;
+        try {
+          buf = await readValidatedImageBuffer(existing.body, path, {
+            maxBytes: persistMaxBytes,
+            expectedLength: Number(existing.size),
+            limits: dimensionLimits,
+            timeouts: streamTimeouts,
+            readErrorStatus: 503,
+          });
+        } catch (error) {
+          if (error?.deleteStored && typeof env.R2?.delete === "function") {
+            await env.R2.delete(r2ObjectKey(path)).catch(() => undefined);
+          }
+          failed += 1;
+          continue;
+        }
+        await withTimeout(
+          cache.put(cacheKey, new Response(buf, { status: 200, headers })),
+          writeTimeoutMs,
+          "Cache prewarm write timed out",
+        );
         alreadyR2 += 1;
         cacheWarmed += 1;
         ok += 1;
         continue;
       }
+      if (existing?.body) await existing.body.cancel();
       const fetched = await fetchUpstreamWithFallback(path, env);
       if (!fetched.response || fetched.response.status !== 200) {
+        if (fetched.response?.body) await fetched.response.body.cancel();
         failed += 1;
         continue;
       }
-      const buf = await fetched.response.arrayBuffer();
-      const contentType =
-        fetched.response.headers.get("content-type") || "application/octet-stream";
-      await env.R2.put(r2ObjectKey(path), buf, {
-        httpMetadata: { contentType },
-      });
+      const contentType = validatedImageContentType(path, fetched.response.headers.get("content-type"));
+      const declaredLength = fetched.response.headers.get("content-length");
+      if (
+        !contentType ||
+        !/^\d+$/.test(String(declaredLength || "")) ||
+        !contentLengthWithinLimit(declaredLength, persistMaxBytes)
+      ) {
+        if (fetched.response.body) await fetched.response.body.cancel();
+        failed += 1;
+        continue;
+      }
+      const buf = await readValidatedImageBuffer(
+        fetched.response.body,
+        path,
+        {
+          maxBytes: persistMaxBytes,
+          expectedLength: Number(declaredLength),
+          limits: dimensionLimits,
+          timeouts: streamTimeouts,
+          readErrorStatus: 502,
+        },
+      );
+      await withTimeout(
+        env.R2.put(r2ObjectKey(path), buf, {
+          httpMetadata: { contentType },
+          customMetadata: { edgeValidation: IMAGE_VALIDATION_VERSION },
+        }),
+        writeTimeoutMs,
+        "R2 prewarm write timed out",
+      );
       const headers = successHeaders({
         contentType,
         contentLength: buf.byteLength,
@@ -399,7 +574,12 @@ async function handlePrewarm(request, env, ctx) {
         edgeVia: "r2-prewarm",
       });
       headers.set("X-Edge-Cache", "MISS");
-      ctx.waitUntil(cache.put(cacheKey, new Response(buf, { status: 200, headers })));
+      headers.set(IMAGE_VALIDATION_HEADER, IMAGE_VALIDATION_VERSION);
+      await withTimeout(
+        cache.put(cacheKey, new Response(buf, { status: 200, headers })),
+        writeTimeoutMs,
+        "Cache prewarm write timed out",
+      );
       cacheWarmed += 1;
       ok += 1;
     } catch {
@@ -498,20 +678,17 @@ export default {
     const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
     const ttl = Number(env.CACHE_TTL_SECONDS || 604800);
     const r2Mode = resolveR2Mode(env);
+    const maxBytes = maxImageBytes(env);
+    const persistMaxBytes = cacheWriteMaxBytes(env);
+    const dimensionLimits = imageDimensionLimits(env);
+    const streamTimeouts = coldStreamTimeouts(env);
+    const writeTimeoutMs = storageWriteTimeoutMs(env);
 
     // Path-only cache key: ignore exp/sig so re-signed URLs share cache.
     const cache = caches.default;
     const cacheKey = new Request(new URL(`/pximg${path}`, url.origin), { method: "GET" });
-    const cached = await cache.match(cacheKey);
-    if (cached) {
-      const headers = new Headers(cached.headers);
-      headers.set("X-Edge-Cache", "HIT");
-      headers.set("Access-Control-Allow-Origin", "*");
-      if (request.method === "HEAD") {
-        return new Response(null, { status: cached.status, headers });
-      }
-      return new Response(cached.body, { status: cached.status, headers });
-    }
+    const cached = await matchValidatedCache({ cache, cacheKey, path, maxBytes, method: request.method, ctx });
+    if (cached) return cached;
 
     // Isolate rate limit only on Cache MISS (origin/R2 work). Cache HIT stays free.
     const rateCfg = parseRateLimitConfig(env);
@@ -533,9 +710,25 @@ export default {
 
     // Optional R2 read (Mode B2 / read_through).
     if (r2Mode !== "off") {
-      const obj = await tryR2Get(env, path);
-      if (obj) {
-        const contentType = obj.httpMetadata?.contentType || "application/octet-stream";
+      const r2Read = await readR2(env, path, request.method);
+      if (r2Read.status === "error" && r2Mode === "r2_only") {
+        return jsonError(503, "R2 unavailable", { "X-Edge-Storage": "r2_only", "Retry-After": "1" });
+      }
+      const obj = r2Read.object;
+      if (obj && !isValidatedR2Object(obj)) {
+        if (obj.body) await obj.body.cancel();
+        if (env.R2 && typeof env.R2.delete === "function") {
+          waitUntilBestEffort(ctx, env.R2.delete(r2ObjectKey(path)));
+        }
+      } else if (obj) {
+        const contentType = validatedImageContentType(path, obj.httpMetadata?.contentType);
+        if (!contentType || !contentLengthWithinLimit(obj.size, maxBytes)) {
+          if (obj.body) await obj.body.cancel();
+          if (typeof env.R2?.delete === "function") {
+            waitUntilBestEffort(ctx, env.R2.delete(r2ObjectKey(path)));
+          }
+          return jsonError(contentType ? 413 : 415, contentType ? "R2 object too large" : "Unsupported R2 content type");
+        }
         const headers = successHeaders({
           contentType,
           contentLength: obj.size,
@@ -549,31 +742,98 @@ export default {
         });
         headers.set("X-Edge-Cache", "MISS");
         headers.set("X-Edge-Via", "r2");
-        // Warm Cache API from R2 for this POP.
         if (request.method === "GET") {
-          const body = obj.body;
-          const out = new Response(body, { status: 200, headers });
-          ctx.waitUntil(cache.put(cacheKey, out.clone()));
-          return out;
+          try {
+            const collect = Number(obj.size) <= persistMaxBytes;
+            const opened = await createValidatedImageStream(obj.body, path, {
+              maxBytes,
+              collect,
+              expectedLength: Number(obj.size),
+              limits: dimensionLimits,
+              timeouts: streamTimeouts,
+              readErrorStatus: 503,
+            });
+            const persistence = opened.completion.then(async (result) => {
+              if (!result.complete || !result.bytes) {
+                if (result.error?.deleteStored && typeof env.R2?.delete === "function") {
+                  await env.R2.delete(r2ObjectKey(path)).catch(() => undefined);
+                }
+                return;
+              }
+              const storedHeaders = new Headers(headers);
+              storedHeaders.set(IMAGE_VALIDATION_HEADER, IMAGE_VALIDATION_VERSION);
+              storedHeaders.set("Content-Length", String(result.totalBytes));
+              await withTimeout(
+                cache.put(cacheKey, new Response(result.bytes, { status: 200, headers: storedHeaders })),
+                writeTimeoutMs,
+                "Cache write timed out",
+              );
+            });
+            ctx.waitUntil(persistence.catch(() => undefined));
+            return new Response(opened.stream, { status: 200, headers });
+          } catch (error) {
+            if (error?.deleteStored && typeof env.R2?.delete === "function") {
+              waitUntilBestEffort(ctx, env.R2.delete(r2ObjectKey(path)));
+            }
+            const status = error instanceof ImageBodyError ? error.status : 503;
+            if (r2Mode === "r2_only") {
+              const message =
+                status === 413
+                  ? "R2 object too large"
+                  : status === 415
+                    ? "Invalid R2 image body"
+                    : "R2 unavailable";
+              return jsonError(status, message);
+            }
+          }
         }
-        // HEAD: still warm cache with full object when possible.
-        const buf = await obj.arrayBuffer();
-        const getRes = new Response(buf, { status: 200, headers });
-        ctx.waitUntil(cache.put(cacheKey, getRes.clone()));
-        return new Response(null, { status: 200, headers });
+        if (request.method === "HEAD") {
+          // HEAD is metadata-only. Never read the object body or warm a full GET entry.
+          return new Response(null, { status: 200, headers });
+        }
       }
       if (r2Mode === "r2_only") {
         return jsonError(404, "Not in R2", { "X-Edge-Storage": "r2_only" });
       }
     }
 
-    const fetched = await fetchUpstreamWithFallback(path, env);
+    let coldFlight = null;
+    if (request.method === "GET") {
+      coldFlight = beginColdFlight(cacheKey.url, maxConcurrentColdFills(env));
+      if (coldFlight.role === "follower") {
+        await waitForFlight(coldFlight.promise, coldFlightWaitMs(env));
+        const filled = await matchValidatedCache({
+          cache,
+          cacheKey,
+          path,
+          maxBytes,
+          method: request.method,
+          ctx,
+        });
+        if (filled) return filled;
+        return jsonError(503, "Image fill already in progress", { "Retry-After": "1" });
+      }
+      if (coldFlight.role === "saturated") {
+        return jsonError(503, "Image fill capacity reached", { "Retry-After": "1" });
+      }
+    }
+
+    let fetched;
+    try {
+      fetched = await fetchUpstreamWithFallback(path, env, request.method);
+    } catch {
+      coldFlight?.finish?.();
+      return jsonError(502, "Upstream fetch failed");
+    }
     const upstream = fetched.response;
     if (!upstream) {
+      coldFlight?.finish?.();
       return jsonError(502, "Upstream fetch failed");
     }
 
     if (upstream.status !== 200) {
+      if (upstream.body) await upstream.body.cancel();
+      coldFlight?.finish?.();
       const errTtl = Number(env.ERROR_CACHE_TTL_SECONDS || 30);
       return new Response(JSON.stringify({ ok: false, message: "Upstream error", status: upstream.status }), {
         status: 502,
@@ -587,8 +847,18 @@ export default {
       });
     }
 
-    const contentType = upstream.headers.get("content-type") || "application/octet-stream";
+    const contentType = validatedImageContentType(path, upstream.headers.get("content-type"));
     const contentLength = upstream.headers.get("content-length");
+    if (!contentType) {
+      if (upstream.body) await upstream.body.cancel();
+      coldFlight?.finish?.();
+      return jsonError(415, "Unsupported upstream content type");
+    }
+    if (!contentLengthWithinLimit(contentLength, maxBytes)) {
+      if (upstream.body) await upstream.body.cancel();
+      coldFlight?.finish?.();
+      return jsonError(413, "Image too large");
+    }
     const etag = upstream.headers.get("etag");
     const lastModified = upstream.headers.get("last-modified");
     const headers = successHeaders({
@@ -602,19 +872,59 @@ export default {
       circuitOpen: Boolean(fetched.circuitOpen),
     });
 
-    // Buffer once so we can (1) respond, (2) Cache API put, (3) optional R2 put — including HEAD warm.
-    const buf = await upstream.arrayBuffer();
-    if (contentLength == null || contentLength === "") {
-      headers.set("Content-Length", String(buf.byteLength));
-    }
-
-    const getRes = new Response(buf, { status: 200, headers });
-    ctx.waitUntil(cache.put(cacheKey, getRes.clone()));
-    scheduleR2Put(env, ctx, path, buf, contentType);
-
     if (request.method === "HEAD") {
       return new Response(null, { status: 200, headers });
     }
-    return new Response(buf, { status: 200, headers });
+
+    try {
+      const declaredLength = /^\d+$/.test(String(contentLength || "")) ? Number(contentLength) : null;
+      const collect = declaredLength !== null && declaredLength <= persistMaxBytes;
+      const opened = await createValidatedImageStream(
+        upstream.body,
+        path,
+        {
+          maxBytes,
+          collect,
+          expectedLength: declaredLength,
+          limits: dimensionLimits,
+          timeouts: streamTimeouts,
+          readErrorStatus: 502,
+        },
+      );
+      const persistence = opened.completion
+        .then(async (result) => {
+          if (result.complete && result.bytes) {
+            await withTimeout(
+              persistValidatedBuffer({
+                env,
+                cache,
+                cacheKey,
+                path,
+                bytes: result.bytes,
+                headers,
+                contentType,
+                writeR2: r2Mode !== "off",
+              }),
+              writeTimeoutMs,
+              "Image persistence timed out",
+            );
+          }
+        })
+        .finally(() => coldFlight.finish());
+      ctx.waitUntil(persistence.catch(() => undefined));
+      return new Response(opened.stream, { status: 200, headers });
+    } catch (error) {
+      coldFlight.finish();
+      const status = error instanceof ImageBodyError ? error.status : 502;
+      const message =
+        status === 413
+          ? "Image too large"
+          : status === 415
+            ? "Invalid upstream image body"
+            : status === 504
+              ? "Upstream image timeout"
+              : "Upstream image stream failed";
+      return jsonError(status, message);
+    }
   },
 };

@@ -7,6 +7,202 @@ export const ALLOWED_PREFIXES = ["/img-original/", "/img-master/", "/img-/", "/c
 export const ALLOWED_EXT = new Set(["jpg", "jpeg", "png", "gif", "webp"]);
 export const BUILTIN_MIRRORS = new Set(["i.pixiv.cat", "i.pixiv.re", "i.pixiv.nl"]);
 export const MAX_UPSTREAM_REDIRECTS = 3;
+export const DEFAULT_MAX_IMAGE_BYTES = 32 * 1024 * 1024;
+export const DEFAULT_CACHE_WRITE_MAX_BYTES = 8 * 1024 * 1024;
+export const DEFAULT_MAX_CONCURRENT_COLD_FILLS = 4;
+export const DEFAULT_COLD_FLIGHT_WAIT_MS = 1500;
+export const DEFAULT_COLD_STREAM_IDLE_TIMEOUT_MS = 15000;
+export const DEFAULT_COLD_STREAM_TOTAL_TIMEOUT_MS = 120000;
+export const DEFAULT_STORAGE_WRITE_TIMEOUT_MS = 5000;
+export const DEFAULT_MAX_IMAGE_WIDTH = 16384;
+export const DEFAULT_MAX_IMAGE_HEIGHT = 16384;
+export const DEFAULT_MAX_IMAGE_PIXELS = 100_000_000;
+
+const MIME_BY_EXT = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+};
+
+export function maxImageBytes(env) {
+  const parsed = Number(env?.MAX_IMAGE_BYTES || DEFAULT_MAX_IMAGE_BYTES);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MAX_IMAGE_BYTES;
+  return Math.max(1024 * 1024, Math.min(Math.floor(parsed), 100 * 1024 * 1024));
+}
+
+export function cacheWriteMaxBytes(env) {
+  const maxImage = maxImageBytes(env);
+  const parsed = Number(env?.CACHE_WRITE_MAX_BYTES || DEFAULT_CACHE_WRITE_MAX_BYTES);
+  if (!Number.isFinite(parsed) || parsed <= 0) return Math.min(DEFAULT_CACHE_WRITE_MAX_BYTES, maxImage);
+  return Math.max(1024 * 1024, Math.min(Math.floor(parsed), maxImage));
+}
+
+export function maxConcurrentColdFills(env) {
+  const parsed = Number(env?.MAX_CONCURRENT_COLD_FILLS || DEFAULT_MAX_CONCURRENT_COLD_FILLS);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MAX_CONCURRENT_COLD_FILLS;
+  return Math.max(1, Math.min(Math.floor(parsed), 64));
+}
+
+export function coldFlightWaitMs(env) {
+  const parsed = Number(env?.COLD_FLIGHT_WAIT_MS || DEFAULT_COLD_FLIGHT_WAIT_MS);
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_COLD_FLIGHT_WAIT_MS;
+  return Math.max(0, Math.min(Math.floor(parsed), 5000));
+}
+
+export function coldStreamTimeouts(env) {
+  const idleRaw = Number(env?.COLD_STREAM_IDLE_TIMEOUT_MS || DEFAULT_COLD_STREAM_IDLE_TIMEOUT_MS);
+  const totalRaw = Number(env?.COLD_STREAM_TOTAL_TIMEOUT_MS || DEFAULT_COLD_STREAM_TOTAL_TIMEOUT_MS);
+  const idleMs = Number.isFinite(idleRaw)
+    ? Math.max(1000, Math.min(Math.floor(idleRaw), 60000))
+    : DEFAULT_COLD_STREAM_IDLE_TIMEOUT_MS;
+  const totalMs = Number.isFinite(totalRaw)
+    ? Math.max(idleMs, Math.min(Math.floor(totalRaw), 300000))
+    : DEFAULT_COLD_STREAM_TOTAL_TIMEOUT_MS;
+  return { idleMs, totalMs };
+}
+
+export function storageWriteTimeoutMs(env) {
+  const parsed = Number(env?.STORAGE_WRITE_TIMEOUT_MS || DEFAULT_STORAGE_WRITE_TIMEOUT_MS);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_STORAGE_WRITE_TIMEOUT_MS;
+  return Math.max(500, Math.min(Math.floor(parsed), 30000));
+}
+
+export function imageDimensionLimits(env) {
+  const clamp = (raw, fallback, max) => {
+    const parsed = Number(raw || fallback);
+    if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+    return Math.max(1, Math.min(Math.floor(parsed), max));
+  };
+  return {
+    maxWidth: clamp(env?.MAX_IMAGE_WIDTH, DEFAULT_MAX_IMAGE_WIDTH, 65535),
+    maxHeight: clamp(env?.MAX_IMAGE_HEIGHT, DEFAULT_MAX_IMAGE_HEIGHT, 65535),
+    maxPixels: clamp(env?.MAX_IMAGE_PIXELS, DEFAULT_MAX_IMAGE_PIXELS, 4_000_000_000),
+  };
+}
+
+export function hasExpectedImageMagic(path, bytes) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  const ext = String(path || "").split(".").pop()?.toLowerCase() || "";
+  if ((ext === "jpg" || ext === "jpeg") && data.length >= 3) {
+    return data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
+  }
+  if (ext === "png" && data.length >= 8) {
+    return [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((value, i) => data[i] === value);
+  }
+  if (ext === "gif" && data.length >= 6) {
+    const sig = String.fromCharCode(...data.slice(0, 6));
+    return sig === "GIF87a" || sig === "GIF89a";
+  }
+  if (ext === "webp" && data.length >= 12) {
+    return (
+      String.fromCharCode(...data.slice(0, 4)) === "RIFF" &&
+      String.fromCharCode(...data.slice(8, 12)) === "WEBP"
+    );
+  }
+  return false;
+}
+
+export function parseImageDimensions(path, bytes) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+  const ext = String(path || "").split(".").pop()?.toLowerCase() || "";
+  const ok = (width, height) =>
+    width > 0 && height > 0 ? { status: "ok", width, height } : { status: "invalid" };
+  if (ext === "png") {
+    if (data.length < 24) return { status: "need-more" };
+    if (!hasExpectedImageMagic(path, data)) return { status: "invalid" };
+    if (String.fromCharCode(...data.slice(12, 16)) !== "IHDR") return { status: "invalid" };
+    const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    return ok(view.getUint32(16), view.getUint32(20));
+  }
+  if (ext === "gif") {
+    if (data.length < 10) return { status: "need-more" };
+    if (!hasExpectedImageMagic(path, data)) return { status: "invalid" };
+    return ok(data[6] | (data[7] << 8), data[8] | (data[9] << 8));
+  }
+  if (ext === "webp") {
+    if (data.length < 30) return { status: "need-more" };
+    if (!hasExpectedImageMagic(path, data)) return { status: "invalid" };
+    const kind = String.fromCharCode(...data.slice(12, 16));
+    if (kind === "VP8X") {
+      const width = 1 + data[24] + (data[25] << 8) + (data[26] << 16);
+      const height = 1 + data[27] + (data[28] << 8) + (data[29] << 16);
+      return ok(width, height);
+    }
+    if (kind === "VP8L") {
+      if (data[20] !== 0x2f) return { status: "invalid" };
+      const width = 1 + data[21] + ((data[22] & 0x3f) << 8);
+      const height = 1 + (data[22] >> 6) + (data[23] << 2) + ((data[24] & 0x0f) << 10);
+      return ok(width, height);
+    }
+    if (kind === "VP8 ") {
+      if (data[23] !== 0x9d || data[24] !== 0x01 || data[25] !== 0x2a) return { status: "invalid" };
+      const width = (data[26] | (data[27] << 8)) & 0x3fff;
+      const height = (data[28] | (data[29] << 8)) & 0x3fff;
+      return ok(width, height);
+    }
+    return { status: "invalid" };
+  }
+  if (ext === "jpg" || ext === "jpeg") {
+    if (data.length < 4) return { status: "need-more" };
+    if (!hasExpectedImageMagic(path, data)) return { status: "invalid" };
+    const sofMarkers = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+    let offset = 2;
+    while (offset < data.length) {
+      while (offset < data.length && data[offset] !== 0xff) offset += 1;
+      if (offset >= data.length) return { status: "need-more" };
+      while (offset < data.length && data[offset] === 0xff) offset += 1;
+      if (offset >= data.length) return { status: "need-more" };
+      const marker = data[offset++];
+      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) continue;
+      if (marker === 0xd9 || marker === 0xda) return { status: "invalid" };
+      if (offset + 2 > data.length) return { status: "need-more" };
+      const length = (data[offset] << 8) | data[offset + 1];
+      if (length < 2) return { status: "invalid" };
+      if (sofMarkers.has(marker)) {
+        if (length < 7) return { status: "invalid" };
+        if (offset + 7 > data.length) return { status: "need-more" };
+        const height = (data[offset + 3] << 8) | data[offset + 4];
+        const width = (data[offset + 5] << 8) | data[offset + 6];
+        return ok(width, height);
+      }
+      if (offset + length > data.length) return { status: "need-more" };
+      offset += length;
+    }
+    return { status: "need-more" };
+  }
+  return { status: "invalid" };
+}
+
+export function dimensionsWithinLimit(dimensions, limits) {
+  if (!dimensions || dimensions.status !== "ok") return false;
+  return (
+    dimensions.width <= limits.maxWidth &&
+    dimensions.height <= limits.maxHeight &&
+    dimensions.width * dimensions.height <= limits.maxPixels
+  );
+}
+
+export function validatedImageContentType(path, rawContentType) {
+  const ext = String(path || "").split(".").pop()?.toLowerCase() || "";
+  const expected = MIME_BY_EXT[ext];
+  if (!expected) return null;
+  const actual = String(rawContentType || "").split(";", 1)[0].trim().toLowerCase();
+  if (!actual || actual === "application/octet-stream") return expected;
+  if (ext === "jpg" || ext === "jpeg") {
+    return actual === "image/jpeg" || actual === "image/jpg" ? "image/jpeg" : null;
+  }
+  return actual === expected ? expected : null;
+}
+
+export function contentLengthWithinLimit(rawContentLength, maxBytes) {
+  const raw = String(rawContentLength ?? "").trim();
+  if (!raw) return true;
+  if (!/^\d+$/.test(raw)) return false;
+  const size = Number(raw);
+  return Number.isSafeInteger(size) && size >= 0 && size <= Number(maxBytes);
+}
 
 export function timingSafeEqual(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
