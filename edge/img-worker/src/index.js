@@ -25,6 +25,7 @@
 import {
   authorizePrewarmSecrets,
   buildHealthzBody,
+  canFollowUpstreamRedirect,
   filterPrewarmPaths,
   isOriginCircuitOpen as pureIsOriginCircuitOpen,
   isSignedUrlExpired,
@@ -34,6 +35,7 @@ import {
   parseSignedPath,
   resolveFallbackHosts,
   resolveR2Mode,
+  resolveSafeRedirectUrl,
   resolveVerifySecrets,
   r2ObjectKey,
   takeRateLimitToken,
@@ -48,6 +50,7 @@ const DEFAULT_ORIGIN = "i.pximg.net";
 const REFERER = "https://www.pixiv.net/";
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 // Soft circuit breaker for origin 403 storms (isolate per isolate; best-effort).
 // When open, skip origin and go straight to emergency mirrors if configured.
@@ -146,7 +149,7 @@ function originFetchInit(env) {
       "User-Agent": UA,
       Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
     },
-    redirect: "follow",
+    redirect: "manual",
     cf: {
       cacheEverything: true,
       cacheTtlByStatus: {
@@ -159,29 +162,54 @@ function originFetchInit(env) {
   };
 }
 
+async function fetchWithSafeRedirects(initialUrl, init, policy) {
+  let url = resolveSafeRedirectUrl(initialUrl, initialUrl, policy);
+  if (!url) throw new Error("Upstream URL is outside the allowed trust boundary");
+
+  for (let redirects = 0; ; redirects += 1) {
+    const response = await fetch(url, { ...init, redirect: "manual" });
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+
+    const location = response.headers.get("Location");
+    if (!location) return response;
+    if (response.body) await response.body.cancel();
+    if (!canFollowUpstreamRedirect(redirects)) {
+      throw new Error("Upstream redirect limit exceeded");
+    }
+
+    const nextUrl = resolveSafeRedirectUrl(url, location, policy);
+    if (!nextUrl) throw new Error("Upstream redirect target is not allowed");
+    url = nextUrl;
+  }
+}
+
 async function fetchOrigin(path, env) {
   const originHost = String(env.ORIGIN_HOST || DEFAULT_ORIGIN).trim() || DEFAULT_ORIGIN;
   const url = `https://${originHost}${path}`;
   const init = originFetchInit(env);
   try {
-    return await fetch(url, init);
+    return await fetchWithSafeRedirects(url, init, { mode: "pximg" });
   } catch {
     // One retry for transient network errors on cold POP / origin blip.
-    return await fetch(url, init);
+    return await fetchWithSafeRedirects(url, init, { mode: "pximg" });
   }
 }
 
 async function fetchMirrorHost(path, host) {
   const url = `https://${host}${path}`;
-  return fetch(url, {
-    method: "GET",
-    headers: {
-      Referer: REFERER,
-      "User-Agent": UA,
-      Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+  return fetchWithSafeRedirects(
+    url,
+    {
+      method: "GET",
+      headers: {
+        Referer: REFERER,
+        "User-Agent": UA,
+        Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      },
+      redirect: "manual",
     },
-    redirect: "follow",
-  });
+    { mode: "same-host", allowedHost: host },
+  );
 }
 
 /**

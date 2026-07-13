@@ -13,6 +13,7 @@ import {
   authorizePrewarmSecrets,
   buildHealthzBody,
   cachePathKey,
+  canFollowUpstreamRedirect,
   filterPrewarmPaths,
   isAllowedMirrorHost,
   isOriginCircuitOpen,
@@ -21,6 +22,7 @@ import {
   originCircuitConfig,
   parseRateLimitConfig,
   parseSignedPath,
+  resolveSafeRedirectUrl,
   resolveFallbackHosts,
   resolveR2Mode,
   resolveVerifySecrets,
@@ -137,6 +139,82 @@ describe("mirrors + r2 key", () => {
   });
   it("r2ObjectKey prefixes pximg", () => {
     assert.equal(r2ObjectKey("/img-original/x.jpg"), "pximg/img-original/x.jpg");
+  });
+});
+
+describe("upstream redirect boundaries", () => {
+  it("allows at most three redirect hops", () => {
+    assert.equal(canFollowUpstreamRedirect(0), true);
+    assert.equal(canFollowUpstreamRedirect(1), true);
+    assert.equal(canFollowUpstreamRedirect(2), true);
+    assert.equal(canFollowUpstreamRedirect(3), false);
+    assert.equal(canFollowUpstreamRedirect(-1), false);
+  });
+
+  it("allows HTTPS pximg redirects within the strict pximg.net boundary", () => {
+    assert.equal(
+      resolveSafeRedirectUrl(
+        "https://i.pximg.net/img-original/a.jpg",
+        "https://sub.pximg.net/img-original/b.jpg",
+        { mode: "pximg" },
+      ),
+      "https://sub.pximg.net/img-original/b.jpg",
+    );
+    assert.equal(
+      resolveSafeRedirectUrl(
+        "https://i.pximg.net/img-original/a.jpg",
+        "/img-original/b.jpg",
+        { mode: "pximg" },
+      ),
+      "https://i.pximg.net/img-original/b.jpg",
+    );
+  });
+
+  it("rejects scheme, authority, port, IP, localhost, and suffix-confusion escapes", () => {
+    const current = "https://i.pximg.net/img-original/a.jpg";
+    for (const target of [
+      "http://i.pximg.net/a.jpg",
+      "https://user:pass@i.pximg.net/a.jpg",
+      "https://i.pximg.net:8443/a.jpg",
+      "https://127.0.0.1/a.jpg",
+      "https://[::1]/a.jpg",
+      "https://localhost/a.jpg",
+      "https://localhost./a.jpg",
+      "https://service.localhost/a.jpg",
+      "https://evilpximg.net/a.jpg",
+      "https://pximg.net.evil.example/a.jpg",
+    ]) {
+      assert.equal(resolveSafeRedirectUrl(current, target, { mode: "pximg" }), null, target);
+    }
+  });
+
+  it("keeps mirror and worker redirects on the original host", () => {
+    const current = "https://i.pixiv.cat/img-original/a.jpg";
+    assert.equal(
+      resolveSafeRedirectUrl(current, "/img-original/b.jpg", {
+        mode: "same-host",
+        allowedHost: "i.pixiv.cat",
+      }),
+      "https://i.pixiv.cat/img-original/b.jpg",
+    );
+    assert.equal(
+      resolveSafeRedirectUrl(current, "https://other.workers.dev/a.jpg", {
+        mode: "same-host",
+        allowedHost: "i.pixiv.cat",
+      }),
+      null,
+    );
+  });
+
+  it("rejects invalid locations and unknown policies", () => {
+    assert.equal(
+      resolveSafeRedirectUrl("https://i.pximg.net/a.jpg", "http://[", { mode: "pximg" }),
+      null,
+    );
+    assert.equal(
+      resolveSafeRedirectUrl("https://i.pximg.net/a.jpg", "/b.jpg", { mode: "unknown" }),
+      null,
+    );
   });
 });
 

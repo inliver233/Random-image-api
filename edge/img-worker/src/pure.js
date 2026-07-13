@@ -6,6 +6,7 @@
 export const ALLOWED_PREFIXES = ["/img-original/", "/img-master/", "/img-/", "/c/"];
 export const ALLOWED_EXT = new Set(["jpg", "jpeg", "png", "gif", "webp"]);
 export const BUILTIN_MIRRORS = new Set(["i.pixiv.cat", "i.pixiv.re", "i.pixiv.nl"]);
+export const MAX_UPSTREAM_REDIRECTS = 3;
 
 export function timingSafeEqual(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
@@ -52,6 +53,68 @@ export function isAllowedMirrorHost(host) {
   // Allow same-org worker emergency origins only (not open proxy).
   if (h.endsWith(".workers.dev")) return true;
   return false;
+}
+
+function isIpLiteral(hostname) {
+  const host = String(hostname || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, "");
+  if (!host) return false;
+  if (host.includes(":")) return true;
+  const parts = host.split(".");
+  return (
+    parts.length === 4 &&
+    parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) >= 0 && Number(part) <= 255)
+  );
+}
+
+function isPximgHost(hostname) {
+  const host = String(hostname || "").trim().toLowerCase();
+  return host === "pximg.net" || host.endsWith(".pximg.net");
+}
+
+export function canFollowUpstreamRedirect(completedRedirects) {
+  const count = Number(completedRedirects);
+  return Number.isInteger(count) && count >= 0 && count < MAX_UPSTREAM_REDIRECTS;
+}
+
+/**
+ * Resolve one upstream redirect without widening its trust boundary.
+ * `pximg` permits redirects between strict pximg.net subdomains. `same-host`
+ * pins mirrors and worker fallbacks to the host selected by configuration.
+ */
+export function resolveSafeRedirectUrl(currentUrl, location, policy) {
+  let target;
+  try {
+    target = new URL(String(location || ""), String(currentUrl || ""));
+  } catch {
+    return null;
+  }
+
+  if (target.protocol !== "https:") return null;
+  if (target.username || target.password) return null;
+  if (target.port && target.port !== "443") return null;
+
+  const host = target.hostname.toLowerCase().replace(/\.$/, "");
+  if (!host || isIpLiteral(host) || host === "localhost" || host.endsWith(".localhost")) {
+    return null;
+  }
+
+  const mode = String(policy?.mode || "");
+  if (mode === "pximg") {
+    if (!isPximgHost(host)) return null;
+  } else if (mode === "same-host") {
+    const allowedHost = String(policy?.allowedHost || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\.$/, "");
+    if (!allowedHost || host !== allowedHost) return null;
+  } else {
+    return null;
+  }
+
+  return target.toString();
 }
 
 /** Ordered unique hosts from FALLBACK_MIRROR_HOSTS (csv) + legacy FALLBACK_MIRROR_HOST. */
