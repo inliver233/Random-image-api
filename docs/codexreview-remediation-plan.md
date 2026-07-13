@@ -88,7 +88,7 @@ The root-cause text below is the audit hypothesis to revalidate, not completion 
 
 | Requirement | Status | Mapping / evidence plan |
 |---|---|---|
-| Strict pximg hostname boundary and per-hop redirect validation | pending | Revalidate image/API worker and Python redirect helpers; add deceptive suffix, credentials, private IP, DNS rebinding and every-hop tests. Closely related to B7/H11/H13. |
+| Strict pximg hostname boundary and per-hop redirect validation | in-progress | Strict exact-or-dot-boundary hostname validation is completed in `e905d7b` with deceptive suffix tests. HTTP/userinfo/port policy and manual per-hop redirect/DNS/IP validation remain under B7/H11/H13. |
 | Rollback/delete/status/fail-cooldown Engine synchronization | pending | Covered by B5/B6; enumerate every producer and require ordered outbox convergence tests. |
 | Separate Engine sync and traffic flags | pending | Covered by H2; defaults must keep both false until complete snapshot readiness. |
 | Production canary 5→25→50→100 with rollback | blocked | Requires deployed production-like environment after B6/H1-H3/M18-M19; save commands and results under `docs/benchmarks/`. |
@@ -107,6 +107,7 @@ The root-cause text below is the audit hypothesis to revalidate, not completion 
 | 2026-07-13 | B4 fix | `py -3.11 -m compileall -q backend/app/jobs/handlers/hydrate_metadata.py backend/tests/test_job_handler_hydrate_metadata.py`; `py -3.11 -m pytest -q backend/tests/test_job_handler_hydrate_metadata.py` | PASS; 7 tests. A forced 300-second defer proves exact `run_after` propagation. Independent review approved completion. |
 | 2026-07-13 | H12 URI cache | Focused pytest; `pytest.main(['-q','backend/tests/test_proxy_pool_routing.py'])` followed by `os._exit`; `py -3.11 -m pytest -q backend/tests/test_proxy_client_pool.py` | PASS; 2 focused, 8 routing, 4 proxy-client tests. Ordinary routing-file pytest completes tests but the process retains a pre-existing app thread; wrapper records the test result and exits. H12 remains in progress. |
 | 2026-07-13 | B6 partial-snapshot guard | Python 3.11 compileall; `pytest.main` for Engine events, warm startup and Admin Engine tests | PASS; 18 tests. Null/zero/invalid limits fail closed, positive limits are dry-run only, formal no-limit push is exactly once, and core rejects partial formal push before DB/HTTP. B6 remains in progress. |
+| 2026-07-13 | Strict pximg hostname | Python 3.11 compileall; `pytest.main` for `test_pixiv_urls.py` and `test_image_edge.py` | PASS; 34 tests. Deceptive prefix/suffix domains are rejected; independent review approved. Redirect hardening remains. |
 
 ## Commit log
 
@@ -118,3 +119,4 @@ The root-cause text below is the audit hypothesis to revalidate, not completion 
 | `0ce6191` | B4 | Preserved recoverable hydrate deferrals and exact upstream/token backoff deadlines. |
 | `3072c3e` | H12 (partial) | Corrected Proxy URI cache identity and invalidation; client lease/timeout work remains. |
 | `3f09bec` | B6 (partial) | Sealed the known Admin partial-snapshot replacement path; protocol ordering/recovery remains. |
+| `e905d7b` | P0 hostname boundary | Enforced strict pximg domain boundaries in import parsing and Image Edge signing. |
