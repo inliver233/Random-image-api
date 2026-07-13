@@ -22,6 +22,7 @@ class Image(Base):
             "height",
             "random_key",
         ),
+        sa.Index("idx_images_status_x_random", "status", "x_restrict", "random_key"),
         sa.Index("idx_images_illust_type_random", "status", "illust_type", "random_key"),
         sa.Index("idx_images_user_random", "status", "user_id", "random_key"),
         sa.Index("idx_images_created_at_pixiv", "created_at_pixiv"),
