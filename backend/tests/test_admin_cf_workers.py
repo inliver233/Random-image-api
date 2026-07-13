@@ -4,12 +4,16 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import httpx
 from fastapi.testclient import TestClient
 
 from app.core.cf_pool_overlay import reset_overlay_for_tests
-from app.core.cf_worker_deploy import CfWorkerDeleteResult, CfWorkerDeployResult
+from app.core.cf_worker_deploy import CfWorkerDeleteResult, CfWorkerDeployError, CfWorkerDeployResult
 from app.core.security import create_jwt
+from app.db.cf_worker_deployments import reserve_cf_worker_deployment
 from app.db.models.base import Base
+from app.db.models.cf_worker_deployments import CfWorkerDeployment
+from app.db.session import create_sessionmaker
 from app.main import create_app
 
 
@@ -356,6 +360,156 @@ def test_cf_workers_deploy_validation(tmp_path: Path, monkeypatch) -> None:
             },
         )
         assert resp.status_code == 400
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_deploy_rejects_cross_kind_name_before_cloudflare(tmp_path: Path, monkeypatch) -> None:
+    result = CfWorkerDeployResult(
+        kind="api",
+        worker_name="shared-name",
+        worker_host="shared-name.acct.workers.dev",
+        base_url="https://shared-name.acct.workers.dev",
+        secrets_set=["PROXY_SECRET"],
+        deployed=True,
+    )
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_cross_kind")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        with patch(
+            "app.api.admin.cf_workers.deploy_cf_worker",
+            new_callable=AsyncMock,
+            return_value=result,
+        ) as deploy:
+            first = client.post(
+                "/admin/api/cf-workers/deploy",
+                headers=headers,
+                json={
+                    "kind": "api",
+                    "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
+                    "account_id": "0123456789abcdef0123456789abcdef",
+                    "worker_name": "shared-name",
+                    "proxy_secret": "proxy-secret-value",
+                },
+            )
+            assert first.status_code == 200
+            assert first.json()["deployment_state"] == "deployed"
+            same_kind = client.post(
+                "/admin/api/cf-workers/deploy",
+                headers=headers,
+                json={
+                    "kind": "api",
+                    "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
+                    "account_id": "0123456789abcdef0123456789abcdef",
+                    "worker_name": "shared-name",
+                    "proxy_secret": "different-secret-value",
+                },
+            )
+            assert same_kind.status_code == 409
+            second = client.post(
+                "/admin/api/cf-workers/deploy",
+                headers=headers,
+                json={
+                    "kind": "image",
+                    "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
+                    "account_id": "0123456789abcdef0123456789abcdef",
+                    "worker_name": "shared-name",
+                    "image_edge_secret": "image-secret-value",
+                },
+            )
+            assert second.status_code == 409
+            assert deploy.await_count == 1
+
+    async def _assert_state() -> None:
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            row = await session.get(CfWorkerDeployment, 1)
+            assert row is not None
+            assert row.kind == "api"
+            assert row.state == "deployed"
+
+    asyncio.run(_assert_state())
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_deploy_failure_leaves_durable_failed_intent(tmp_path: Path, monkeypatch) -> None:
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_failed_intent")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        with patch(
+            "app.api.admin.cf_workers.deploy_cf_worker",
+            new_callable=AsyncMock,
+            side_effect=CfWorkerDeployError("upload failed", status_code=502),
+        ):
+            resp = client.post(
+                "/admin/api/cf-workers/deploy",
+                headers=headers,
+                json={
+                    "kind": "api",
+                    "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
+                    "account_id": "0123456789abcdef0123456789abcdef",
+                    "worker_name": "failed-name",
+                    "proxy_secret": "proxy-secret-value",
+                },
+            )
+            assert resp.status_code == 502
+
+    async def _assert_state() -> None:
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            row = await session.get(CfWorkerDeployment, 1)
+            assert row is not None
+            assert row.state == "failed"
+            assert row.last_error == "upload failed"
+
+    asyncio.run(_assert_state())
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_transport_failure_is_retryable(tmp_path: Path, monkeypatch) -> None:
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_transport_failed")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        with patch(
+            "app.api.admin.cf_workers.deploy_cf_worker",
+            new_callable=AsyncMock,
+            side_effect=httpx.ConnectError("Bearer transport-secret api_token=token-secret"),
+        ):
+            resp = client.post(
+                "/admin/api/cf-workers/deploy",
+                headers=headers,
+                json={
+                    "kind": "api",
+                    "api_token": "cf-token-abcdefghijklmnopqrstuvwxyz",
+                    "account_id": "0123456789abcdef0123456789abcdef",
+                    "worker_name": "transport-failed",
+                    "proxy_secret": "proxy-secret-value",
+                },
+            )
+            assert resp.status_code == 502
+            assert "transport-secret" not in resp.text
+            assert "token-secret" not in resp.text
+
+    async def _assert_retry() -> None:
+        Session = create_sessionmaker(app.state.engine)
+        async with Session() as session:
+            row = await session.get(CfWorkerDeployment, 1)
+            assert row is not None
+            assert row.state == "failed"
+            assert "transport-secret" not in str(row.last_error)
+            assert "token-secret" not in str(row.last_error)
+        deployment_id, version = await reserve_cf_worker_deployment(
+            app.state.engine,
+            account_id="0123456789abcdef0123456789abcdef",
+            worker_name="transport-failed",
+            kind="api",
+        )
+        assert deployment_id == 1
+        assert version == 2
+
+    asyncio.run(_assert_retry())
     reset_overlay_for_tests()
 
 

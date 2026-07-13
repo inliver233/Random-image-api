@@ -50,6 +50,9 @@ from app.core.cf_worker_deploy import (
     CfWorkerDeployError,
     delete_cf_worker_script,
     deploy_cf_worker,
+    validate_account_id,
+    validate_api_token,
+    validate_worker_name,
 )
 from app.core.egress_policy import (
     egress_policy_snapshot,
@@ -60,6 +63,12 @@ from app.core.errors import ApiError, ErrorCode
 from app.core.image_edge import snapshot_image_edge_base_cooldown
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_settings import set_runtime_setting
+from app.db.cf_worker_deployments import (
+    CfWorkerIdentityConflict,
+    CfWorkerOperationConflict,
+    mark_cf_worker_deployment,
+    reserve_cf_worker_deployment,
+)
 
 router = APIRouter()
 
@@ -371,6 +380,12 @@ async def cf_workers_delete_script(
     api_token = parse_required_str(data.get("api_token"), field="api_token", max_len=200)
     account_id = parse_required_str(data.get("account_id"), field="account_id", max_len=64)
     worker_name = parse_required_str(data.get("worker_name"), field="worker_name", max_len=63)
+    try:
+        api_token = validate_api_token(api_token)
+        account_id = validate_account_id(account_id).lower()
+        worker_name = validate_worker_name(worker_name)
+    except CfWorkerDeployError as exc:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=str(exc), status_code=400) from exc
     kind_raw = parse_optional_str(data.get("kind"))
     kind = (kind_raw or "").strip().lower()
     if kind and kind not in {"api", "image"}:
@@ -389,7 +404,6 @@ async def cf_workers_delete_script(
         if status < 500:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message=str(exc), status_code=status) from exc
         raise ApiError(code=ErrorCode.UPSTREAM_STREAM_ERROR, message=str(exc), status_code=502) from exc
-
     unregistered = False
     runtime_bases: list[str] = []
     base_url: str | None = None
@@ -470,12 +484,35 @@ async def cf_workers_deploy(
     api_token = parse_required_str(data.get("api_token"), field="api_token", max_len=200)
     account_id = parse_required_str(data.get("account_id"), field="account_id", max_len=64)
     worker_name = parse_required_str(data.get("worker_name"), field="worker_name", max_len=63)
+    try:
+        api_token = validate_api_token(api_token)
+        account_id = validate_account_id(account_id).lower()
+        worker_name = validate_worker_name(worker_name)
+    except CfWorkerDeployError as exc:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=str(exc), status_code=400) from exc
     register = parse_bool(data.get("register"), default=True)
     # Product default split (goal):
     # - Public image path: default enable self-built CF image edge after deploy.
     # - Pixiv business API path: default do NOT enable CF API proxy (opt-in).
     default_enable_business = kind == "image"
     enable_business = parse_bool(data.get("enable_business"), default=default_enable_business)
+
+    engine = _engine(request)
+    if engine is None:
+        raise ApiError(
+            code=ErrorCode.INTERNAL_ERROR,
+            message="Database unavailable for durable CF deployment intent",
+            status_code=503,
+        )
+    try:
+        deployment_id, operation_version = await reserve_cf_worker_deployment(
+            engine,
+            account_id=account_id,
+            worker_name=worker_name,
+            kind=kind,
+        )
+    except (CfWorkerIdentityConflict, CfWorkerOperationConflict) as exc:
+        raise ApiError(code=ErrorCode.BAD_REQUEST, message=str(exc), status_code=409) from exc
 
     settings = _settings(request)
     # Reuse env secret, then process overlay, else generate once (returned only in this response).
@@ -527,18 +564,56 @@ async def cf_workers_deploy(
             client=getattr(request.app.state, "httpx_client", None),
         )
     except CfWorkerDeployError as exc:
+        await mark_cf_worker_deployment(
+            engine,
+            deployment_id=deployment_id,
+            operation_version=operation_version,
+            expected_state="intent",
+            state="failed",
+            last_error=str(exc),
+        )
         status = int(exc.status_code)
         if status < 500:
             raise ApiError(code=ErrorCode.BAD_REQUEST, message=str(exc), status_code=status) from exc
         raise ApiError(code=ErrorCode.UPSTREAM_STREAM_ERROR, message=str(exc), status_code=502) from exc
+    except Exception as exc:
+        await mark_cf_worker_deployment(
+            engine,
+            deployment_id=deployment_id,
+            operation_version=operation_version,
+            expected_state="intent",
+            state="failed",
+            last_error=str(exc),
+        )
+        raise ApiError(
+            code=ErrorCode.UPSTREAM_STREAM_ERROR,
+            message="Cloudflare deploy transport failed",
+            status_code=502,
+        ) from exc
 
     deployed_base = normalize_runtime_cf_base_url(result.base_url)
     if not deployed_base:
+        await mark_cf_worker_deployment(
+            engine,
+            deployment_id=deployment_id,
+            operation_version=operation_version,
+            expected_state="intent",
+            state="failed",
+            last_error="Cloudflare deploy returned an untrusted Worker base",
+        )
         raise ApiError(
             code=ErrorCode.UPSTREAM_STREAM_ERROR,
             message="Cloudflare deploy returned an untrusted Worker base",
             status_code=502,
         )
+    await mark_cf_worker_deployment(
+        engine,
+        deployment_id=deployment_id,
+        operation_version=operation_version,
+        expected_state="intent",
+        state="deployed",
+        base_url=deployed_base,
+    )
 
     updated_by = str(claims.get("sub") or claims.get("username") or "admin")
     runtime_bases: list[str] = []
@@ -651,6 +726,8 @@ async def cf_workers_deploy(
         payload["generated_secret_note"] = (
             "系统生成的共享密钥，仅此响应回显一次；已写入 Worker 与 BFF runtime overlay。"
         )
+    payload["deployment_id"] = deployment_id
+    payload["deployment_state"] = "deployed"
     return admin_ok(request, payload=payload, request_id=rid)
 
 
