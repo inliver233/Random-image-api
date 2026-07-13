@@ -1,16 +1,20 @@
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import urlparse
 
 from app.core.config import parse_csv_urls
+from app.core.pixiv_urls import host_matches_domain
 
 PoolKind = Literal["api", "image"]
 
 # Runtime-settings keys for ops-registered CF pool members (merged with env bases).
 RUNTIME_KEY_API_BASES = "cf_pool.api.base_urls"
 RUNTIME_KEY_IMAGE_BASES = "cf_pool.image.base_urls"
+RUNTIME_KEY_API_VERIFIED_BASES = "cf_pool.api.verified_base_urls"
+RUNTIME_KEY_IMAGE_VERIFIED_BASES = "cf_pool.image.verified_base_urls"
 # Deploy-time business enable (OR with env CF_API_PROXY_ENABLED / IMAGE_EDGE_ENABLED).
 RUNTIME_KEY_API_ENABLED = "cf_pool.api.enabled"
 RUNTIME_KEY_IMAGE_ENABLED = "cf_pool.image.enabled"
@@ -30,11 +34,11 @@ class CfPoolMember:
 
 
 def normalize_cf_base_url(raw: str) -> str | None:
-    """Accept http(s) base; strip trailing slash; reject empty / non-http."""
+    """Normalize a trusted CF base origin; reject ambiguous or unsafe URL forms."""
     base = (raw or "").strip().rstrip("/")
     if not base:
         return None
-    if not (base.startswith("https://") or base.startswith("http://")):
+    if not base.startswith("https://"):
         # Allow bare workers.dev host from CF deploy response.
         host = base
         if "://" in host:
@@ -46,12 +50,52 @@ def normalize_cf_base_url(raw: str) -> str | None:
         parsed = urlparse(base)
     except Exception:
         return None
-    if (parsed.scheme or "").lower() not in {"http", "https"}:
+    if (parsed.scheme or "").lower() != "https":
         return None
-    if not (parsed.hostname or "").strip():
+    if parsed.username is not None or parsed.password is not None:
         return None
-    # Drop path/query/fragment — pool members are origin bases only.
-    return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    host = (parsed.hostname or "").strip().lower().rstrip(".")
+    if not host or host == "localhost" or host.endswith(".localhost"):
+        return None
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port not in {None, 443}:
+        return None
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        return None
+    return f"https://{host}"
+
+
+def normalize_runtime_cf_base_url(raw: str) -> str | None:
+    """Runtime pool members must be HTTPS Cloudflare workers.dev origins."""
+    base = normalize_cf_base_url(raw)
+    if not base:
+        return None
+    host = (urlparse(base).hostname or "").lower()
+    if not host_matches_domain(host, "workers.dev"):
+        return None
+    return base
+
+
+def merge_runtime_base_url_lists(*lists: list[str] | tuple[str, ...] | None) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for group in lists:
+        for raw in group or []:
+            base = normalize_runtime_cf_base_url(str(raw or ""))
+            if not base or base in seen:
+                continue
+            seen.add(base)
+            out.append(base)
+    return out
 
 
 def merge_base_url_lists(*lists: list[str] | tuple[str, ...] | None) -> list[str]:

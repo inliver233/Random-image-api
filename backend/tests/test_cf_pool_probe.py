@@ -175,6 +175,34 @@ def test_probe_cf_worker_base_api_secret_not_configured() -> None:
     reset_cf_base_cooldown_for_tests()
 
 
+def test_probe_cf_worker_base_rejects_service_mismatch() -> None:
+    reset_cf_base_cooldown_for_tests()
+    client = AsyncMock(spec=httpx.AsyncClient)
+    client.get = AsyncMock(
+        return_value=_json_response(
+            200,
+            {
+                "ok": True,
+                "service": "attacker-controlled-service",
+                "secret_configured": True,
+            },
+        )
+    )
+
+    async def _run() -> dict:
+        return await probe_cf_worker_base(
+            client,
+            kind="api",
+            base_url="https://api-mismatch.example.workers.dev",
+        )
+
+    out = asyncio.run(_run())
+    assert out["ok"] is False
+    assert out["error"] == "service_mismatch"
+    assert is_cf_base_cooling("https://api-mismatch.example.workers.dev") is True
+    reset_cf_base_cooldown_for_tests()
+
+
 def test_probe_cf_worker_base_image_secret_not_configured() -> None:
     """img-worker healthz secret_configured=false → not cutover-ready, no cooldown."""
     reset_image_edge_base_cooldown_for_tests()

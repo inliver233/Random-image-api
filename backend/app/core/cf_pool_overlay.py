@@ -9,11 +9,14 @@ from app.core.cf_pool_registry import (
     RUNTIME_KEY_API_BASES,
     RUNTIME_KEY_API_ENABLED,
     RUNTIME_KEY_API_SECRET,
+    RUNTIME_KEY_API_VERIFIED_BASES,
     RUNTIME_KEY_IMAGE_BASES,
     RUNTIME_KEY_IMAGE_ENABLED,
     RUNTIME_KEY_IMAGE_SECRET,
     RUNTIME_KEY_IMAGE_SECRET_PREVIOUS,
+    RUNTIME_KEY_IMAGE_VERIFIED_BASES,
     merge_base_url_lists,
+    merge_runtime_base_url_lists,
     parse_base_urls_payload,
 )
 from app.core.logging import get_logger
@@ -56,7 +59,7 @@ def get_image_overlay_bases() -> list[str]:
 
 
 def set_api_overlay_bases(bases: list[str] | None) -> list[str]:
-    merged = merge_base_url_lists(bases or [])
+    merged = merge_runtime_base_url_lists(bases or [])
     with _lock:
         global _api_bases, _loaded_at_mono
         _api_bases = list(merged)
@@ -65,7 +68,7 @@ def set_api_overlay_bases(bases: list[str] | None) -> list[str]:
 
 
 def set_image_overlay_bases(bases: list[str] | None) -> list[str]:
-    merged = merge_base_url_lists(bases or [])
+    merged = merge_runtime_base_url_lists(bases or [])
     with _lock:
         global _image_bases, _loaded_at_mono
         _image_bases = list(merged)
@@ -160,8 +163,24 @@ def set_image_overlay_secret(secret: str | None, *, previous: str | None = None)
 def apply_runtime_values_to_overlay(values: dict[str, Any] | None) -> None:
     """Load overlay from runtime_settings values dict (startup / after write / TTL)."""
     values = values or {}
-    api = parse_base_urls_payload(values.get(RUNTIME_KEY_API_BASES))
-    image = parse_base_urls_payload(values.get(RUNTIME_KEY_IMAGE_BASES))
+    requested_api = merge_runtime_base_url_lists(
+        parse_base_urls_payload(values.get(RUNTIME_KEY_API_BASES))
+    )
+    requested_image = merge_runtime_base_url_lists(
+        parse_base_urls_payload(values.get(RUNTIME_KEY_IMAGE_BASES))
+    )
+    verified_api = set(
+        merge_runtime_base_url_lists(
+            parse_base_urls_payload(values.get(RUNTIME_KEY_API_VERIFIED_BASES))
+        )
+    )
+    verified_image = set(
+        merge_runtime_base_url_lists(
+            parse_base_urls_payload(values.get(RUNTIME_KEY_IMAGE_VERIFIED_BASES))
+        )
+    )
+    api = [base for base in requested_api if base in verified_api]
+    image = [base for base in requested_image if base in verified_image]
     set_api_overlay_bases(api)
     set_image_overlay_bases(image)
     set_api_overlay_enabled(_as_bool(values.get(RUNTIME_KEY_API_ENABLED)))

@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.core.cf_pool_registry import (
     merge_base_url_lists,
     normalize_cf_base_url,
+    normalize_runtime_cf_base_url,
     parse_base_urls_payload,
     pool_members_from_bases,
     register_base_url,
@@ -12,10 +13,32 @@ from app.core.cf_pool_registry import (
 
 def test_normalize_cf_base_url() -> None:
     assert normalize_cf_base_url("https://a.example.com/") == "https://a.example.com"
-    assert normalize_cf_base_url("https://a.example.com/path") == "https://a.example.com"
+    assert normalize_cf_base_url("https://a.example.com/path") is None
     assert normalize_cf_base_url("worker-name.acct.workers.dev") == "https://worker-name.acct.workers.dev"
     assert normalize_cf_base_url("") is None
     assert normalize_cf_base_url("ftp://x") is None
+
+
+def test_normalize_cf_base_url_rejects_unsafe_origins() -> None:
+    for raw in (
+        "http://api.example.workers.dev",
+        "https://user:pass@api.example.workers.dev",
+        "https://127.0.0.1",
+        "https://169.254.169.254",
+        "https://192.168.2.1",
+        "https://localhost",
+        "https://api.example.workers.dev:8443",
+        "https://api.example.workers.dev/?target=private",
+    ):
+        assert normalize_cf_base_url(raw) is None
+
+
+def test_runtime_cf_base_requires_workers_dev() -> None:
+    assert (
+        normalize_runtime_cf_base_url("https://api.example.workers.dev")
+        == "https://api.example.workers.dev"
+    )
+    assert normalize_runtime_cf_base_url("https://api.example.com") is None
 
 
 def test_merge_and_register() -> None:

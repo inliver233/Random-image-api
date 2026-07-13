@@ -35,6 +35,7 @@ def _prepare(tmp_path: Path, monkeypatch, *, name: str) -> object:
 
 
 def test_cf_workers_pool_and_register(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CF_API_PROXY_BASE_URLS", "https://api-a.example.workers.dev")
     app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_pool")
     token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
     with TestClient(app) as client:
@@ -71,6 +72,26 @@ def test_cf_workers_pool_and_register(tmp_path: Path, monkeypatch) -> None:
         assert un.status_code == 200
         assert un.json()["unregistered"] is True
     reset_overlay_for_tests()
+
+
+def test_cf_workers_register_rejects_unverified_or_unsafe_base(tmp_path: Path, monkeypatch) -> None:
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_register_reject")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        for base_url in (
+            "http://127.0.0.1",
+            "https://169.254.169.254",
+            "https://user:pass@evil.example",
+            "https://attacker-owned.example.workers.dev",
+        ):
+            resp = client.post(
+                "/admin/api/cf-workers/register",
+                headers=headers,
+                json={"kind": "api", "base_url": base_url},
+            )
+            assert resp.status_code == 400
+    assert reset_overlay_for_tests() is None
 
 
 def test_cf_workers_deploy_api_default_does_not_enable_business(tmp_path: Path, monkeypatch) -> None:
@@ -339,6 +360,7 @@ def test_cf_workers_deploy_validation(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_cf_workers_probe_empty_body_and_override(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CF_API_PROXY_BASE_URLS", "https://api-a.example.workers.dev")
     app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_probe")
     token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
     fake_api = [
@@ -409,6 +431,25 @@ def test_cf_workers_probe_empty_body_and_override(tmp_path: Path, monkeypatch) -
             assert kwargs["kind"] == "api"
             assert kwargs["bases"] == ["https://api-a.example.workers.dev"]
             assert kwargs["timeout_s"] == 2.0
+    reset_overlay_for_tests()
+
+
+def test_cf_workers_probe_rejects_untrusted_override(tmp_path: Path, monkeypatch) -> None:
+    app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_probe_untrusted")
+    token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
+    with TestClient(app) as client:
+        headers = {"Authorization": f"Bearer {token}", "X-Request-Id": "req_test"}
+        with patch("app.api.admin.cf_workers.probe_cf_pool_bases", new_callable=AsyncMock) as probe:
+            resp = client.post(
+                "/admin/api/cf-workers/probe",
+                headers=headers,
+                json={
+                    "kind": "api",
+                    "base_urls": ["https://attacker-owned.example.workers.dev"],
+                },
+            )
+        assert resp.status_code == 400
+        probe.assert_not_awaited()
     reset_overlay_for_tests()
 
 
@@ -489,6 +530,7 @@ def test_cf_workers_egress_policy_force_residential(tmp_path: Path, monkeypatch)
 
 
 def test_cf_workers_delete_script_and_unregister_pool(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CF_API_PROXY_BASE_URLS", "https://ria-api-a.acct.workers.dev")
     app = _prepare(tmp_path, monkeypatch, name="admin_cf_workers_delete_script")
     token = create_jwt(secret_key="secret_test", subject="admin", ttl_s=3600)
     del_result = CfWorkerDeleteResult(worker_name="ria-api-a", deleted=True, already_absent=False)
@@ -529,7 +571,8 @@ def test_cf_workers_delete_script_and_unregister_pool(tmp_path: Path, monkeypatc
             delete_fn.assert_awaited_once()
 
         pool = client.get("/admin/api/cf-workers/pool", headers=headers).json()
-        assert "https://ria-api-a.acct.workers.dev" not in pool["api"]["merged_base_urls"]
+        assert "https://ria-api-a.acct.workers.dev" not in pool["api"]["runtime_base_urls"]
+        assert "https://ria-api-a.acct.workers.dev" in pool["api"]["merged_base_urls"]
     reset_overlay_for_tests()
 
 

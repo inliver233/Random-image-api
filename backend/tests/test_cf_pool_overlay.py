@@ -14,7 +14,12 @@ from app.core.cf_pool_overlay import (
     reset_overlay_for_tests,
     should_refresh_overlay,
 )
-from app.core.cf_pool_registry import RUNTIME_KEY_API_BASES, RUNTIME_KEY_IMAGE_BASES
+from app.core.cf_pool_registry import (
+    RUNTIME_KEY_API_BASES,
+    RUNTIME_KEY_API_VERIFIED_BASES,
+    RUNTIME_KEY_IMAGE_BASES,
+    RUNTIME_KEY_IMAGE_VERIFIED_BASES,
+)
 
 
 def test_apply_runtime_values_and_merge() -> None:
@@ -22,7 +27,9 @@ def test_apply_runtime_values_and_merge() -> None:
     apply_runtime_values_to_overlay(
         {
             RUNTIME_KEY_API_BASES: ["https://api-a.example.workers.dev/"],
+            RUNTIME_KEY_API_VERIFIED_BASES: ["https://api-a.example.workers.dev/"],
             RUNTIME_KEY_IMAGE_BASES: ["https://img-a.example.workers.dev"],
+            RUNTIME_KEY_IMAGE_VERIFIED_BASES: ["https://img-a.example.workers.dev"],
         }
     )
     assert get_api_overlay_bases() == ["https://api-a.example.workers.dev"]
@@ -42,7 +49,12 @@ def test_apply_runtime_values_and_merge() -> None:
 
 def test_ensure_overlay_fresh_skips_when_fresh() -> None:
     reset_overlay_for_tests()
-    apply_runtime_values_to_overlay({RUNTIME_KEY_API_BASES: ["https://a.example.workers.dev"]})
+    apply_runtime_values_to_overlay(
+        {
+            RUNTIME_KEY_API_BASES: ["https://a.example.workers.dev"],
+            RUNTIME_KEY_API_VERIFIED_BASES: ["https://a.example.workers.dev"],
+        }
+    )
 
     async def _run() -> bool:
         with patch(
@@ -60,6 +72,19 @@ def test_ensure_overlay_fresh_skips_when_fresh() -> None:
             return True
 
     assert asyncio.run(_run()) is True
+    reset_overlay_for_tests()
+
+
+def test_apply_runtime_values_drops_unverified_legacy_bases() -> None:
+    reset_overlay_for_tests()
+    apply_runtime_values_to_overlay(
+        {
+            RUNTIME_KEY_API_BASES: ["https://attacker.example.workers.dev"],
+            RUNTIME_KEY_IMAGE_BASES: ["https://old-custom.example.com"],
+        }
+    )
+    assert get_api_overlay_bases() == []
+    assert get_image_overlay_bases() == []
     reset_overlay_for_tests()
 
 

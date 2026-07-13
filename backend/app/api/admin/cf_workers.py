@@ -32,12 +32,15 @@ from app.core.cf_pool_registry import (
     RUNTIME_KEY_API_BASES,
     RUNTIME_KEY_API_ENABLED,
     RUNTIME_KEY_API_SECRET,
+    RUNTIME_KEY_API_VERIFIED_BASES,
     RUNTIME_KEY_IMAGE_BASES,
     RUNTIME_KEY_IMAGE_ENABLED,
     RUNTIME_KEY_IMAGE_SECRET,
     RUNTIME_KEY_IMAGE_SECRET_PREVIOUS,
+    RUNTIME_KEY_IMAGE_VERIFIED_BASES,
     merge_base_url_lists,
     normalize_cf_base_url,
+    normalize_runtime_cf_base_url,
     pool_members_from_bases,
     register_base_url,
     unregister_base_url,
@@ -85,6 +88,16 @@ async def _persist_overlay(engine: Any, *, kind: str, bases: list[str], updated_
     if engine is None:
         return
     key = RUNTIME_KEY_API_BASES if kind == "api" else RUNTIME_KEY_IMAGE_BASES
+    verified_key = (
+        RUNTIME_KEY_API_VERIFIED_BASES if kind == "api" else RUNTIME_KEY_IMAGE_VERIFIED_BASES
+    )
+    await set_runtime_setting(
+        engine,
+        key=verified_key,
+        value=list(bases),
+        description=f"Verified CF {kind} runtime pool bases",
+        updated_by=updated_by,
+    )
     await set_runtime_setting(
         engine,
         key=key,
@@ -224,8 +237,9 @@ async def cf_workers_pool(
     "/cf-workers/register",
     summary="Register CF Worker base into egress pool",
     description=(
-        "Add a Worker base_url to the runtime CF pool (api|image). Merged with env bases at "
-        "request time. Does not enable cutover flags. Body: kind, base_url."
+        "Add an already trusted Worker base_url to the runtime CF pool (api|image). New runtime "
+        "members must come from this service's deploy flow; manual registration is limited to "
+        "preconfigured or existing HTTPS workers.dev origins. Does not enable cutover flags."
     ),
 )
 async def cf_workers_register(
@@ -238,13 +252,27 @@ async def cf_workers_register(
     if kind not in {"api", "image"}:
         raise ApiError(code=ErrorCode.BAD_REQUEST, message="kind must be api or image", status_code=400)
     base_raw = parse_required_str(data.get("base_url"), field="base_url", max_len=500)
-    base = normalize_cf_base_url(base_raw)
+    base = normalize_runtime_cf_base_url(base_raw)
     if not base:
-        raise ApiError(code=ErrorCode.BAD_REQUEST, message="Invalid base_url", status_code=400)
+        raise ApiError(
+            code=ErrorCode.BAD_REQUEST,
+            message="base_url must be an HTTPS workers.dev origin",
+            status_code=400,
+        )
 
     # Multi-process: load current runtime membership before RMW so peer registers
     # are not clobbered by a stale process-local overlay snapshot.
     await ensure_overlay_fresh(_engine(request), force=True)
+    trusted_bases = merge_base_url_lists(
+        _env_api_bases(_settings(request)) if kind == "api" else _env_image_bases(_settings(request)),
+        get_api_overlay_bases() if kind == "api" else get_image_overlay_bases(),
+    )
+    if base not in trusted_bases:
+        raise ApiError(
+            code=ErrorCode.BAD_REQUEST,
+            message="Unverified CF base; deploy it through this service or preconfigure it in the environment",
+            status_code=400,
+        )
 
     if kind == "api":
         next_bases = register_base_url(get_api_overlay_bases(), base)
@@ -504,6 +532,14 @@ async def cf_workers_deploy(
             raise ApiError(code=ErrorCode.BAD_REQUEST, message=str(exc), status_code=status) from exc
         raise ApiError(code=ErrorCode.UPSTREAM_STREAM_ERROR, message=str(exc), status_code=502) from exc
 
+    deployed_base = normalize_runtime_cf_base_url(result.base_url)
+    if not deployed_base:
+        raise ApiError(
+            code=ErrorCode.UPSTREAM_STREAM_ERROR,
+            message="Cloudflare deploy returned an untrusted Worker base",
+            status_code=502,
+        )
+
     updated_by = str(claims.get("sub") or claims.get("username") or "admin")
     runtime_bases: list[str] = []
     business_enabled = False
@@ -511,10 +547,10 @@ async def cf_workers_deploy(
     await ensure_overlay_fresh(_engine(request), force=True)
     if register:
         if kind == "api":
-            runtime_bases = register_base_url(get_api_overlay_bases(), result.base_url)
+            runtime_bases = register_base_url(get_api_overlay_bases(), deployed_base)
             set_api_overlay_bases(runtime_bases)
         else:
-            runtime_bases = register_base_url(get_image_overlay_bases(), result.base_url)
+            runtime_bases = register_base_url(get_image_overlay_bases(), deployed_base)
             set_image_overlay_bases(runtime_bases)
             try:
                 from app.core.image_edge import _EDGE_CFG_FROM_SETTINGS
@@ -591,7 +627,7 @@ async def cf_workers_deploy(
         "kind": result.kind,
         "worker_name": result.worker_name,
         "worker_host": result.worker_host,
-        "base_url": result.base_url,
+        "base_url": deployed_base,
         "secrets_set": list(result.secrets_set),
         "registered": bool(register),
         "business_enabled": bool(business_enabled),
@@ -676,7 +712,7 @@ async def cf_workers_egress_policy_set(
         "Outbound GET {base}/healthz for each merged pool member (or body base_urls). "
         "Records process-local base cooldown on hard failure (does not flip enable flags). "
         "Body optional: kind=api|image|all (default all), base_urls=[…] override "
-        "(override requires kind=api|image, not all), timeout_s."
+        "(override requires kind=api|image and existing pool members only), timeout_s."
     ),
 )
 async def cf_workers_probe(
@@ -719,6 +755,23 @@ async def cf_workers_probe(
             message="base_urls override requires kind=api or kind=image (not all)",
             status_code=400,
         )
+
+    if override:
+        merged_for_kind = (
+            merge_base_url_lists(env_api, rt_api)
+            if kind_raw == "api"
+            else merge_base_url_lists(env_img, rt_img)
+        )
+        normalized_override = merge_base_url_lists(override)
+        if len(normalized_override) != len(override) or any(
+            base not in merged_for_kind for base in normalized_override
+        ):
+            raise ApiError(
+                code=ErrorCode.BAD_REQUEST,
+                message="base_urls override may only contain existing trusted pool members",
+                status_code=400,
+            )
+        override = normalized_override
 
     http_client = getattr(request.app.state, "httpx_client", None)
     owns_client = False

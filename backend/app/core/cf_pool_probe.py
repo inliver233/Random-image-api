@@ -62,6 +62,11 @@ async def probe_cf_worker_base(
         body_ok = bool(data.get("ok"))
         out["body_ok"] = body_ok
         out["service"] = data.get("service")
+        expected_service = "random-image-edge" if kind_l == "image" else "random-image-api-proxy"
+        if str(out["service"] or "") != expected_service:
+            out["error"] = "service_mismatch"
+            _record_outcome(kind_l, base, ok=False)
+            return out
         if "secret_configured" in data:
             out["secret_configured"] = bool(data.get("secret_configured"))
         # Workers may report ok:true with empty secret (api: fail-closed only on /p/*;
