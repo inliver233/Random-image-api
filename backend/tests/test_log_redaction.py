@@ -2,9 +2,33 @@ from __future__ import annotations
 
 import io
 import logging
+from contextlib import contextmanager
+from collections.abc import Iterator
 
-from app.core.logging import RedactFilter
+from app.core.logging import RedactFilter, configure_logging
 from app.core.redact import REDACTED, redact_any, redact_text
+
+
+@contextmanager
+def _preserve_configured_logging_state() -> Iterator[None]:
+    loggers = [
+        logging.getLogger(),
+        logging.getLogger("uvicorn"),
+        logging.getLogger("uvicorn.error"),
+        logging.getLogger("uvicorn.access"),
+    ]
+    logger_states = [(logger, list(logger.handlers), logger.level, logger.propagate) for logger in loggers]
+    handlers = {id(handler): handler for logger in loggers for handler in logger.handlers}
+    handler_filters = [(handler, list(handler.filters)) for handler in handlers.values()]
+    try:
+        yield
+    finally:
+        for logger, previous_handlers, previous_level, previous_propagate in logger_states:
+            logger.handlers = previous_handlers
+            logger.setLevel(previous_level)
+            logger.propagate = previous_propagate
+        for handler, previous_filters in handler_filters:
+            handler.filters = previous_filters
 
 
 def test_redact_proxy_uri_password_with_at() -> None:
@@ -74,3 +98,86 @@ def test_logging_filter_redacts_output() -> None:
     out = stream.getvalue()
     assert "supersecret" not in out
     assert "***" in out
+
+
+def test_configure_logging_redacts_records_from_propagating_child_logger() -> None:
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    root = logging.getLogger()
+    logger = logging.getLogger("app.tests.configured_redaction")
+    previous_logger_handlers = list(logger.handlers)
+    previous_logger_level = logger.level
+    previous_logger_propagate = logger.propagate
+    with _preserve_configured_logging_state():
+        try:
+            root.handlers = [handler]
+            root.setLevel(logging.INFO)
+            logger.handlers = []
+            logger.setLevel(logging.INFO)
+            logger.propagate = True
+
+            configure_logging()
+            logger.info(
+                "Authorization: Bearer %s refresh_token=%s proxy=%s",
+                "bearer-secret",
+                "refresh-secret",
+                "http://proxy-user:proxy-password@127.0.0.1:8080",
+            )
+        finally:
+            logger.handlers = previous_logger_handlers
+            logger.setLevel(previous_logger_level)
+            logger.propagate = previous_logger_propagate
+
+    out = stream.getvalue()
+    assert "bearer-secret" not in out
+    assert "refresh-secret" not in out
+    assert "proxy-password" not in out
+    assert "Bearer ***" in out
+
+
+def test_configure_logging_redacts_uvicorn_access_handler() -> None:
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger = logging.getLogger("uvicorn.access")
+    with _preserve_configured_logging_state():
+        logger.handlers = [handler]
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+
+        configure_logging()
+        logger.info(
+            '%s - "%s %s HTTP/%s" %d',
+            "127.0.0.1:1234",
+            "GET",
+            "/random?api_key=browser-secret&x=1",
+            "1.1",
+            200,
+        )
+
+    out = stream.getvalue()
+    assert "browser-secret" not in out
+    assert "api_key=***" in out
+
+
+def test_configure_logging_redacts_uvicorn_error_and_is_idempotent() -> None:
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger = logging.getLogger("uvicorn.error")
+    with _preserve_configured_logging_state():
+        logger.handlers = [handler]
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+
+        configure_logging()
+        configure_logging()
+        logger.error("upstream Authorization: Bearer %s", "uvicorn-error-secret")
+
+        redact_filters = [item for item in handler.filters if isinstance(item, RedactFilter)]
+        assert len(redact_filters) == 1
+
+    out = stream.getvalue()
+    assert "uvicorn-error-secret" not in out
+    assert "Bearer ***" in out
