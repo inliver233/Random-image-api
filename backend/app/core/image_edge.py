@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from app.core.b64url import b64url_encode
 from app.core.config import Settings, parse_csv_urls
 from app.core.env_parse import parse_bool_env, parse_int_env
+from app.core.pixiv_urls import is_pximg_host
 
 # Keep aligned with edge/img-worker path allowlist (contract: contracts/image-edge.md).
 _ALLOWED_EDGE_PREFIXES = ("/img-original/", "/img-master/", "/img-/", "/c/")
@@ -167,7 +168,7 @@ def pximg_path_from_original_url(original_url: str) -> str | None:
     except Exception:
         return None
     host = (parsed.hostname or "").lower()
-    if not host.endswith("pximg.net"):
+    if not is_pximg_host(host):
         return None
     path = parsed.path or ""
     if not path.startswith("/"):

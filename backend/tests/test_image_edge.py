@@ -36,6 +36,8 @@ def test_pximg_path_from_original_url_accepts_pximg_only() -> None:
         == "/img-original/img/2020/01/01/00/00/00/1_p0.jpg"
     )
     assert pximg_path_from_original_url("https://example.com/x.jpg") is None
+    assert pximg_path_from_original_url("https://evilpximg.net/img-original/1_p0.jpg") is None
+    assert pximg_path_from_original_url("https://pximg.net.evil.example/img-original/1_p0.jpg") is None
     assert pximg_path_from_original_url("https://i.pximg.net/../etc/passwd") is None
 
 

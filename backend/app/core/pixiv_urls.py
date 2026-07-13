@@ -23,6 +23,18 @@ ALLOWED_IMAGE_EXTS = {"jpg", "jpeg", "png", "gif", "webp", "zip"}
 ALLOWED_PXIMG_MIRROR_HOSTS = {"i.pixiv.cat", "i.pixiv.re", "i.pixiv.nl"}
 
 
+def host_matches_domain(host: str, domain: str) -> bool:
+    host_n = (host or "").strip().lower().rstrip(".")
+    domain_n = (domain or "").strip().lower().rstrip(".")
+    if not host_n or not domain_n:
+        return False
+    return host_n == domain_n or host_n.endswith("." + domain_n)
+
+
+def is_pximg_host(host: str) -> bool:
+    return host_matches_domain(host, "pximg.net")
+
+
 def parse_pixiv_original_url(url: str) -> PixivOriginalUrl:
     url = url.strip()
     if not url:
@@ -33,7 +45,7 @@ def parse_pixiv_original_url(url: str) -> PixivOriginalUrl:
         raise ValueError("unsupported scheme")
 
     host = (parsed.hostname or "").lower()
-    if not (host.endswith("pximg.net") or host in ALLOWED_PXIMG_MIRROR_HOSTS):
+    if not (is_pximg_host(host) or host in ALLOWED_PXIMG_MIRROR_HOSTS):
         raise ValueError("unsupported host")
 
     m = _PIXIV_P_RE.search(parsed.path) or _PIXIV_UGOIRA_RE.search(parsed.path) or _PIXIV_UGOIRA_ZIP_RE.search(parsed.path)
