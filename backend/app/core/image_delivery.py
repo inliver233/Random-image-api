@@ -214,12 +214,12 @@ async def deliver_known_image(
             # when edge is not ready (default inside prepare_origin_stream).
         )
 
-    transport = getattr(request.app.state, "httpx_transport", None)
-    shared_client = getattr(request.app.state, "httpx_client", None)
+    transport = getattr(request.app.state, "httpx_data_transport", None)
+    shared_client = getattr(request.app.state, "httpx_data_client", None)
     now = iso_utc_ms()
     try:
         stream_kwargs: dict[str, Any] = {
-            "transport": transport,
+            "transport": transport if not proxy_uri else None,
             "client": shared_client if not proxy_uri else None,
             "proxy": proxy_uri,
             "cache_control": cache_control_stream if not delivery_via_edge else cache_control_edge,

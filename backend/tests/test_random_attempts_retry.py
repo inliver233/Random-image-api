@@ -66,6 +66,8 @@ def test_random_attempts_retries_on_upstream_failure(tmp_path: Path, monkeypatch
     transport = httpx.MockTransport(handler)
     app.state.httpx_transport = transport
     app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+    app.state.httpx_data_transport = transport
+    app.state.httpx_data_client = httpx.AsyncClient(transport=transport, follow_redirects=False)
 
     with TestClient(app) as client:
         resp = client.get("/random?attempts=2", headers={"X-Request-Id": "req_test"})
@@ -114,6 +116,8 @@ def test_random_attempts_exhausted_returns_502(tmp_path: Path, monkeypatch) -> N
     transport = httpx.MockTransport(handler)
     app.state.httpx_transport = transport
     app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+    app.state.httpx_data_transport = transport
+    app.state.httpx_data_client = httpx.AsyncClient(transport=transport, follow_redirects=False)
 
     with TestClient(app) as client:
         resp = client.get("/random?attempts=2", headers={"X-Request-Id": "req_test"})

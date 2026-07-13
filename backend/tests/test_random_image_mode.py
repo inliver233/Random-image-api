@@ -53,6 +53,8 @@ def test_random_image_streams_bytes(tmp_path: Path, monkeypatch) -> None:
     transport = httpx.MockTransport(handler)
     app.state.httpx_transport = transport
     app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+    app.state.httpx_data_transport = transport
+    app.state.httpx_data_client = httpx.AsyncClient(transport=transport, follow_redirects=False)
 
     with TestClient(app) as client:
         resp = client.get("/random", headers={"X-Request-Id": "req_test"})

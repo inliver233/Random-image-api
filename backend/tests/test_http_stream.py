@@ -72,6 +72,41 @@ def test_stream_url_uses_streaming(monkeypatch) -> None:
     assert dummy_stream.closed is True
 
 
+def test_stream_url_acquires_and_releases_data_plane_lease(monkeypatch) -> None:
+    acquired: list[str | None] = []
+    released = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"data", request=request)
+
+    async def _run() -> bytes:
+        nonlocal released
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+        class _Lease:
+            def __init__(self) -> None:
+                self.client = client
+
+            async def release(self) -> None:
+                nonlocal released
+                released += 1
+
+        async def _acquire(proxy, **_kwargs):  # type: ignore[no-untyped-def]
+            acquired.append(proxy)
+            return _Lease()
+
+        monkeypatch.setattr("app.core.http_stream.acquire_data_plane_client", _acquire)
+        try:
+            resp = await stream_url("https://example.test/data.bin", cache_control="no-store")
+            return b"".join([chunk async for chunk in resp.body_iterator])
+        finally:
+            await client.aclose()
+
+    assert asyncio.run(_run()) == b"data"
+    assert acquired == [None]
+    assert released == 1
+
+
 def test_stream_url_follows_only_validated_pximg_redirects() -> None:
     requested: list[str] = []
 

@@ -32,9 +32,13 @@ from app.core.api_keys import (
 from app.core.errors import ApiError, ErrorCode, json_error_response
 from app.core.http_client import (
     aclose_control_plane_http_client,
+    aclose_data_plane_http_client,
+    aclose_data_plane_proxy_client_pool,
     aclose_proxy_client_pool,
-    build_default_async_transport,
-    build_shared_async_client,
+    build_control_plane_async_client,
+    build_control_plane_async_transport,
+    build_data_plane_async_client,
+    build_data_plane_async_transport,
 )
 from app.core.logging import configure_logging, get_logger
 from app.core.metrics import observe_random_result
@@ -188,13 +192,30 @@ def create_app() -> FastAPI:
                 except Exception:
                     pass
 
+            httpx_data_client = getattr(app.state, "httpx_data_client", None)
+            if httpx_data_client is not None:
+                try:
+                    await httpx_data_client.aclose()
+                except Exception:
+                    pass
+
             try:
                 await aclose_proxy_client_pool()
             except Exception:
                 pass
 
             try:
+                await aclose_data_plane_proxy_client_pool()
+            except Exception:
+                pass
+
+            try:
                 await aclose_control_plane_http_client()
+            except Exception:
+                pass
+
+            try:
+                await aclose_data_plane_http_client()
             except Exception:
                 pass
 
@@ -300,8 +321,10 @@ def create_app() -> FastAPI:
         redis_url=str(getattr(settings, "redis_url", "") or ""),
     )
     app.state.random_service = build_random_service_factory()
-    app.state.httpx_transport = build_default_async_transport()
-    app.state.httpx_client = build_shared_async_client(transport=app.state.httpx_transport)
+    app.state.httpx_transport = build_control_plane_async_transport()
+    app.state.httpx_client = build_control_plane_async_client(transport=app.state.httpx_transport)
+    app.state.httpx_data_transport = build_data_plane_async_transport()
+    app.state.httpx_data_client = build_data_plane_async_client(transport=app.state.httpx_data_transport)
     app.state.runtime_config_cache = RuntimeConfigCache(ttl_s=2.0)
 
     api_key_cfg = ApiKeyAuthConfig(

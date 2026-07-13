@@ -1,44 +1,133 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, Mapping
 
 import httpx
 
-# Shared connection limits for non-proxy upstream fetches (mirrors / direct pximg).
-# Proxy URIs need a dedicated client (httpx binds proxy at client construction).
-_DEFAULT_LIMITS = httpx.Limits(
-    max_connections=100,
-    max_keepalive_connections=40,
-    keepalive_expiry=30.0,
-)
-
-_PROXY_LIMITS = httpx.Limits(
-    max_connections=40,
-    max_keepalive_connections=16,
-    keepalive_expiry=30.0,
-)
+HttpPlane = Literal["control", "data"]
 
 
-def build_default_async_transport() -> httpx.AsyncHTTPTransport:
-    return httpx.AsyncHTTPTransport(limits=_DEFAULT_LIMITS, retries=0)
+@dataclass(frozen=True, slots=True)
+class HttpPlaneLimits:
+    max_connections: int
+    max_keepalive_connections: int
+    keepalive_expiry_s: float
+
+    def as_httpx(self) -> httpx.Limits:
+        return httpx.Limits(
+            max_connections=self.max_connections,
+            max_keepalive_connections=self.max_keepalive_connections,
+            keepalive_expiry=self.keepalive_expiry_s,
+        )
 
 
-def build_shared_async_client(*, transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncClient:
+_PLANE_LIMIT_DEFAULTS: dict[tuple[HttpPlane, bool], tuple[int, int, float]] = {
+    ("control", False): (100, 40, 30.0),
+    ("data", False): (160, 80, 30.0),
+    ("control", True): (40, 16, 30.0),
+    ("data", True): (16, 8, 30.0),
+}
+
+
+def _bounded_int(raw: str | None, *, default: int, min_value: int, max_value: int) -> int:
+    try:
+        value = int(str(raw or "").strip())
+    except (TypeError, ValueError):
+        return default
+    return max(min_value, min(value, max_value))
+
+
+def _bounded_float(raw: str | None, *, default: float, min_value: float, max_value: float) -> float:
+    try:
+        value = float(str(raw or "").strip())
+    except (TypeError, ValueError):
+        return default
+    return max(min_value, min(value, max_value))
+
+
+def resolve_http_plane_limits(
+    plane: HttpPlane,
+    *,
+    proxy: bool = False,
+    env: Mapping[str, str] | None = None,
+) -> HttpPlaneLimits:
+    if plane not in {"control", "data"}:
+        raise ValueError(f"unsupported HTTP plane: {plane}")
+    source = os.environ if env is None else env
+    default_max, default_keepalive, default_expiry = _PLANE_LIMIT_DEFAULTS[(plane, proxy)]
+    prefix = f"HTTP_{plane.upper()}{'_PROXY' if proxy else ''}"
+    max_connections = _bounded_int(
+        source.get(f"{prefix}_MAX_CONNECTIONS"),
+        default=default_max,
+        min_value=1,
+        max_value=2048,
+    )
+    max_keepalive = _bounded_int(
+        source.get(f"{prefix}_MAX_KEEPALIVE_CONNECTIONS"),
+        default=default_keepalive,
+        min_value=0,
+        max_value=max_connections,
+    )
+    expiry = _bounded_float(
+        source.get(f"{prefix}_KEEPALIVE_EXPIRY_SECONDS"),
+        default=default_expiry,
+        min_value=1.0,
+        max_value=300.0,
+    )
+    return HttpPlaneLimits(max_connections, max_keepalive, expiry)
+
+
+def resolve_proxy_pool_max_clients(
+    plane: HttpPlane,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> int:
+    if plane not in {"control", "data"}:
+        raise ValueError(f"unsupported HTTP plane: {plane}")
+    source = os.environ if env is None else env
+    return _bounded_int(
+        source.get(f"HTTP_{plane.upper()}_PROXY_POOL_MAX_CLIENTS"),
+        default=32,
+        min_value=1,
+        max_value=512,
+    )
+
+
+def build_control_plane_async_transport() -> httpx.AsyncHTTPTransport:
+    return httpx.AsyncHTTPTransport(limits=resolve_http_plane_limits("control").as_httpx(), retries=0)
+
+
+def build_data_plane_async_transport() -> httpx.AsyncHTTPTransport:
+    return httpx.AsyncHTTPTransport(limits=resolve_http_plane_limits("data").as_httpx(), retries=0)
+
+
+def build_control_plane_async_client(*, transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncClient:
     return httpx.AsyncClient(
-        transport=transport or build_default_async_transport(),
+        transport=transport or build_control_plane_async_transport(),
         follow_redirects=True,
         timeout=httpx.Timeout(30.0, connect=10.0),
-        limits=_DEFAULT_LIMITS,
+        limits=resolve_http_plane_limits("control").as_httpx(),
+    )
+
+
+def build_data_plane_async_client(*, transport: httpx.AsyncBaseTransport | None = None) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        transport=transport or build_data_plane_async_transport(),
+        follow_redirects=False,
+        timeout=httpx.Timeout(60.0, connect=10.0),
+        limits=resolve_http_plane_limits("data").as_httpx(),
     )
 
 
 # Process-local non-proxy client for control-plane outbound (engine events, R2 prewarm)
 # when no request-scoped app.state.httpx_client is injected (worker/job handlers).
 _control_plane_client: httpx.AsyncClient | None = None
+_data_plane_client: httpx.AsyncClient | None = None
 
 
 def get_control_plane_http_client() -> httpx.AsyncClient:
@@ -50,7 +139,7 @@ def get_control_plane_http_client() -> httpx.AsyncClient:
     """
     global _control_plane_client
     if _control_plane_client is None:
-        _control_plane_client = build_shared_async_client()
+        _control_plane_client = build_control_plane_async_client()
     return _control_plane_client
 
 
@@ -70,6 +159,30 @@ def reset_control_plane_http_client_for_tests() -> None:
     """Drop control-plane client reference without awaiting close (tests only)."""
     global _control_plane_client
     _control_plane_client = None
+
+
+def get_data_plane_http_client() -> httpx.AsyncClient:
+    """Lazy process singleton for long-lived image byte streams."""
+    global _data_plane_client
+    if _data_plane_client is None:
+        _data_plane_client = build_data_plane_async_client()
+    return _data_plane_client
+
+
+async def aclose_data_plane_http_client() -> None:
+    global _data_plane_client
+    client = _data_plane_client
+    _data_plane_client = None
+    if client is not None:
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+
+
+def reset_data_plane_http_client_for_tests() -> None:
+    global _data_plane_client
+    _data_plane_client = None
 
 
 class HttpClientLease:
@@ -115,9 +228,16 @@ class ProxyClientPool:
     temporarily exceed ``max_clients`` rather than closing in-flight requests.
     """
 
-    def __init__(self, *, max_clients: int = 32, idle_ttl_s: float = 60.0) -> None:
+    def __init__(
+        self,
+        *,
+        max_clients: int = 32,
+        idle_ttl_s: float = 60.0,
+        limits: HttpPlaneLimits | None = None,
+    ) -> None:
         self._max = max(1, int(max_clients))
         self._idle_ttl_s = max(0.0, float(idle_ttl_s))
+        self._limits = (limits or resolve_http_plane_limits("control", proxy=True)).as_httpx()
         self._lock = asyncio.Lock()
         self._clients: dict[tuple[str, int], _ProxyClientEntry] = {}
         self._lru: list[tuple[str, int]] = []
@@ -218,7 +338,7 @@ class ProxyClientPool:
                     proxy=uri,
                     follow_redirects=True,
                     timeout=httpx.Timeout(30.0, connect=10.0),
-                    limits=_PROXY_LIMITS,
+                    limits=self._limits,
                 )
                 entry = _ProxyClientEntry(client=client, leases=1, last_used=acquired_at)
                 self._clients[key] = entry
@@ -239,14 +359,26 @@ class ProxyClientPool:
 
 
 _proxy_pool: ProxyClientPool | None = None
+_data_proxy_pool: ProxyClientPool | None = None
 
 
 def get_proxy_client_pool() -> ProxyClientPool:
     """Lazy process singleton (created on first residential proxy use)."""
     global _proxy_pool
     if _proxy_pool is None:
-        _proxy_pool = ProxyClientPool()
+        _proxy_pool = ProxyClientPool(max_clients=resolve_proxy_pool_max_clients("control"))
     return _proxy_pool
+
+
+def get_data_plane_proxy_client_pool() -> ProxyClientPool:
+    """Lazy process singleton for proxy-bound image byte streams."""
+    global _data_proxy_pool
+    if _data_proxy_pool is None:
+        _data_proxy_pool = ProxyClientPool(
+            max_clients=resolve_proxy_pool_max_clients("data"),
+            limits=resolve_http_plane_limits("data", proxy=True),
+        )
+    return _data_proxy_pool
 
 
 async def aclose_proxy_client_pool() -> None:
@@ -258,10 +390,23 @@ async def aclose_proxy_client_pool() -> None:
         await pool.aclose()
 
 
+async def aclose_data_plane_proxy_client_pool() -> None:
+    global _data_proxy_pool
+    pool = _data_proxy_pool
+    _data_proxy_pool = None
+    if pool is not None:
+        await pool.aclose()
+
+
 def reset_proxy_client_pool_for_tests() -> None:
     """Drop pool reference without awaiting close (tests that never opened clients)."""
     global _proxy_pool
     _proxy_pool = None
+
+
+def reset_data_plane_proxy_client_pool_for_tests() -> None:
+    global _data_proxy_pool
+    _data_proxy_pool = None
 
 
 async def acquire_proxy_client(
@@ -283,10 +428,32 @@ async def acquire_proxy_client(
                 transport=transport,
                 follow_redirects=True,
                 timeout=httpx.Timeout(30.0, connect=10.0),
-                limits=_DEFAULT_LIMITS,
+                limits=resolve_http_plane_limits("control").as_httpx(),
             )
             return HttpClientLease(client, release=client.aclose)
         # CF-first / direct origin: reuse process control-plane client (do not aclose).
         return HttpClientLease(get_control_plane_http_client())
     active_pool = pool if pool is not None else get_proxy_client_pool()
+    return await active_pool.acquire(uri, transport=transport)
+
+
+async def acquire_data_plane_client(
+    proxy_uri: str | None,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    pool: ProxyClientPool | None = None,
+) -> HttpClientLease:
+    """Acquire a lease from the image data plane without sharing control capacity."""
+    uri = (proxy_uri or "").strip()
+    if not uri:
+        if transport is not None:
+            client = httpx.AsyncClient(
+                transport=transport,
+                follow_redirects=False,
+                timeout=httpx.Timeout(60.0, connect=10.0),
+                limits=resolve_http_plane_limits("data").as_httpx(),
+            )
+            return HttpClientLease(client, release=client.aclose)
+        return HttpClientLease(get_data_plane_http_client())
+    active_pool = pool if pool is not None else get_data_plane_proxy_client_pool()
     return await active_pool.acquire(uri, transport=transport)

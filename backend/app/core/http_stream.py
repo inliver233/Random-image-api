@@ -8,7 +8,7 @@ import httpx
 from starlette.responses import StreamingResponse
 
 from app.core.errors import ApiError, ErrorCode
-from app.core.http_client import acquire_proxy_client
+from app.core.http_client import acquire_data_plane_client
 from app.core.metrics import UPSTREAM_STREAM_ERRORS_TOTAL
 from app.core.pixiv_urls import is_pximg_host
 
@@ -73,8 +73,8 @@ async def stream_url(
     Connection reuse rules:
     - If ``proxy`` is set: process proxy client pool (httpx binds proxy at client level).
     - Else if shared ``client`` is provided: reuse it (do NOT close on completion).
-    - Else: acquire a lease for the control-plane singleton, proxy pool, or an
-      owned transport-injected client; release after the stream finishes.
+    - Else: acquire a lease for the independent data-plane singleton/proxy pool,
+      or an owned transport-injected client; release after the stream finishes.
     """
     try:
         initial_url = _parse_safe_stream_url(url)
@@ -89,7 +89,7 @@ async def stream_url(
         assert client is not None
         active_client = client
     else:
-        lease = await acquire_proxy_client(
+        lease = await acquire_data_plane_client(
             proxy,
             transport=transport,
         )

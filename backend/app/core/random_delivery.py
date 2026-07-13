@@ -322,7 +322,7 @@ async def deliver_random_image_stream(
         try:
             # Edge stream: no Pixiv Referer (Worker already attaches it to origin).
             stream_kwargs: dict[str, Any] = {
-                "transport": httpx_transport,
+                "transport": httpx_transport if not proxy_uri else None,
                 "client": httpx_client if not proxy_uri else None,
                 "proxy": proxy_uri,
                 "cache_control": "no-store",

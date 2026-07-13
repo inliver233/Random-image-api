@@ -223,14 +223,17 @@ def test_deliver_random_image_stream_edge_unavailable_falls_to_local(monkeypatch
     monkeypatch.setattr("app.core.random_delivery.needs_opportunistic_hydrate", lambda _img: False)
 
     async def _prepare(**kwargs):  # type: ignore[no-untyped-def]
-        return ("https://origin.example/img.jpg", None)
+        return ("https://origin.example/img.jpg", "http://proxy.example:8080")
 
     monkeypatch.setattr("app.core.random_delivery.prepare_origin_stream", _prepare)
 
     class _FakeResp:
         status_code = 200
 
+    stream_kwargs: list[dict] = []
+
     async def _stream_url(*args, **kwargs):  # type: ignore[no-untyped-def]
+        stream_kwargs.append(dict(kwargs))
         return _FakeResp()
 
     monkeypatch.setattr("app.core.random_delivery.stream_url", _stream_url)
@@ -247,8 +250,8 @@ def test_deliver_random_image_stream_edge_unavailable_falls_to_local(monkeypatch
             engine=object(),
             settings=object(),
             runtime=object(),
-            httpx_transport=None,
-            httpx_client=None,
+            httpx_transport=object(),
+            httpx_client=object(),
             range_header=None,
             attempts=1,
             prefer_edge_redirect=True,
@@ -272,6 +275,9 @@ def test_deliver_random_image_stream_edge_unavailable_falls_to_local(monkeypatch
     after_local = IMAGE_DELIVERY_TOTAL.labels(path="local_stream")._value.get()
     assert after_miss == before_miss + 1.0
     assert after_local == before_local + 1.0
+    assert stream_kwargs[0]["proxy"] == "http://proxy.example:8080"
+    assert stream_kwargs[0]["transport"] is None
+    assert stream_kwargs[0]["client"] is None
     # Catalog row with last_ok_at=None → mark_ok scheduled after local stream.
     assert len(bg.tasks) == 1
 

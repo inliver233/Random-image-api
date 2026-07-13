@@ -20,6 +20,8 @@ def test_image_proxy_streams_bytes(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", db_url)
 
     app = create_app()
+    assert app.state.httpx_data_client is not app.state.httpx_client
+    assert app.state.httpx_data_transport is not app.state.httpx_transport
     image_id: int | None = None
 
     async def _seed() -> None:
@@ -54,6 +56,8 @@ def test_image_proxy_streams_bytes(tmp_path: Path, monkeypatch) -> None:
     transport = httpx.MockTransport(handler)
     app.state.httpx_transport = transport
     app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+    app.state.httpx_data_transport = transport
+    app.state.httpx_data_client = httpx.AsyncClient(transport=transport, follow_redirects=False)
 
     with TestClient(app) as client:
         resp = client.get(f"/i/{image_id}.jpg", headers={"X-Request-Id": "req_test"})
@@ -61,6 +65,9 @@ def test_image_proxy_streams_bytes(tmp_path: Path, monkeypatch) -> None:
         assert resp.content == b"img-bytes"
         assert resp.headers["Cache-Control"] == "public, max-age=31536000, immutable"
         assert resp.headers["X-Request-Id"] == "req_test"
+
+    assert app.state.httpx_client.is_closed is True
+    assert app.state.httpx_data_client.is_closed is True
 
 
 def test_image_proxy_range_passthrough_returns_206(tmp_path: Path, monkeypatch) -> None:
@@ -115,6 +122,8 @@ def test_image_proxy_range_passthrough_returns_206(tmp_path: Path, monkeypatch) 
     transport = httpx.MockTransport(handler)
     app.state.httpx_transport = transport
     app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+    app.state.httpx_data_transport = transport
+    app.state.httpx_data_client = httpx.AsyncClient(transport=transport, follow_redirects=False)
 
     with TestClient(app) as client:
         resp = client.get(
@@ -253,6 +262,8 @@ def test_image_proxy_upstream_404_marks_failure(tmp_path: Path, monkeypatch) -> 
     transport = httpx.MockTransport(handler)
     app.state.httpx_transport = transport
     app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+    app.state.httpx_data_transport = transport
+    app.state.httpx_data_client = httpx.AsyncClient(transport=transport, follow_redirects=False)
 
     with TestClient(app) as client:
         resp = client.get(f"/i/{image_id}.jpg", headers={"X-Request-Id": "req_test"})

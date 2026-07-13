@@ -6,26 +6,43 @@ import httpx
 
 from app.core.http_client import (
     ProxyClientPool,
+    acquire_data_plane_client,
     acquire_proxy_client,
     aclose_control_plane_http_client,
+    aclose_data_plane_http_client,
+    aclose_data_plane_proxy_client_pool,
     aclose_proxy_client_pool,
+    build_control_plane_async_client,
+    build_data_plane_async_client,
     get_control_plane_http_client,
+    get_data_plane_http_client,
+    get_data_plane_proxy_client_pool,
     get_proxy_client_pool,
+    resolve_http_plane_limits,
+    resolve_proxy_pool_max_clients,
     reset_control_plane_http_client_for_tests,
+    reset_data_plane_http_client_for_tests,
+    reset_data_plane_proxy_client_pool_for_tests,
     reset_proxy_client_pool_for_tests,
 )
 
 
 def setup_function() -> None:
     reset_proxy_client_pool_for_tests()
+    reset_data_plane_proxy_client_pool_for_tests()
     reset_control_plane_http_client_for_tests()
+    reset_data_plane_http_client_for_tests()
 
 
 def teardown_function() -> None:
     asyncio.run(aclose_proxy_client_pool())
+    asyncio.run(aclose_data_plane_proxy_client_pool())
     asyncio.run(aclose_control_plane_http_client())
+    asyncio.run(aclose_data_plane_http_client())
     reset_proxy_client_pool_for_tests()
+    reset_data_plane_proxy_client_pool_for_tests()
     reset_control_plane_http_client_for_tests()
+    reset_data_plane_http_client_for_tests()
 
 
 def test_control_plane_http_client_reuses_singleton() -> None:
@@ -37,6 +54,36 @@ def test_control_plane_http_client_reuses_singleton() -> None:
         await aclose_control_plane_http_client()
         c = get_control_plane_http_client()
         assert c is not a
+
+    asyncio.run(_run())
+
+
+def test_data_plane_has_independent_singleton_and_capacity_config() -> None:
+    async def _run() -> None:
+        control = get_control_plane_http_client()
+        data_a = get_data_plane_http_client()
+        data_b = get_data_plane_http_client()
+        assert data_a is data_b
+        assert data_a is not control
+
+        control_limits = resolve_http_plane_limits("control", env={})
+        data_limits = resolve_http_plane_limits("data", env={})
+        assert (control_limits.max_connections, control_limits.max_keepalive_connections) == (100, 40)
+        assert (data_limits.max_connections, data_limits.max_keepalive_connections) == (160, 80)
+
+        overridden = resolve_http_plane_limits(
+            "data",
+            env={
+                "HTTP_DATA_MAX_CONNECTIONS": "12",
+                "HTTP_DATA_MAX_KEEPALIVE_CONNECTIONS": "99",
+            },
+        )
+        assert overridden.max_connections == 12
+        assert overridden.max_keepalive_connections == 12
+        assert resolve_proxy_pool_max_clients("control", env={}) == 32
+        assert resolve_proxy_pool_max_clients(
+            "data", env={"HTTP_DATA_PROXY_POOL_MAX_CLIENTS": "7"}
+        ) == 7
 
     asyncio.run(_run())
 
@@ -107,6 +154,51 @@ def test_acquire_proxy_client_non_proxy_reuses_control_plane() -> None:
         await pooled_lease2.release()
         assert pooled is pooled2
         assert get_proxy_client_pool().size == 1
+
+    asyncio.run(_run())
+
+
+def test_data_plane_proxy_pool_does_not_share_control_client() -> None:
+    async def _run() -> None:
+        control_lease = await acquire_proxy_client("http://proxy.example:9")
+        data_lease = await acquire_data_plane_client("http://proxy.example:9")
+        assert control_lease.client is not data_lease.client
+        await control_lease.release()
+        await data_lease.release()
+        assert get_proxy_client_pool().size == 1
+        assert get_data_plane_proxy_client_pool().size == 1
+
+    asyncio.run(_run())
+
+
+def test_blocked_data_plane_request_does_not_block_control_plane() -> None:
+    class BlockingTransport(httpx.AsyncBaseTransport):
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            self.started.set()
+            await self.release.wait()
+            return httpx.Response(200, request=request)
+
+    async def _run() -> None:
+        data_transport = BlockingTransport()
+        data_client = build_data_plane_async_client(transport=data_transport)
+        control_client = build_control_plane_async_client(
+            transport=httpx.MockTransport(lambda req: httpx.Response(200, request=req))
+        )
+        data_task = asyncio.create_task(data_client.get("https://data.example.test/image"))
+        await data_transport.started.wait()
+        control_response = await asyncio.wait_for(
+            control_client.get("https://control.example.test/health"),
+            timeout=0.25,
+        )
+        assert control_response.status_code == 200
+        data_transport.release.set()
+        assert (await data_task).status_code == 200
+        await data_client.aclose()
+        await control_client.aclose()
 
     asyncio.run(_run())
 

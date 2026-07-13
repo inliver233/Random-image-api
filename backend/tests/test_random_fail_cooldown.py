@@ -68,6 +68,8 @@ def test_fail_cooldown_skips_recent_failures(tmp_path: Path, monkeypatch) -> Non
     transport = httpx.MockTransport(handler)
     app.state.httpx_transport = transport
     app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+    app.state.httpx_data_transport = transport
+    app.state.httpx_data_client = httpx.AsyncClient(transport=transport, follow_redirects=False)
 
     with TestClient(app) as client:
         first = client.get("/random?attempts=1", headers={"X-Request-Id": "req_test"})

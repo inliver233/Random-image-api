@@ -50,6 +50,8 @@ def test_legacy_single_streams_bytes(tmp_path: Path, monkeypatch) -> None:
     transport = httpx.MockTransport(handler)
     app.state.httpx_transport = transport
     app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+    app.state.httpx_data_transport = transport
+    app.state.httpx_data_client = httpx.AsyncClient(transport=transport, follow_redirects=False)
 
     with TestClient(app) as client:
         resp = client.get("/123.jpg", headers={"X-Request-Id": "req_test"})
@@ -149,6 +151,8 @@ def test_legacy_multi_one_based_page(tmp_path: Path, monkeypatch) -> None:
     transport = httpx.MockTransport(handler)
     app.state.httpx_transport = transport
     app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+    app.state.httpx_data_transport = transport
+    app.state.httpx_data_client = httpx.AsyncClient(transport=transport, follow_redirects=False)
 
     with TestClient(app) as client:
         resp = client.get("/123-2.png", headers={"X-Request-Id": "req_test"})
@@ -158,7 +162,7 @@ def test_legacy_multi_one_based_page(tmp_path: Path, monkeypatch) -> None:
         assert resp.headers["X-Request-Id"] == "req_test"
 
 
-def test_legacy_single_prefers_image_edge(tmp_path: Path, monkeypatch) -> None:
+def test_legacy_single_streams_image_edge_by_default(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "legacy_edge.db"
     db_url = "sqlite+aiosqlite:///" + db_path.as_posix()
 
@@ -193,12 +197,20 @@ def test_legacy_single_prefers_image_edge(tmp_path: Path, monkeypatch) -> None:
 
     asyncio.run(_seed())
 
+    def handler(req: httpx.Request) -> httpx.Response:
+        assert req.url.host == "img.example.com"
+        assert req.headers.get("Referer") is None
+        return httpx.Response(200, headers={"Content-Type": "image/jpeg"}, content=b"edge-bytes")
+
+    transport = httpx.MockTransport(handler)
+    app.state.httpx_data_transport = transport
+    app.state.httpx_data_client = httpx.AsyncClient(transport=transport, follow_redirects=False)
+
     with TestClient(app) as client:
-        resp = client.get("/555.jpg", headers={"X-Request-Id": "req_legacy_edge"}, follow_redirects=False)
-        assert resp.status_code == 302
-        loc = resp.headers.get("location") or ""
-        assert loc.startswith("https://img.example.com/u/")
-        assert resp.headers.get("x-image-edge") == "1"
+        resp = client.get("/555.jpg", headers={"X-Request-Id": "req_legacy_edge"})
+        assert resp.status_code == 200
+        assert resp.content == b"edge-bytes"
+        assert resp.headers.get("x-image-edge") == "stream"
 
 
 def test_legacy_single_force_local_streams(tmp_path: Path, monkeypatch) -> None:
@@ -241,6 +253,8 @@ def test_legacy_single_force_local_streams(tmp_path: Path, monkeypatch) -> None:
     transport = httpx.MockTransport(handler)
     app.state.httpx_transport = transport
     app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+    app.state.httpx_data_transport = transport
+    app.state.httpx_data_client = httpx.AsyncClient(transport=transport, follow_redirects=False)
 
     with TestClient(app) as client:
         resp = client.get("/556.jpg?local=1", headers={"X-Request-Id": "req_legacy_local"})

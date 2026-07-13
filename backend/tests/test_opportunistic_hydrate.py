@@ -142,10 +142,12 @@ def test_image_proxy_opportunistically_enqueues_hydrate_metadata_once(tmp_path: 
     transport = httpx.MockTransport(handler)
 
     def _install_mock_http() -> None:
-        # deliver_known_image prefers the shared client when no residential proxy is selected.
-        # Re-install after each TestClient: app shutdown closes app.state.httpx_client.
+        # deliver_known_image uses the data plane when no residential proxy is selected.
+        # Re-install after each TestClient: app shutdown closes both state clients.
         app.state.httpx_transport = transport
         app.state.httpx_client = httpx.AsyncClient(transport=transport, follow_redirects=True)
+        app.state.httpx_data_transport = transport
+        app.state.httpx_data_client = httpx.AsyncClient(transport=transport, follow_redirects=False)
 
     def _count_jobs() -> int:
         async def _op() -> int:
