@@ -10,9 +10,15 @@
 
 ## 0. 总口径
 
-codexreview 49 项 ≈ **7 项真解决 / 10 项部分完成 / 32 项未动**。
+复核基线(2026-07-26 上午,tip `08862c0`):codexreview 49 项 ≈ **7 项真解决 / 10 项部分完成 / 32 项未动**。
 
 DoD 阶段 A(出口与体验)已达成;B(Engine 爬坡)/ C(Redis 多实例)/ D(PG 真切)/ E(队列策略)未达成。
+
+### 0.1 本轮修复进展(2026-07-26,基线之后)
+
+阶段 0 门禁全绿已完成:GAP-1(`e35a382`)、前端类型/lint(`0c6b366`)、13 个 vitest 漂移(`cfa45c8`)、5 个后端漂移 + 2 个顺序依赖(`71f1751`/`042ac4f`)、CI dev+Go(`7f6e8cd`)。实测:backend 813 passed/1 skipped(PG 门控),frontend lint/typecheck 0 errors、vitest 73/73、build PASS。
+
+阶段 1 已闭环(代码侧):B2(`3e784b7`)、B3(`80af2b9`)、H5(`f936aee`)、H6(`9a6ffab`)、M4/M5(`b8aaf1d`)、M6(`d1757e4`)、M7(`ccb37b9`)、M8(`25a53c8`)。Live PG 证据(真机迁移/并发 claim/争用/trgm 计划)仍被 Docker daemon 不可用阻塞,测试以 `TEST_POSTGRES_URL` 门控,命令记录于各测试 docstring。**M8 运维影响:线上 SQLite 生产部署在滚动到含 `25a53c8` 的镜像前必须设 `ALLOW_PROD_SQLITE=true`。**
 
 ## 1. 公网现状(2026-07-26 实测)
 
@@ -101,6 +107,8 @@ DoD 阶段 A(出口与体验)已达成;B(Engine 爬坡)/ C(Redis 多实例)/ D(P
 - **H19**:ProxyPools 分页丢草稿+weight=0 被改 1。
 
 **Medium(M1-M7/M9-M17/M20 全部未动):** Port 泄漏 ORM(M1)、DatabaseJobQueue 标签(M2)、payload 本机文件(M3)、ORM/migration 漂移(M4)、0019 无去重预检(M5)、PG %LIKE%(M6)、admin images 全表聚合(M7)、SQLite 并发预算(M9)、totals last-writer-wins(M10)、process-local 状态岛(M11)、Dashboard 假绿(M12)、pool #1 硬编码(M13)、无代码分割(主 JS 1.30 MB)+隐藏面板轮询(M14)、God Component(M15)、巨型函数(M16)、blanket except(M17)、runtime secrets 明文 JSON(M20)。
+
+M12 补充证据(2026-07-26 前端测试对账时确认,来自 DashboardPage.tsx 实读):瘦身已删除且无替代面的可观测性信号——`dual-secret`(image_edge 轮换态)、逐服务 CF tag 的 `bases=N`/`no-secret` 原因、R2 `no-url` vs `no-secret` 区分、`engine index empty`、circuit 倒计时(`open ~13s`);engine `no-url` 降级为 hover tooltip。**假绿实锤:`DashboardPage.tsx:591-594` 两个 CF 池只要有一个 ready(n>0)合并 tag 即渲染绿色**,partial CF failure 显示整体健康。修 M12 时需恢复这些信号或给出等价 status 面。
 
 **规划残留:**
 
