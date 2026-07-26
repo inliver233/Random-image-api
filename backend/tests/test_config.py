@@ -100,6 +100,7 @@ def test_load_settings_production_accepts_explicit_non_placeholder_credentials()
             "SECRET_KEY": "prod-secret-key-long-enough",
             "FIELD_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
             "ADMIN_PASSWORD": "prod-admin-pass",
+            "DATABASE_URL": "postgresql+asyncpg://ria:ria@db:5432/random_image",
         }
     )
 
@@ -108,12 +109,31 @@ def test_load_settings_production_accepts_explicit_non_placeholder_credentials()
     assert settings.admin_password == "prod-admin-pass"
 
 
+def test_load_settings_prod_rejects_default_sqlite_without_override() -> None:
+    base = {
+        "APP_ENV": "production",
+        "SECRET_KEY": "prod-secret-key-long-enough",
+        "FIELD_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
+        "ADMIN_PASSWORD": "prod-admin-pass",
+    }
+    # Forgetting DATABASE_URL falls into SQLite — refuse by default.
+    with pytest.raises(ValueError, match="ALLOW_PROD_SQLITE"):
+        load_settings(base)
+    # Explicit SQLite URL is equally refused without the override.
+    with pytest.raises(ValueError, match="ALLOW_PROD_SQLITE"):
+        load_settings({**base, "DATABASE_URL": "sqlite+aiosqlite:///./data/app.db"})
+    # The deliberate single-instance SQLite deployment stays available.
+    s = load_settings({**base, "ALLOW_PROD_SQLITE": "true"})
+    assert s.database_url.startswith("sqlite")
+
+
 def test_load_settings_prod_requires_engine_secret_when_enabled() -> None:
     base = {
         "APP_ENV": "prod",
         "SECRET_KEY": "prod-secret-key-long-enough",
         "FIELD_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
         "ADMIN_PASSWORD": "prod-admin-pass",
+        "DATABASE_URL": "postgresql+asyncpg://ria:ria@db:5432/random_image",
         "PIXIV_OAUTH_CLIENT_ID": "cid",
         "PIXIV_OAUTH_CLIENT_SECRET": "csec",
         "PIXIV_OAUTH_HASH_SECRET": "hsec",
@@ -134,6 +154,7 @@ def test_load_settings_prod_cf_flags_require_secrets_not_env_bases_alone() -> No
         "SECRET_KEY": "prod-secret-key-long-enough",
         "FIELD_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
         "ADMIN_PASSWORD": "prod-admin-pass",
+        "DATABASE_URL": "postgresql+asyncpg://ria:ria@db:5432/random_image",
         "PIXIV_OAUTH_CLIENT_ID": "cid",
         "PIXIV_OAUTH_CLIENT_SECRET": "csec",
         "PIXIV_OAUTH_HASH_SECRET": "hsec",

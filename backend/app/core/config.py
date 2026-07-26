@@ -392,4 +392,16 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         if insecure:
             raise ValueError(f"Insecure placeholder env vars are not allowed in prod: {', '.join(insecure)}")
 
+        # M8: SQLite in production is a deliberate single-instance choice, not
+        # a default you fall into by forgetting DATABASE_URL. Documented 62万+
+        # catalogs still run on it, so an explicit override keeps that path.
+        if settings.database_url.strip().lower().startswith("sqlite") and not parse_bool_env(
+            "ALLOW_PROD_SQLITE", default=False, env=env
+        ):
+            raise ValueError(
+                "Prod refuses SQLite by default: set DATABASE_URL to PostgreSQL "
+                "(postgresql+asyncpg://...) or explicitly set ALLOW_PROD_SQLITE=true "
+                "for a single-instance SQLite deployment."
+            )
+
     return settings
