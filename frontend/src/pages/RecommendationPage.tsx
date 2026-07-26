@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Switch, Tag, Typography } from "antd";
+import { Button, Card, Form, Input, InputNumber, Select, Space, Switch, Tag, Typography } from "antd";
 import React, { useEffect, useMemo, useState } from "react";
 
 import { ActionAlerts } from "../admin/ActionAlerts";
@@ -89,7 +89,7 @@ async function copyText(text: string): Promise<void> {
   document.body.removeChild(el);
 }
 
-const DEFAULTS: Omit<FormValues, "preview_seed"> = {
+const DEFAULTS: Omit<FormValues, "preview_seed" | "x_api_key"> = {
   random_strategy: "quality",
   random_quality_samples: 12,
   pick_mode: "weighted",

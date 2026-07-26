@@ -69,7 +69,7 @@ describe("AuthorsPage", () => {
 
   it("sends X-API-Key when public debug key is stored", async () => {
     setPublicDebugApiKey("pk_test_authors");
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/authors?")) {
         return new Response(

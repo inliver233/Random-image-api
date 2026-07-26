@@ -136,7 +136,7 @@ describe("PlaygroundPage", () => {
     expect(proxyLink.getAttribute("href") || "").toContain("/i/1.jpg");
     expect(proxyLink.getAttribute("href") || "").toContain("api_key=debug-public-key-1234567890");
 
-    const writeText = vi.fn(async () => undefined);
+    const writeText = vi.fn(async (_text: string) => undefined);
     vi.stubGlobal("navigator", {
       ...navigator,
       clipboard: { writeText },
@@ -220,7 +220,7 @@ describe("PlaygroundPage", () => {
     expect(locLink.getAttribute("href") || "").toContain("/i/9.jpg");
     expect(locLink.getAttribute("href") || "").toContain("api_key=debug-public-key-1234567890");
 
-    const writeText = vi.fn(async () => undefined);
+    const writeText = vi.fn(async (_text: string) => undefined);
     vi.stubGlobal("navigator", {
       ...navigator,
       clipboard: { writeText },

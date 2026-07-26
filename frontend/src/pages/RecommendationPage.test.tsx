@@ -179,7 +179,7 @@ describe("RecommendationPage", () => {
     expect(proxyLink.getAttribute("href") || "").toContain("/i/42.jpg");
     expect(proxyLink.getAttribute("href") || "").toContain("api_key=pk_rec_preview");
 
-    const writeText = vi.fn(async () => undefined);
+    const writeText = vi.fn(async (_text: string) => undefined);
     vi.stubGlobal("navigator", {
       ...navigator,
       clipboard: { writeText },
