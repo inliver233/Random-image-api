@@ -13,6 +13,39 @@ from app.db.session import with_sqlite_busy_retry
 DEFAULT_LOCK_TTL_S = 300
 
 
+def claim_next_job_sql(dialect_name: str) -> str:
+    """Dialect-specific claim SQL.
+
+    SQLite has a single writer, so the plain candidate CTE is already
+    serialized by the write transaction (plus busy retry). PostgreSQL runs
+    claimers concurrently: without row locking, two transactions can select
+    the same candidate id and both RETURN it (B3). ``FOR UPDATE SKIP
+    LOCKED`` locks the chosen row inside the same transaction and makes
+    concurrent claimers skip to the next candidate instead of waiting.
+    """
+    lock_clause = ""
+    if (dialect_name or "").strip().lower().startswith("postgres"):
+        lock_clause = "\n  FOR UPDATE SKIP LOCKED"
+    return f"""
+WITH candidate AS (
+  SELECT id
+  FROM jobs
+  WHERE status IN ('pending','failed','running')
+    AND (run_after IS NULL OR run_after <= :now)
+    AND (locked_at IS NULL OR locked_at <= :lock_expired_before)
+  ORDER BY priority DESC, id ASC
+  LIMIT 1{lock_clause}
+)
+UPDATE jobs
+SET status='running',
+    locked_by=:worker_id,
+    locked_at=:now,
+    updated_at=:now
+WHERE id IN (SELECT id FROM candidate)
+RETURNING *;
+""".strip()
+
+
 async def claim_next_job(
     engine: AsyncEngine,
     *,
@@ -25,25 +58,8 @@ async def claim_next_job(
     now_s = iso_utc_ms(now_dt)
     expired_before_s = iso_utc_ms(expired_before_dt)
 
-    sql = """
-WITH candidate AS (
-  SELECT id
-  FROM jobs
-  WHERE status IN ('pending','failed','running')
-    AND (run_after IS NULL OR run_after <= :now)
-    AND (locked_at IS NULL OR locked_at <= :lock_expired_before)
-  ORDER BY priority DESC, id ASC
-  LIMIT 1
-)
-UPDATE jobs
-SET status='running',
-    locked_by=:worker_id,
-    locked_at=:now,
-    updated_at=:now
-WHERE id IN (SELECT id FROM candidate)
-RETURNING *;
-""".strip()
     dialect = dialect_name_from_engine(engine)
+    sql = claim_next_job_sql(dialect)
     sql_exec, params_exec = adapt_driver_sql_named_binds(
         sql,
         {
