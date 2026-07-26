@@ -59,6 +59,26 @@ def _install_signal_handlers(stop_event: asyncio.Event) -> None:
             continue
 
 
+def apply_write_budget(max_concurrency: int, *, database_url: str) -> int:
+    """Cap job concurrency by the soft SQLite write budget (M9).
+
+    SQLite has one writer: dozens of concurrent hydrate/import/probe tasks
+    only fight over the write lock and inflate public pick tail latency.
+    Unset on SQLite → conservative default cap (8); explicit 0 → no extra
+    cap; PostgreSQL → no cap unless explicitly requested.
+    """
+    is_sqlite_db = (database_url or "").strip().lower().startswith("sqlite")
+    write_budget = parse_int_env(
+        "WORKER_SQLITE_WRITE_BUDGET",
+        default=8 if is_sqlite_db else 0,
+        min_v=0,
+        max_v=200,
+    )
+    if write_budget > 0:
+        return min(int(max_concurrency), int(write_budget))
+    return int(max_concurrency)
+
+
 def _disabled_handler(job_type: str, *, reason: str):
     async def _handler(_job: dict[str, Any]) -> None:
         raise JobPermanentError(f"{job_type} handler disabled: {reason}")
@@ -362,17 +382,7 @@ async def main_async(*, max_iterations: int | None = None, poll_interval_s: floa
             min_v=1,
             max_v=200,
         )
-        # Soft SQLite write budget: caps concurrent job tasks so write-heavy workers
-        # do not thrash the shared catalog DB used by public pick (Phase 4 readiness).
-        # 0 = no extra cap (legacy behavior). Default 0 keeps behavior unchanged.
-        write_budget = parse_int_env(
-            "WORKER_SQLITE_WRITE_BUDGET",
-            default=0,
-            min_v=0,
-            max_v=200,
-        )
-        if write_budget > 0:
-            max_concurrency = min(int(max_concurrency), int(write_budget))
+        max_concurrency = apply_write_budget(max_concurrency, database_url=settings.database_url)
         auto_concurrency = parse_bool_env("WORKER_AUTO_CONCURRENCY", default=True)
         auto_refresh_s = parse_int_env(
             "WORKER_AUTO_CONCURRENCY_REFRESH_SECONDS",
