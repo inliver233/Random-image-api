@@ -7,7 +7,7 @@ import weakref
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, TypeVar
 
-from sqlalchemy.exc import OperationalError, TimeoutError
+from sqlalchemy.exc import DBAPIError, OperationalError, TimeoutError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.core.env_parse import parse_float_env, parse_int_env
@@ -44,6 +44,18 @@ def _is_transient_contention_message(msg: str) -> bool:
     return any(h in text for h in pg_hits)
 
 
+# Retry-safe PostgreSQL SQLSTATEs: serialization_failure, deadlock_detected,
+# lock_not_available. asyncpg surfaces these on exc.sqlstate; SQLAlchemy wraps
+# them as generic DBAPIError (not OperationalError), so message matching alone
+# never fires for the common wrapped path (H6).
+_PG_RETRY_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
+
+
+def _pg_sqlstate(exc: BaseException) -> str | None:
+    state = getattr(exc, "sqlstate", None) or getattr(exc, "pgcode", None)
+    return str(state) if state else None
+
+
 def is_sqlite_busy_error(exc: BaseException) -> bool:
     """True for transient DB contention worth retrying (SQLite busy + PG deadlock/serialize).
 
@@ -55,17 +67,24 @@ def is_sqlite_busy_error(exc: BaseException) -> bool:
         return True
     if isinstance(exc, sqlite3.OperationalError):
         return _is_transient_contention_message(str(exc))
-    if isinstance(exc, OperationalError):
+    if isinstance(exc, DBAPIError):
+        # Covers OperationalError too (subclass). Prefer the driver SQLSTATE;
+        # fall back to message matching for drivers without one.
         orig = getattr(exc, "orig", None)
-        if isinstance(orig, BaseException) and is_sqlite_busy_error(orig):
-            return True
+        if isinstance(orig, BaseException):
+            if _pg_sqlstate(orig) in _PG_RETRY_SQLSTATES:
+                return True
+            if is_sqlite_busy_error(orig):
+                return True
         return _is_transient_contention_message(str(exc))
     # Bare driver errors sometimes surface without SQLAlchemy wrap (asyncpg).
     if isinstance(exc, Exception) and not isinstance(exc, (KeyboardInterrupt, SystemExit)):
-        # Only treat known contention strings — do not retry arbitrary Exception.
+        # Only treat known contention states/strings — do not retry arbitrary Exception.
         if type(exc).__module__.startswith(("asyncpg", "psycopg", "psycopg2")) or type(
             exc
         ).__name__ in {"DeadlockDetectedError", "SerializationError", "LockNotAvailableError"}:
+            if _pg_sqlstate(exc) in _PG_RETRY_SQLSTATES:
+                return True
             return _is_transient_contention_message(str(exc))
     return False
 
