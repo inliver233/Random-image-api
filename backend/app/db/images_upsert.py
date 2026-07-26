@@ -50,14 +50,6 @@ def dialect_name_from_engine(engine: Any) -> str:
     return text or "sqlite"
 
 
-def driver_param_marker(dialect_name: str) -> str:
-    """Positional bind marker for raw `exec_driver_sql` (sqlite `?` | postgres `%s`)."""
-    name = (dialect_name or "sqlite").strip().lower() or "sqlite"
-    if name.startswith("postgres"):
-        return "%s"
-    return "?"
-
-
 _NAMED_BIND_RE = re.compile(r"(?<!:):([A-Za-z_][A-Za-z0-9_]*)")
 
 

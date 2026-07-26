@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.core.coerce import as_nonneg_int, format_exc
@@ -15,14 +16,11 @@ RANDOM_TOTALS_KEY = "stats.random.total"
 
 
 async def load_persisted_random_totals(engine: AsyncEngine) -> dict[str, int]:
-    from app.db.images_upsert import dialect_name_from_engine, driver_param_marker
-
-    marker = driver_param_marker(dialect_name_from_engine(engine))
-    sql = f"SELECT value_json FROM runtime_settings WHERE key = {marker};"
+    sql = sa.text("SELECT value_json FROM runtime_settings WHERE key = :key")
 
     async def _op() -> str | None:
         async with engine.connect() as conn:
-            row = (await conn.exec_driver_sql(sql, (RANDOM_TOTALS_KEY,))).fetchone()
+            row = (await conn.execute(sql, {"key": RANDOM_TOTALS_KEY})).fetchone()
             return str(row[0]) if row is not None and row[0] is not None else None
 
     try:

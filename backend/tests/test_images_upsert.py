@@ -11,7 +11,6 @@ from app.db.engine import create_engine
 from app.db.images_upsert import (
     adapt_driver_sql_named_binds,
     dialect_name_from_engine,
-    driver_param_marker,
     insert_for_dialect,
     now_expr_for_dialect,
     upsert_image_by_illust_page,
@@ -109,10 +108,14 @@ def test_utc_now_compiles_per_dialect() -> None:
     assert "strftime" in sq_ddl
 
 
-def test_driver_param_marker_sqlite_question_postgres_percent_s() -> None:
-    assert driver_param_marker("sqlite") == "?"
-    assert driver_param_marker("postgresql") == "%s"
-    assert driver_param_marker("other") == "?"
+def test_driver_param_marker_is_gone() -> None:
+    # H5: the %s "postgres marker" was wrong for SQLAlchemy's asyncpg dialect
+    # (paramstyle numeric_dollar) and broke every call site under PostgreSQL.
+    # Raw runtime_settings reads now use sa.text named binds; keep the helper
+    # deleted so it cannot be reintroduced.
+    import app.db.images_upsert as images_upsert
+
+    assert not hasattr(images_upsert, "driver_param_marker")
 
 
 def test_dialect_name_from_engine_sqlite(tmp_path: Path) -> None:

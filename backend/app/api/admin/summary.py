@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Depends, Request
 
 from app.api.admin.deps import get_admin_claims
 from app.core.admin_json import admin_ok
 from app.core.request_id import get_or_create_request_id
 from app.core.runtime_settings import worker_last_seen_from_value_json
-from app.db.images_upsert import dialect_name_from_engine, driver_param_marker
 from app.db.session import with_sqlite_busy_retry
 
 router = APIRouter()
@@ -19,8 +19,7 @@ router = APIRouter()
     summary="Get admin dashboard counts",
     description=(
         "Aggregate control-plane counts: catalog hydration gaps, tokens/proxies/pools/"
-        "bindings, `jobs` status histogram, and worker last-seen from RuntimeSetting "
-        "(dialect-aware bind markers for raw driver SQL). "
+        "bindings, `jobs` status histogram, and worker last-seen from RuntimeSetting. "
         "Job counts reflect the jobs table (payload store) — not external redis/nats queues."
     ),
 )
@@ -116,11 +115,10 @@ WHERE status=1
             for status, count in rows:
                 jobs_counts[str(status)] = int(count)
 
-            marker = driver_param_marker(dialect_name_from_engine(engine))
             worker_last_seen_json = (
-                await conn.exec_driver_sql(
-                    f"SELECT value_json FROM runtime_settings WHERE key = {marker};",
-                    ("worker.last_seen_at",),
+                await conn.execute(
+                    sa.text("SELECT value_json FROM runtime_settings WHERE key = :key"),
+                    {"key": "worker.last_seen_at"},
                 )
             ).scalar_one_or_none()
             worker_last_seen_at = worker_last_seen_from_value_json(
