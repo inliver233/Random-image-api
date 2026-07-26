@@ -14,7 +14,7 @@ from app.db.engine import create_engine
 from app.db.models.base import Base
 from app.db.models.images import Image
 from app.db.session import create_sessionmaker
-from app.jobs.errors import JobDeferError
+from app.jobs.errors import JobPermanentError
 from app.jobs.handlers.hydrate_metadata import build_hydrate_metadata_handler
 from app.main import create_app
 
@@ -275,7 +275,7 @@ def test_error_codes_no_token_available_defined_and_used() -> None:
     assert _references_error_code("NO_TOKEN_AVAILABLE") is True
 
 
-def test_error_codes_no_token_available_defers_hydrate_job(tmp_path: Path, monkeypatch) -> None:
+def test_error_codes_no_token_available_fails_hydrate_job_permanently(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "error_codes_no_token_available.db"
     engine = create_engine("sqlite+aiosqlite:///" + db_path.as_posix())
 
@@ -291,12 +291,14 @@ def test_error_codes_no_token_available_defers_hydrate_job(tmp_path: Path, monke
             await conn.run_sync(Base.metadata.create_all)
 
         handler = build_hydrate_metadata_handler(engine)
+        # TOKEN-1 semantics: zero enabled tokens is a configuration problem,
+        # not a transient one — permanent failure instead of 60s retry churn.
         try:
             await handler({"type": "hydrate_metadata", "payload_json": '{"illust_id": 123}', "ref_id": ""})
-        except JobDeferError as exc:
+        except JobPermanentError as exc:
             assert ErrorCode.NO_TOKEN_AVAILABLE.value in str(exc)
         else:
-            raise AssertionError("expected JobDeferError")
+            raise AssertionError("expected JobPermanentError")
         await engine.dispose()
 
     asyncio.run(_run())

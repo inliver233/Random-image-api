@@ -72,12 +72,23 @@ def test_public_html_pages_openapi_route_metadata_documents_modular_surfaces() -
     from app.main import create_app
 
     app = create_app()
-    # include_in_schema=False → not in openapi paths; assert on route.openapi_extra / endpoint
+    # include_in_schema=False → not in openapi paths; assert on route.openapi_extra / endpoint.
+    # Newer FastAPI keeps included routers nested instead of flattening app.routes,
+    # so collect routes recursively through both layouts.
     by_path: dict[str, object] = {}
-    for route in app.routes:
-        path = getattr(route, "path", None)
-        if path in {"/docs", "/status", "/wtf"}:
-            by_path[str(path)] = route
+
+    def _collect(routes: object) -> None:
+        for route in routes:  # type: ignore[union-attr]
+            path = getattr(route, "path", None)
+            if path in {"/docs", "/status", "/wtf"}:
+                by_path[str(path)] = route
+            nested = getattr(route, "original_router", None)
+            if nested is not None:
+                _collect(nested.routes)
+            elif getattr(route, "routes", None):
+                _collect(route.routes)
+
+    _collect(app.routes)
 
     docs = by_path["/docs"]
     assert getattr(docs, "summary", None) == "Public API docs HTML"

@@ -64,7 +64,7 @@ def test_admin_maintenance_openapi_documents_edge_and_rate_limit_readiness() -> 
     assert "redis" in rl_desc.lower() or "REDIS" in rl_desc
 
     cmp_op = paths["/admin/api/maintenance/random-engine/compare-filters"]["post"]
-    assert cmp_op.get("summary") == "Compare random-engine filter cardinality"
+    assert cmp_op.get("summary") == "Compare random-engine filter cardinality (+ optional seeded pick probe)"
     cmp_desc = str(cmp_op.get("description") or "")
     assert "cardinality" in cmp_desc.lower() or "filtered" in cmp_desc.lower()
 

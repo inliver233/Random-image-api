@@ -238,7 +238,7 @@ def test_openapi_documents_public_api_key_security_schemes(tmp_path: Path, monke
             ("/authors", "List catalog authors"),
             ("/images", "List catalog images"),
             ("/images/{image_id}", "Get one catalog image"),
-            ("/i/{image_id}.{ext}", "Deliver image bytes or edge redirect"),
+            ("/i/{image_id}.{ext}", "Deliver image bytes (same-origin stream via CF when ready)"),
             ("/version", "Build version metadata"),
             ("/healthz", "Process health and module readiness"),
             ("/status.json", "Public modular status snapshot"),
