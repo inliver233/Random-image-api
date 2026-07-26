@@ -168,8 +168,12 @@ describe("BindingsPage", () => {
     );
 
     expect(await screen.findByText("令牌与代理绑定")).toBeInTheDocument();
-    expect(await screen.findByText("acc1（#1）")).toBeInTheDocument();
-    expect(await screen.findByText("pixiv（#1）")).toBeInTheDocument();
+    // "pixiv（#1）" also appears as the pool filter Select's selected label,
+    // so scope the assertion to the table row of the fetched binding.
+    const tokenCell = await screen.findByText("acc1（#1）");
+    const row = tokenCell.closest("tr");
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLTableRowElement).getByText("pixiv（#1）")).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:\s*req_bindings_1/)).toBeInTheDocument();
   });
 

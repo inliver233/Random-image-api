@@ -110,8 +110,7 @@ describe("SettingsPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /保存设置/ }));
 
-    expect(await screen.findByText("保存成功")).toBeInTheDocument();
-    expect(await screen.findByText(/更新条目数:\s*10/)).toBeInTheDocument();
+    expect(await screen.findByText("保存成功（更新条目数: 10）")).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:\s*req_save/)).toBeInTheDocument();
   });
 });

@@ -295,18 +295,22 @@ describe("DashboardPage", () => {
     // api_key_rl + recent_dedup both surface no-redis-url when redis requested without URL.
     expect((await screen.findAllByText("no-redis-url")).length).toBeGreaterThanOrEqual(2);
     expect(await screen.findByText("api_key required")).toBeInTheDocument();
-    expect(await screen.findByText(/image_edge=flag-on-not-ready/)).toBeInTheDocument();
-    expect(await screen.findByText("dual-secret")).toBeInTheDocument();
-    // image_edge + cf_api_proxy both surface bases= / no-secret (CF tag parity).
-    expect((await screen.findAllByText(/bases=0\s*·\s*no-secret/)).length).toBeGreaterThanOrEqual(2);
-    expect(await screen.findByText(/cf_api_proxy=off/)).toBeInTheDocument();
-    expect(await screen.findByText(/r2_prewarm=flag-on-not-ready/)).toBeInTheDocument();
-    // Mock has url_configured + missing secret → no-secret honesty suffix.
-    expect(await screen.findByText(/r2_prewarm=flag-on-not-ready\s*·\s*no-secret/)).toBeInTheDocument();
-    expect(await screen.findByText(/engine=enabled-not-ready/)).toBeInTheDocument();
-    expect(await screen.findByText("no-url")).toBeInTheDocument();
-    expect(await screen.findByText("engine index empty")).toBeInTheDocument();
-    expect(await screen.findByText(/circuit=open\s*~13s/)).toBeInTheDocument();
+    // Slimmed UI: image_edge + cf_api_proxy are merged into ONE CF tag. Detailed
+    // reasons (dual-secret / bases=N / no-secret / per-pool off) were removed from
+    // the dashboard (audit M12). Mock: image_edge flag on but not ready,
+    // cf_api_proxy off → degraded (orange) CF tag, not green.
+    const cfTag = await screen.findByText("CF：flag 开未 ready");
+    expect(cfTag).toHaveClass("ant-tag-orange");
+    // R2 prewarm: flag on but not ready → degraded tag only; the no-secret
+    // honesty suffix (mock: url_configured + missing secret) is gone (M12).
+    const r2Tag = await screen.findByText("r2=flag-on");
+    expect(r2Tag).toHaveClass("ant-tag-orange");
+    // Random engine: enabled but not ready, 0% traffic, circuit open. The
+    // "engine index empty" tag and circuit countdown (~13s) are gone (M12).
+    const engineTag = await screen.findByText(/engine=not-ready\s*·\s*0%\s*·\s*open/);
+    expect(engineTag).toHaveClass("ant-tag-orange");
+    // The no-url cutover reason survives only as the engine tag tooltip.
+    expect(engineTag).toHaveAttribute("title", "RANDOM_ENGINE_URL not configured");
     expect(await screen.findByText(/请求ID:.*req_modular/)).toBeInTheDocument();
   });
 
@@ -335,9 +339,13 @@ describe("DashboardPage", () => {
 
     renderDashboard();
 
-    expect(
-      await screen.findByText(/r2_prewarm=flag-on-not-ready\s*·\s*no-url\s*·\s*no-secret/),
-    ).toBeInTheDocument();
+    // Slimmed UI no longer distinguishes no-url / no-secret; the only remaining
+    // user-visible signal for a misconfigured-but-enabled R2 prewarm is the
+    // degraded (orange, not green) r2=flag-on tag (audit M12).
+    const r2Tag = await screen.findByText("r2=flag-on");
+    expect(r2Tag).toHaveClass("ant-tag-orange");
+    expect(r2Tag).not.toHaveClass("ant-tag-green");
+    expect(screen.queryByText("r2=ready")).not.toBeInTheDocument();
   });
 
   it("navigates to import", async () => {
@@ -371,7 +379,7 @@ describe("DashboardPage", () => {
 
     expect(await screen.findByText("工作线程 / 队列")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /去添加代理/ }));
-    expect(await screen.findByText("代理管理（仅 Hydrate / OAuth）")).toBeInTheDocument();
+    expect(await screen.findByText("代理节点（应急 / 遗留）")).toBeInTheDocument();
   });
 
   it("navigates to playground", async () => {

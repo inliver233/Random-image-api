@@ -130,7 +130,7 @@ describe("ProxiesPage", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("代理管理（仅 Hydrate / OAuth）")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "代理节点（应急 / 遗留）" })).toBeInTheDocument();
     expect(await screen.findByText("http://***:***@1.2.3.4:8080")).toBeInTheDocument();
     expect(await screen.findByText(/请求ID:\s*req_proxies_1/)).toBeInTheDocument();
   });
@@ -143,7 +143,7 @@ describe("ProxiesPage", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("代理管理（仅 Hydrate / OAuth）")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "代理节点（应急 / 遗留）" })).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("http://easy-proxies:15666"), { target: { value: "http://easy.test" } });
     fireEvent.change(screen.getByPlaceholderText("可选"), { target: { value: "pw_test" } });
     fireEvent.click(screen.getByRole("button", { name: "开始导入" }));
@@ -160,7 +160,7 @@ describe("ProxiesPage", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("代理管理（仅 Hydrate / OAuth）")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "代理节点（应急 / 遗留）" })).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText("http://user:pass@1.2.3.4:8080"), {
       target: { value: "http://u:pa@ss@1.2.3.4:8080\nsocks5://5.6.7.8:1080\n" },
     });
@@ -184,7 +184,7 @@ describe("ProxiesPage", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("代理管理（仅 Hydrate / OAuth）")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "代理节点（应急 / 遗留）" })).toBeInTheDocument();
     expect(await screen.findByText("http://***:***@1.2.3.4:8080")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "启动健康探测任务" }));
 
@@ -201,7 +201,7 @@ describe("ProxiesPage", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("代理管理（仅 Hydrate / OAuth）")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "代理节点（应急 / 遗留）" })).toBeInTheDocument();
     expect(await screen.findByText("http://***:***@1.2.3.4:8080")).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: /禁\s*用/ }));
@@ -218,7 +218,7 @@ describe("ProxiesPage", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("代理管理（仅 Hydrate / OAuth）")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "代理节点（应急 / 遗留）" })).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: "解除拉黑" }));
 
     expect(await screen.findByText(/代理节点已重置失败并解除拉黑：1/)).toBeInTheDocument();

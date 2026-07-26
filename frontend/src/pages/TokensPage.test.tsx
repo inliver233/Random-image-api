@@ -154,9 +154,11 @@ describe("TokensPage", () => {
     expect(await screen.findByText("Pixiv 令牌管理")).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: /测试刷新/ }));
-    expect(await screen.findByText(/令牌刷新成功/)).toBeInTheDocument();
-    expect(await screen.findByText(/代理 #10，代理池 #1/)).toBeInTheDocument();
-    expect(screen.queryByText(/直连/)).not.toBeInTheDocument();
+    // Scope route assertions to the success-alert message so the static help
+    // text (which also mentions 直连/CF API 代理) cannot match.
+    const refreshResult = await screen.findByText(/令牌刷新成功/);
+    expect(refreshResult).toHaveTextContent(/经代理 #10，代理池 #1/);
+    expect(refreshResult).not.toHaveTextContent(/直连/);
     expect(await screen.findByText(/请求ID:\s*req_test_refresh/)).toBeInTheDocument();
 
     fireEvent.click(await screen.findByRole("button", { name: /重置失败计数/ }));
@@ -228,9 +230,11 @@ describe("TokensPage", () => {
 
     expect(await screen.findByText("acc1")).toBeInTheDocument();
     fireEvent.click(await screen.findByRole("button", { name: /测试刷新/ }));
-    expect(await screen.findByText(/令牌刷新成功/)).toBeInTheDocument();
-    expect(await screen.findByText(/经 CF API 代理/)).toBeInTheDocument();
-    expect(screen.queryByText(/直连/)).not.toBeInTheDocument();
+    // The static help text also says 经 CF API 代理/直连, so assert against the
+    // mutation result alert only: via_cf must surface CF API proxy, not 直连.
+    const refreshResult = await screen.findByText(/令牌刷新成功/);
+    expect(refreshResult).toHaveTextContent(/经 CF API 代理/);
+    expect(refreshResult).not.toHaveTextContent(/直连/);
   });
 
   it("updates token", async () => {
