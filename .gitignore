@@ -46,6 +46,7 @@ docs/
 !docs/
 docs/*
 !docs/codexreview-remediation-plan.md
+!docs/audit-2026-07-26-baseline.md
 !docs/benchmarks/
 !docs/benchmarks/**
 参考资料/
