@@ -17,6 +17,8 @@ anyio==4.12.1
     #   httpx
     #   starlette
     #   watchfiles
+asyncpg==0.30.0
+    # via -r requirements.in
 certifi==2026.1.4
     # via
     #   httpcore
