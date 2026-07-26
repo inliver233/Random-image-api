@@ -9,7 +9,30 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # SQLite partial unique index: only one active opportunistic hydrate per illust.
+    # Deterministic preflight: databases from before this index can hold
+    # duplicate active opportunistic hydrates; creating a unique index over
+    # them would abort the migration (and the API startup chain). Keep the
+    # oldest active job per (type, ref_type, ref_id), cancel the rest.
+    op.execute(
+        """
+UPDATE jobs
+SET status = 'canceled',
+    last_error = 'migration 0019: duplicate active opportunistic hydrate canceled'
+WHERE type = 'hydrate_metadata'
+  AND ref_type = 'opportunistic_hydrate'
+  AND status IN ('pending', 'running')
+  AND id NOT IN (
+    SELECT MIN(id)
+    FROM jobs
+    WHERE type = 'hydrate_metadata'
+      AND ref_type = 'opportunistic_hydrate'
+      AND status IN ('pending', 'running')
+    GROUP BY type, ref_type, ref_id
+  );
+""".strip()
+    )
+    # Partial unique index: only one active opportunistic hydrate per illust
+    # (identical predicate on SQLite and PostgreSQL).
     op.execute(
         """
 CREATE UNIQUE INDEX IF NOT EXISTS uq_jobs_active_opportunistic_hydrate

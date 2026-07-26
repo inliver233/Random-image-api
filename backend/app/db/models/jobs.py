@@ -18,6 +18,8 @@ class JobRow(Base):
         sa.Index("idx_jobs_run_after", "run_after"),
         sa.Index("idx_jobs_ref", "ref_type", "ref_id"),
         # Prevent concurrent opportunistic hydrate enqueue races for the same illust.
+        # The predicate must exist for BOTH dialects: without postgresql_where the
+        # compiled PG metadata silently became an unconditional global unique index.
         sa.Index(
             "uq_jobs_active_opportunistic_hydrate",
             "type",
@@ -25,6 +27,9 @@ class JobRow(Base):
             "ref_id",
             unique=True,
             sqlite_where=sa.text(
+                "type = 'hydrate_metadata' AND ref_type = 'opportunistic_hydrate' AND status IN ('pending','running')"
+            ),
+            postgresql_where=sa.text(
                 "type = 'hydrate_metadata' AND ref_type = 'opportunistic_hydrate' AND status IN ('pending','running')"
             ),
         ),

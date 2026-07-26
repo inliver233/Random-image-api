@@ -23,8 +23,11 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.core.data_files import ensure_sqlite_parent_dir  # noqa: E402
+from app.db.models.base import Base  # noqa: E402
 
-target_metadata = None
+# Real metadata enables autogenerate comparison and schema-drift checks (M4).
+# Migrations remain the source of truth for upgrades; metadata must match them.
+target_metadata = Base.metadata
 
 
 def _get_database_url() -> str:
