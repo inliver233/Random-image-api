@@ -161,6 +161,38 @@ def test_configure_logging_redacts_uvicorn_access_handler() -> None:
     assert "api_key=***" in out
 
 
+def test_configure_logging_keeps_uvicorn_access_line_with_real_access_formatter() -> None:
+    from uvicorn.logging import AccessFormatter
+
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(
+        AccessFormatter(
+            '%(client_addr)s - "%(request_line)s" %(status_code)s',
+            use_colors=False,
+        )
+    )
+    logger = logging.getLogger("uvicorn.access")
+    with _preserve_configured_logging_state():
+        logger.handlers = [handler]
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+
+        configure_logging()
+        logger.info(
+            '%s - "%s %s HTTP/%s" %d',
+            "127.0.0.1:1234",
+            "GET",
+            "/random?api_key=browser-secret&x=1",
+            "1.1",
+            200,
+        )
+
+    out = stream.getvalue()
+    assert '127.0.0.1:1234 - "GET /random?api_key=***&x=1 HTTP/1.1" 200' in out
+    assert "browser-secret" not in out
+
+
 def test_configure_logging_redacts_uvicorn_error_and_is_idempotent() -> None:
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)

@@ -6,14 +6,28 @@ from typing import Any
 from app.core.redact import redact_any
 
 
+_UVICORN_ACCESS_LOGGER = "uvicorn.access"
+_UVICORN_ACCESS_ARG_COUNT = 5
+
+
 class RedactFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         try:
-            message = record.getMessage()
-            record.msg = redact_any(message)
-            record.args = ()
+            if (
+                record.name == _UVICORN_ACCESS_LOGGER
+                and isinstance(record.args, tuple)
+                and len(record.args) == _UVICORN_ACCESS_ARG_COUNT
+            ):
+                # Uvicorn's AccessFormatter unpacks record.args as a 5-tuple;
+                # clearing args would make it raise and drop the access line.
+                record.msg = redact_any(record.msg)
+                record.args = tuple(redact_any(arg) for arg in record.args)
+            else:
+                message = record.getMessage()
+                record.msg = redact_any(message)
+                record.args = ()
             for key, value in list(record.__dict__.items()):
-                if key.startswith("_"):
+                if key.startswith("_") or key in {"msg", "args"}:
                     continue
                 record.__dict__[key] = redact_any(value)
         except Exception:
