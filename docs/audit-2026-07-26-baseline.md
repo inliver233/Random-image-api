@@ -18,7 +18,7 @@ DoD 阶段 A(出口与体验)已达成;B(Engine 爬坡)/ C(Redis 多实例)/ D(P
 
 阶段 0 门禁全绿已完成:GAP-1(`e35a382`)、前端类型/lint(`0c6b366`)、13 个 vitest 漂移(`cfa45c8`)、5 个后端漂移 + 2 个顺序依赖(`71f1751`/`042ac4f`)、CI dev+Go(`7f6e8cd`)。实测:backend 813 passed/1 skipped(PG 门控),frontend lint/typecheck 0 errors、vitest 73/73、build PASS。
 
-阶段 1 已闭环(代码侧):B2(`3e784b7`)、B3(`80af2b9`)、H5(`f936aee`)、H6(`9a6ffab`)、M4/M5(`b8aaf1d`)、M6(`d1757e4`)、M7(`ccb37b9`)、M8(`25a53c8`)。Live PG 证据(真机迁移/并发 claim/争用/trgm 计划)仍被 Docker daemon 不可用阻塞,测试以 `TEST_POSTGRES_URL` 门控,命令记录于各测试 docstring。**M8 运维影响:线上 SQLite 生产部署在滚动到含 `25a53c8` 的镜像前必须设 `ALLOW_PROD_SQLITE=true`。**
+阶段 1 已闭环(代码侧):B2(`3e784b7`)、B3(`80af2b9`)、H5(`f936aee`)、H6(`9a6ffab`)、M4/M5(`b8aaf1d`)、M6(`d1757e4`)、M7(`ccb37b9`)、M8(`25a53c8`)、M9(`ebb5fa4`)。阶段 1 剩余:H7 完整 ETL、PG-CUTOVER-1..4(需 Docker)。Live PG 证据(真机迁移/并发 claim/争用/trgm 计划)仍被 Docker daemon 不可用阻塞,测试以 `TEST_POSTGRES_URL` 门控,命令记录于各测试 docstring。**M8 运维影响:线上 SQLite 生产部署在滚动到含 `25a53c8` 的镜像前必须设 `ALLOW_PROD_SQLITE=true`。**
 
 ## 1. 公网现状(2026-07-26 实测)
 
