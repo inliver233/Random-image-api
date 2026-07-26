@@ -17,16 +17,24 @@ def _preserve_configured_logging_state() -> Iterator[None]:
         logging.getLogger("uvicorn.error"),
         logging.getLogger("uvicorn.access"),
     ]
-    logger_states = [(logger, list(logger.handlers), logger.level, logger.propagate) for logger in loggers]
+    logger_states = [
+        (logger, list(logger.handlers), logger.level, logger.propagate, logger.disabled)
+        for logger in loggers
+    ]
     handlers = {id(handler): handler for logger in loggers for handler in logger.handlers}
     handler_filters = [(handler, list(handler.filters)) for handler in handlers.values()]
     try:
+        # Earlier tests may have run logging fileConfig (e.g. alembic), which
+        # can leave these loggers disabled; the tests here must observe output.
+        for logger in loggers:
+            logger.disabled = False
         yield
     finally:
-        for logger, previous_handlers, previous_level, previous_propagate in logger_states:
+        for logger, previous_handlers, previous_level, previous_propagate, previous_disabled in logger_states:
             logger.handlers = previous_handlers
             logger.setLevel(previous_level)
             logger.propagate = previous_propagate
+            logger.disabled = previous_disabled
         for handler, previous_filters in handler_filters:
             handler.filters = previous_filters
 

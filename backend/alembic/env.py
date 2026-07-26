@@ -14,7 +14,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Keep application loggers (e.g. uvicorn.*) alive when migrations run
+    # in-process; the default disable_existing_loggers=True silences them.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
