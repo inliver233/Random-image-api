@@ -75,8 +75,11 @@ async def list_tags(
                 fts_ids_sq = fts_ids.subquery()
                 stmt = stmt.where(Tag.id.in_(sa.select(fts_ids_sq.c.tag_id)))
             else:
+                # ilike keeps SQLite's default case-insensitive LIKE semantics
+                # on PostgreSQL too (plain LIKE is case-sensitive there); the
+                # pg_trgm GIN indexes from migration 0023 serve %…% ILIKE.
                 like = f"%{q_norm}%"
-                stmt = stmt.where(sa.or_(Tag.name.like(like), Tag.translated_name.like(like)))
+                stmt = stmt.where(sa.or_(Tag.name.ilike(like), Tag.translated_name.ilike(like)))
         if cursor_name:
             stmt = stmt.where(Tag.name > cursor_name)
 

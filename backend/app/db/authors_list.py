@@ -59,7 +59,8 @@ async def list_authors(
                 fts_user_ids_sq = fts_user_ids.subquery()
                 clauses.append(Image.user_id.in_(sa.select(fts_user_ids_sq.c.user_id)))
             else:
-                clauses.append(Image.user_name.like(f"%{q_norm}%"))
+                # ilike: case-insensitive on both dialects (see tags_list).
+                clauses.append(Image.user_name.ilike(f"%{q_norm}%"))
 
         return (
             select(
