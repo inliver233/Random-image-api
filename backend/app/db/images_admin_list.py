@@ -9,6 +9,10 @@ from app.db.models.image_tags import ImageTag
 from app.db.models.images import Image
 
 
+def _has_any_tag() -> sa.Exists:
+    return sa.exists(sa.select(1).where(ImageTag.image_id == Image.id))
+
+
 async def list_admin_images(
     session: AsyncSession,
     *,
@@ -19,21 +23,18 @@ async def list_admin_images(
     """Admin image cursor list (status=1) with optional missing-* filters.
 
     Returns ((image, tag_count), ...) page and next_cursor image id.
+
+    TAGS-1 pattern: page images first, then COUNT tags only for that page.
+    The previous version pre-aggregated the entire image_tags table
+    (~421万 links in production) on every page request; the "missing tags"
+    filter is NOT EXISTS, which needs no aggregate at all.
     """
     limit_i = int(limit)
     if limit_i < 1:
         raise ValueError("limit must be >= 1")
 
-    tag_counts = (
-        sa.select(ImageTag.image_id.label("image_id"), sa.func.count().label("tag_count"))
-        .group_by(ImageTag.image_id)
-        .subquery()
-    )
-    tag_count_col = sa.func.coalesce(tag_counts.c.tag_count, 0).label("tag_count")
-
     stmt = (
-        sa.select(Image, tag_count_col)
-        .outerjoin(tag_counts, tag_counts.c.image_id == Image.id)
+        sa.select(Image)
         .where(Image.status == 1)
         .order_by(Image.id.desc())
         .limit(int(limit_i) + 1)
@@ -43,7 +44,7 @@ async def list_admin_images(
 
     for key in missing_keys or []:
         if key == "tags":
-            stmt = stmt.where(tag_count_col == 0)
+            stmt = stmt.where(~_has_any_tag())
         elif key == "geometry":
             stmt = stmt.where((Image.width.is_(None)) | (Image.height.is_(None)))
         elif key == "r18":
@@ -63,8 +64,21 @@ async def list_admin_images(
                 (Image.bookmark_count.is_(None)) | (Image.view_count.is_(None)) | (Image.comment_count.is_(None))
             )
 
-    rows = (await session.execute(stmt)).all()
-    rows_page = rows[: int(limit_i)]
-    next_cursor = int(rows_page[-1][0].id) if len(rows) > int(limit_i) and rows_page else None
-    out: list[tuple[Image, int]] = [(img, int(tag_count or 0)) for img, tag_count in rows_page]
+    images = list((await session.execute(stmt)).scalars().all())
+    images_page = images[: int(limit_i)]
+    next_cursor = int(images_page[-1].id) if len(images) > int(limit_i) and images_page else None
+
+    counts: dict[int, int] = {}
+    if images_page:
+        page_ids = [int(img.id) for img in images_page]
+        count_rows = (
+            await session.execute(
+                sa.select(ImageTag.image_id, sa.func.count())
+                .where(ImageTag.image_id.in_(page_ids))
+                .group_by(ImageTag.image_id)
+            )
+        ).all()
+        counts = {int(image_id): int(cnt or 0) for image_id, cnt in count_rows}
+
+    out: list[tuple[Image, int]] = [(img, counts.get(int(img.id), 0)) for img in images_page]
     return out, next_cursor
